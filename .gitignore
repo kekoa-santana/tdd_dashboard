@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+myenv/
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (tracked separately or synced from projection repo)
+data/dashboard/*.parquet
+data/dashboard/*.npz
+data/dashboard/*.json
+data/dashboard/snapshots/
+
+# Environment
+.env
+
+ideas.md
+
+.claude/
+CLAUDE.md
+
+SYNC_GUIDE.md
+
+*.log
+data/dashboard

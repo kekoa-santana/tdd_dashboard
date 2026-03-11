@@ -1,0 +1,17 @@
+# TDD Dashboard Runtime Configuration
+# Update these values each off-season — no code changes needed.
+
+# The season being projected (upcoming/current)
+current_season: 2026
+
+# Historical season range used for training and display
+train_start_season: 2018
+train_end_season: 2025
+
+# Game types included in projections
+game_types_in_scope:
+  - R   # Regular season
+  - P   # Postseason
+
+# Schema version for artifact contracts
+schema_version: 1
