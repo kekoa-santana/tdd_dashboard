@@ -286,6 +286,42 @@ def load_update_metadata() -> dict:
         return json.load(f)
 
 
+@st.cache_data
+def load_backtest(name: str) -> pd.DataFrame:
+    """Load a backtest results parquet (e.g. 'pitcher_k_backtest')."""
+    path = DASHBOARD_DIR / f"backtest_{name}.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
+def load_weekly_snapshots(player_type: str) -> dict[str, pd.DataFrame]:
+    """Load all weekly snapshots for a player type.
+
+    Returns {date_str: DataFrame} sorted by date.
+    """
+    weekly_dir = DASHBOARD_DIR / "snapshots" / "weekly"
+    if not weekly_dir.exists():
+        return {}
+    prefix = f"{player_type}_projections_"
+    result = {}
+    for f in sorted(weekly_dir.glob(f"{prefix}*.parquet")):
+        date_str = f.stem.replace(prefix, "")
+        result[date_str] = pd.read_parquet(f)
+    return result
+
+
+@st.cache_data
+def load_latest_weekly_snapshot(player_type: str) -> tuple[str, pd.DataFrame] | None:
+    """Load the most recent weekly snapshot. Returns (date_str, df) or None."""
+    snapshots = load_weekly_snapshots(player_type)
+    if not snapshots:
+        return None
+    latest_date = max(snapshots.keys())
+    return latest_date, snapshots[latest_date]
+
+
 def season_selector(key_prefix: str, include_career: bool = True) -> str:
     """Render a season selector and return the choice."""
     options = (

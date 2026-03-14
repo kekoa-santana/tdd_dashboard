@@ -14,7 +14,6 @@ from config import (
     DASHBOARD_DIR,
     CURRENT_SEASON, PRIOR_SEASON, TRAIN_START, TRAIN_END,
     TRAINING_RANGE, AVAILABLE_SEASONS,
-    PROJECT_ROOT,
 )
 from services.data_loader import load_update_metadata
 from components.metric_cards import metric_card
@@ -300,8 +299,6 @@ def page_data_health() -> None:
         unsafe_allow_html=True,
     )
 
-    runtime_path = PROJECT_ROOT / "config" / "runtime.yaml"
-
     config_items = [
         ("CURRENT_SEASON", str(CURRENT_SEASON)),
         ("PRIOR_SEASON", str(PRIOR_SEASON)),
@@ -309,7 +306,6 @@ def page_data_health() -> None:
         ("TRAIN_END", str(TRAIN_END)),
         ("TRAINING_RANGE", TRAINING_RANGE),
         ("AVAILABLE_SEASONS", ", ".join(str(s) for s in AVAILABLE_SEASONS)),
-        ("Runtime config path", str(runtime_path)),
     ]
 
     config_html = '<div class="insight-card">'

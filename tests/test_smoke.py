@@ -85,6 +85,12 @@ class TestImports:
     def test_import_lib_game_k_model(self):
         from lib.game_k_model import simulate_game_ks  # noqa: F401
 
+    def test_import_model_performance(self):
+        from views.model_performance import page_model_performance  # noqa: F401
+
+    def test_import_backtest_charts(self):
+        from components.backtest_charts import create_accuracy_bars  # noqa: F401
+
 
 # =====================================================================
 # 2. Config tests
@@ -244,3 +250,94 @@ class TestDataLoaders:
         monkeypatch.setattr(utils.helpers, "DASHBOARD_DIR", tmp_path)
         from utils.helpers import check_data_exists
         assert check_data_exists() is False
+
+
+# =====================================================================
+# 5. Backtest & snapshot tests
+# =====================================================================
+class TestBacktestLoaders:
+    """Verify backtest and snapshot data loaders."""
+
+    def test_load_backtest_pitcher_k(self, dashboard_dir):
+        from services.data_loader import load_backtest
+        df = load_backtest("pitcher_k_backtest")
+        assert not df.empty
+        assert "test_season" in df.columns
+        assert "bayes_mae" in df.columns
+
+    def test_load_backtest_game_k(self, dashboard_dir):
+        from services.data_loader import load_backtest
+        df = load_backtest("game_k_backtest")
+        assert not df.empty
+        assert "n_games" in df.columns
+
+    def test_load_backtest_missing(self, dashboard_dir):
+        from services.data_loader import load_backtest
+        df = load_backtest("nonexistent_backtest")
+        assert df.empty
+
+    def test_load_weekly_snapshots(self, dashboard_dir):
+        from services.data_loader import load_weekly_snapshots
+        snaps = load_weekly_snapshots("pitcher")
+        assert isinstance(snaps, dict)
+        assert len(snaps) == 1
+        assert "2026-03-01" in snaps
+        assert not snaps["2026-03-01"].empty
+
+    def test_load_weekly_snapshots_empty(self, dashboard_dir):
+        from services.data_loader import load_weekly_snapshots
+        snaps = load_weekly_snapshots("nonexistent")
+        assert snaps == {}
+
+    def test_load_latest_weekly_snapshot(self, dashboard_dir):
+        from services.data_loader import load_latest_weekly_snapshot
+        result = load_latest_weekly_snapshot("pitcher")
+        assert result is not None
+        date_str, df = result
+        assert date_str == "2026-03-01"
+        assert not df.empty
+
+
+class TestBacktestCharts:
+    """Verify chart functions return Figure objects."""
+
+    def test_create_accuracy_bars(self, dashboard_dir):
+        import matplotlib.pyplot as plt
+        from services.data_loader import load_backtest
+        from components.backtest_charts import create_accuracy_bars
+
+        df = load_backtest("pitcher_k_backtest")
+        fig = create_accuracy_bars(df, "bayes_mae", "marcel_mae", "Test")
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)
+
+    def test_create_coverage_chart(self, dashboard_dir):
+        import matplotlib.pyplot as plt
+        from services.data_loader import load_backtest
+        from components.backtest_charts import create_coverage_chart
+
+        df = load_backtest("pitcher_k_backtest")
+        fig = create_coverage_chart(df, ["coverage_95"], ["95% CI"])
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)
+
+    def test_create_game_k_model_comparison(self, dashboard_dir):
+        import matplotlib.pyplot as plt
+        from services.data_loader import load_backtest
+        from components.backtest_charts import create_game_k_model_comparison
+
+        df = load_backtest("game_k_backtest")
+        fig = create_game_k_model_comparison(df)
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)
+
+    def test_create_movers_chart(self):
+        from matplotlib.figure import Figure
+        from components.backtest_charts import create_movers_chart
+
+        fig = create_movers_chart(
+            ["Player A", "Player B", "Player C"],
+            [2.5, 1.8, -0.3],
+            "Test Movers",
+        )
+        assert isinstance(fig, Figure)

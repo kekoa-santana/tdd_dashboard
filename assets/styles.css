@@ -1,0 +1,442 @@
+/* TDD Dashboard — Brand Styles
+   CSS custom properties (--tdd-*) are injected by app.py at runtime. */
+
+/* Brand header */
+.brand-header {
+    background: var(--tdd-dark-card);
+    border: 1px solid var(--tdd-dark-border);
+    padding: 1.2rem 1.8rem;
+    border-radius: 10px;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.brand-title {
+    color: var(--tdd-gold);
+    font-size: 1.8rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+.brand-subtitle {
+    color: var(--tdd-slate);
+    font-size: 0.9rem;
+    margin-top: 2px;
+}
+
+/* Metric cards */
+.metric-card {
+    background: var(--tdd-dark-card);
+    border: 1px solid var(--tdd-dark-border);
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    text-align: center;
+}
+.metric-value {
+    color: var(--tdd-gold);
+    font-size: 1.6rem;
+    font-weight: 700;
+}
+.metric-label {
+    color: var(--tdd-slate);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 4px;
+}
+.metric-delta {
+    font-size: 0.85rem;
+    margin-top: 4px;
+}
+.metric-pctile {
+    font-size: 0.7rem;
+    font-weight: 600;
+    margin-top: 2px;
+    letter-spacing: 0.5px;
+}
+
+/* Insight cards */
+.insight-card {
+    background: var(--tdd-dark-card);
+    border: 1px solid var(--tdd-dark-border);
+    border-radius: 10px;
+    padding: 1.2rem 1.5rem;
+    margin-bottom: 1rem;
+}
+.insight-title {
+    color: var(--tdd-gold);
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 0.8rem;
+}
+.insight-bullet {
+    color: var(--tdd-cream);
+    font-size: 0.92rem;
+    line-height: 1.7;
+    padding-left: 0.5rem;
+}
+.insight-bullet .dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+
+/* Percentile bars */
+.pctile-row {
+    display: flex;
+    align-items: center;
+    margin: 10px 0;
+}
+.pctile-label {
+    width: 65px;
+    color: var(--tdd-slate);
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+.pctile-bar-bg {
+    flex: 1;
+    background: var(--tdd-dark);
+    border-radius: 6px;
+    height: 22px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--tdd-dark-border);
+}
+.pctile-bar-fill {
+    height: 100%;
+    border-radius: 5px;
+    transition: width 0.3s ease;
+}
+.pctile-info {
+    width: 220px;
+    text-align: right;
+    color: var(--tdd-slate);
+    font-size: 0.8rem;
+    padding-left: 12px;
+}
+
+/* Delta colors */
+.delta-pos { color: var(--tdd-positive); font-weight: 600; }
+.delta-neg { color: var(--tdd-negative); font-weight: 600; }
+.delta-neutral { color: var(--tdd-slate); font-weight: 600; }
+
+/* Table styling */
+.stDataFrame { font-size: 0.85rem; }
+
+/* Sidebar branding */
+[data-testid="stSidebar"] {
+    padding-top: 0;
+}
+[data-testid="stSidebar"] [data-testid="stImage"] {
+    display: flex;
+    justify-content: center;
+    padding-top: 1rem;
+}
+.sidebar-brand {
+    text-align: center;
+    padding: 0.5rem 0 1rem 0;
+}
+.sidebar-brand-name {
+    color: var(--tdd-gold);
+    font-size: 1.3rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+}
+.sidebar-brand-sub {
+    color: var(--tdd-slate);
+    font-size: 0.75rem;
+    margin-top: 4px;
+}
+
+/* Sidebar nav buttons */
+div[data-testid="stSidebar"] .nav-container .stButton > button {
+    background: none;
+    border: none;
+    color: var(--tdd-slate);
+    font-size: 0.95rem;
+    font-weight: 500;
+    padding: 0.45rem 0.8rem;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background 0.15s, color 0.15s;
+}
+div[data-testid="stSidebar"] .nav-container .stButton > button:hover {
+    background: var(--tdd-dark-border);
+    color: var(--tdd-cream);
+}
+div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
+    background: var(--tdd-dark-border);
+    color: var(--tdd-gold);
+    font-weight: 600;
+}
+
+/* Section dividers */
+.section-header {
+    color: var(--tdd-gold);
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin: 1.5rem 0 0.8rem 0;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--tdd-dark-border);
+}
+
+/* Pitch profile tables */
+.pitch-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.85rem;
+}
+.pitch-table th {
+    color: var(--tdd-slate);
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--tdd-dark-border);
+    text-align: left;
+}
+.pitch-table td {
+    color: var(--tdd-cream);
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--tdd-dark-border-faint);
+    vertical-align: middle;
+}
+.pitch-table tr:last-child td {
+    border-bottom: none;
+}
+.pitch-table .pt-name {
+    font-weight: 600;
+    white-space: nowrap;
+}
+.pitch-table .pt-n {
+    color: var(--tdd-slate);
+    font-size: 0.75rem;
+}
+.spark-cell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.spark-bar {
+    height: 14px;
+    border-radius: 7px;
+    min-width: 3px;
+}
+.spark-val {
+    font-size: 0.82rem;
+    font-weight: 500;
+    min-width: 36px;
+}
+
+/* Matchup edge indicator */
+.edge-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin: 0 auto;
+}
+.matchup-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.85rem;
+}
+.matchup-table th {
+    color: var(--tdd-slate);
+    font-size: 0.70rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--tdd-dark-border);
+    text-align: left;
+}
+.matchup-table td {
+    color: var(--tdd-cream);
+    padding: 7px 8px;
+    border-bottom: 1px solid var(--tdd-dark-border-faint);
+    vertical-align: middle;
+}
+.matchup-table tr:last-child td {
+    border-bottom: none;
+}
+.matchup-table .pt-name {
+    font-weight: 600;
+    white-space: nowrap;
+}
+.matchup-table .pt-n {
+    color: var(--tdd-slate);
+    font-size: 0.75rem;
+}
+
+/* Scrollable table wrapper — prevents tables from overflowing on mobile */
+.table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -0.5rem;
+    padding: 0 0.5rem;
+}
+.table-scroll table {
+    min-width: 480px;
+}
+
+/* Percentile bar — inline layout converted to CSS classes for responsiveness */
+.pctile-bar-row {
+    margin: 12px 0;
+}
+.pctile-bar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+    gap: 8px;
+}
+.pctile-bar-label {
+    color: var(--tdd-slate);
+    font-size: 0.85rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.pctile-bar-detail {
+    color: var(--tdd-slate);
+    font-size: 0.8rem;
+    text-align: right;
+    white-space: nowrap;
+}
+.pctile-bar-track {
+    position: relative;
+    width: 100%;
+    background: var(--tdd-dark);
+    border-radius: 6px;
+    height: 22px;
+    overflow: hidden;
+    border: 1px solid var(--tdd-dark-border);
+}
+.pctile-bar-fill-inner {
+    height: 100%;
+    border-radius: 5px;
+}
+
+/* Responsive show/hide helpers */
+.hide-mobile { display: block; }
+.hide-desktop { display: none; }
+
+/* =========================================================================
+   Mobile breakpoint (≤768px)
+   ========================================================================= */
+@media screen and (max-width: 768px) {
+    /* Metric cards — more breathing room */
+    .metric-card {
+        padding: 0.8rem 0.6rem;
+        margin-bottom: 6px;
+    }
+    .metric-value {
+        font-size: 1.3rem;
+    }
+    .metric-label {
+        font-size: 0.68rem;
+        letter-spacing: 0.5px;
+    }
+    .metric-pctile {
+        font-size: 0.65rem;
+    }
+
+    /* Brand header compact */
+    .brand-header {
+        padding: 0.8rem 1rem;
+        flex-direction: column;
+        text-align: center;
+    }
+    .brand-title {
+        font-size: 1.3rem;
+    }
+
+    /* Insight cards */
+    .insight-card {
+        padding: 0.8rem 1rem;
+    }
+
+    /* Percentile bars — stack label above detail on narrow screens */
+    .pctile-bar-header {
+        flex-wrap: wrap;
+    }
+    .pctile-bar-detail {
+        font-size: 0.72rem;
+        text-align: left;
+    }
+
+    /* Tables — smaller text and padding */
+    .pitch-table,
+    .matchup-table {
+        font-size: 0.78rem;
+    }
+    .pitch-table th,
+    .matchup-table th {
+        padding: 4px 5px;
+        font-size: 0.65rem;
+        letter-spacing: 0;
+    }
+    .pitch-table td,
+    .matchup-table td {
+        padding: 5px 5px;
+    }
+    .spark-bar {
+        height: 10px;
+    }
+    .spark-val {
+        font-size: 0.75rem;
+        min-width: 28px;
+    }
+
+    /* Section headers */
+    .section-header {
+        font-size: 1rem;
+        margin: 1rem 0 0.5rem 0;
+    }
+
+    /* Sidebar brand */
+    .sidebar-brand-name {
+        font-size: 1.1rem;
+        letter-spacing: 1px;
+    }
+
+    /* Streamlit dataframes — allow horizontal scroll */
+    .stDataFrame {
+        font-size: 0.78rem;
+    }
+    [data-testid="stDataFrame"] > div {
+        overflow-x: auto !important;
+    }
+
+    /* Responsive show/hide */
+    .hide-mobile { display: none !important; }
+    .hide-desktop { display: block !important; }
+
+    /* Force Streamlit columns to add gap on mobile */
+    [data-testid="stHorizontalBlock"] {
+        gap: 0.4rem !important;
+    }
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        min-width: 0 !important;
+    }
+
+    /* Mobile chart improvements */
+    .hide-desktop img,
+    .hide-desktop svg {
+        max-width: 100% !important;
+        height: auto !important;
+    }
+
+    /* Better spacing for mobile stacked charts */
+    .hide-desktop [data-testid="stVerticalBlock"] > div {
+        margin-bottom: 1rem !important;
+    }
+}

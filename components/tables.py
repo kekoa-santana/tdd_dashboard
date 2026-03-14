@@ -137,6 +137,7 @@ def build_hitter_profile_table(vuln_df: pd.DataFrame) -> str:
         )
 
     return (
+        f'<div class="table-scroll">'
         f'<table class="pitch-table">'
         f'<thead><tr>'
         f'<th>Pitch</th><th>Whiff%</th><th>CStr%</th>'
@@ -144,6 +145,7 @@ def build_hitter_profile_table(vuln_df: pd.DataFrame) -> str:
         f'</tr></thead>'
         f'<tbody>{rows_html}</tbody>'
         f'</table>'
+        f'</div>'
     )
 
 
@@ -234,6 +236,7 @@ def build_pitcher_profile_table(arsenal_df: pd.DataFrame) -> str:
         )
 
     return (
+        f'<div class="table-scroll">'
         f'<table class="pitch-table">'
         f'<thead><tr>'
         f'<th>Pitch</th><th>Whiff%</th><th>CSW%</th>'
@@ -241,6 +244,7 @@ def build_pitcher_profile_table(arsenal_df: pd.DataFrame) -> str:
         f'</tr></thead>'
         f'<tbody>{rows_html}</tbody>'
         f'</table>'
+        f'</div>'
     )
 
 
@@ -411,6 +415,7 @@ def build_matchup_table(
         )
 
     return (
+        f'<div class="table-scroll">'
         f'<table class="matchup-table">'
         f'<thead><tr>'
         f'<th>Pitch</th><th>Usage</th><th>P Whiff%</th>'
@@ -418,4 +423,5 @@ def build_matchup_table(
         f'</tr></thead>'
         f'<tbody>{rows_html}</tbody>'
         f'</table>'
+        f'</div>'
     )

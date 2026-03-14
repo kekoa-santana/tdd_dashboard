@@ -279,12 +279,28 @@ def page_matchup_explorer() -> None:
                     arch_label_map[aid] = str(label)
 
             # Aggregate offerings by archetype
-            arch_agg = p_off.groupby("pitch_archetype", as_index=False).agg(
-                pitches=("pitches", "sum"),
-                swings=("swings", "sum"),
-                whiffs=("whiffs", "sum"),
-            )
-            arch_agg["whiff_rate"] = arch_agg["whiffs"] / arch_agg["swings"].replace(0, np.nan)
+            # pitcher_offerings lacks swings/whiffs — join from arsenal
+            p_ars_for_arch = arsenal_df[
+                (arsenal_df["pitcher_id"] == pitcher_id) & (arsenal_df["pitches"] >= 10)
+            ].copy()
+            if "pitch_archetype" not in p_ars_for_arch.columns and not p_off.empty:
+                pt_to_arch = p_off.set_index("pitch_type")["pitch_archetype"].to_dict()
+                p_ars_for_arch["pitch_archetype"] = p_ars_for_arch["pitch_type"].map(pt_to_arch)
+
+            if "whiff_rate" in p_ars_for_arch.columns and "pitch_archetype" in p_ars_for_arch.columns:
+                # Pitches-weighted whiff_rate by archetype
+                p_ars_for_arch["weighted_whiff"] = p_ars_for_arch["whiff_rate"] * p_ars_for_arch["pitches"]
+                arch_agg = p_ars_for_arch.groupby("pitch_archetype", as_index=False).agg(
+                    pitches=("pitches", "sum"),
+                    weighted_whiff=("weighted_whiff", "sum"),
+                )
+                arch_agg["whiff_rate"] = arch_agg["weighted_whiff"] / arch_agg["pitches"]
+                arch_agg = arch_agg.drop(columns=["weighted_whiff"])
+            else:
+                arch_agg = p_off.groupby("pitch_archetype", as_index=False).agg(
+                    pitches=("pitches", "sum"),
+                )
+                arch_agg["whiff_rate"] = np.nan
             total_p = arch_agg["pitches"].sum()
             arch_agg["usage_pct"] = arch_agg["pitches"] / total_p if total_p > 0 else 0.0
             arch_agg = arch_agg.sort_values("usage_pct", ascending=False)
@@ -397,16 +413,19 @@ def page_matchup_explorer() -> None:
 
             stand_for_overlay = hitter_hand if hitter_hand in ("L", "R") else None
 
-            overlay_cols = st.columns(min(len(top_pts), 4))
-            for i, pt in enumerate(top_pts):
-                with overlay_cols[i]:
-                    fig_ov = plot_matchup_overlay(
-                        p_loc, h_zone, pitch_type=pt,
-                        pitcher_name=selected_pitcher, hitter_name=selected_hitter,
-                        batter_stand=stand_for_overlay,
-                    )
-                    st.pyplot(fig_ov, use_container_width=True)
-                    plt.close(fig_ov)
+            # 2x2 grid for zone overlays
+            for row_start in range(0, len(top_pts), 2):
+                row_pts = top_pts[row_start:row_start + 2]
+                overlay_cols = st.columns(2)
+                for i, pt in enumerate(row_pts):
+                    with overlay_cols[i]:
+                        fig_ov = plot_matchup_overlay(
+                            p_loc, h_zone, pitch_type=pt,
+                            pitcher_name=selected_pitcher, hitter_name=selected_hitter,
+                            batter_stand=stand_for_overlay,
+                        )
+                        st.pyplot(fig_ov, use_container_width=True)
+                        plt.close(fig_ov)
 
     # --- Side-by-side profile tables ---
     st.markdown('<div class="section-header">Individual Profiles</div>',
