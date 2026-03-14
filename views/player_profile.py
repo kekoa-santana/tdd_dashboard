@@ -1,11 +1,26 @@
 """Player Profile page — Deep dive into a single player's projections."""
 from __future__ import annotations
 
+import base64
+from io import BytesIO
+
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 import streamlit as st
+
+
+def _fig_to_b64_img(fig: Figure) -> str:
+    """Convert a matplotlib Figure to a base64 <img> tag for embedding in HTML."""
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight",
+                facecolor=fig.get_facecolor(), edgecolor="none")
+    buf.seek(0)
+    b64 = base64.b64encode(buf.read()).decode("utf-8")
+    buf.close()
+    return f'<img src="data:image/png;base64,{b64}" style="width:100%;height:auto;" />'
 
 from config import (
     GOLD, EMBER, SAGE, SLATE, CREAM, DARK, DARK_BORDER,
@@ -445,23 +460,34 @@ def render_pitch_profiles(
                         help="Leave empty to show all pitch types combined",
                     )
 
-                zone_col1, zone_col2 = st.columns(2)
-                with zone_col1:
-                    fig_whiff = plot_hitter_zone_grid(
-                        h_zone, metric="whiff_rate",
-                        batter_name=selected_name, batter_stand=zone_stand,
-                        pitch_types=_hz_selected_pts or None,
-                    )
-                    st.pyplot(fig_whiff, use_container_width=True)
-                    plt.close(fig_whiff)
-                with zone_col2:
-                    fig_xwoba = plot_hitter_zone_grid(
-                        h_zone, metric="xwoba",
-                        batter_name=selected_name, batter_stand=zone_stand,
-                        pitch_types=_hz_selected_pts or None,
-                    )
-                    st.pyplot(fig_xwoba, use_container_width=True)
-                    plt.close(fig_xwoba)
+                fig_whiff = plot_hitter_zone_grid(
+                    h_zone, metric="whiff_rate",
+                    batter_name=selected_name, batter_stand=zone_stand,
+                    pitch_types=_hz_selected_pts or None,
+                )
+                fig_xwoba = plot_hitter_zone_grid(
+                    h_zone, metric="xwoba",
+                    batter_name=selected_name, batter_stand=zone_stand,
+                    pitch_types=_hz_selected_pts or None,
+                )
+
+                whiff_img = _fig_to_b64_img(fig_whiff)
+                xwoba_img = _fig_to_b64_img(fig_xwoba)
+                plt.close(fig_whiff)
+                plt.close(fig_xwoba)
+
+                # Desktop: side-by-side (2x1) | Mobile: stacked (1x2)
+                st.markdown(
+                    f'<div class="hide-mobile">'
+                    f'<div style="display:flex;gap:1rem;">'
+                    f'<div style="flex:1;">{whiff_img}</div>'
+                    f'<div style="flex:1;">{xwoba_img}</div>'
+                    f'</div></div>'
+                    f'<div class="hide-desktop">'
+                    f'{whiff_img}{xwoba_img}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
 
                 if selected_season and selected_season in UNRELIABLE_BB_SEASONS:
                     st.caption(
@@ -555,6 +581,14 @@ def render_season_trends(
         return
 
     id_col = "pitcher_id" if player_type == "Pitcher" else "batter_id"
+
+    # Supplement with woba from traditional stats (not in full_stats)
+    if player_type == "Hitter":
+        trad_all = load_traditional_stats_all("hitter")
+        if not trad_all.empty and "woba" in trad_all.columns and "woba" not in full_df.columns:
+            woba_df = trad_all[[id_col, "season", "woba"]].drop_duplicates()
+            full_df = full_df.merge(woba_df, on=[id_col, "season"], how="left")
+
     player_data = full_df[full_df[id_col] == player_id].sort_values("season")
     if len(player_data) < 2:
         return  # Need at least 2 seasons for a trend
@@ -574,6 +608,7 @@ def render_season_trends(
         trend_stats = [
             ("K%", "k_rate", False, True),
             ("BB%", "bb_rate", True, True),
+            ("wOBA", "woba", True, False),
             ("Avg EV", "avg_exit_velo", True, False),
             ("Whiff%", "whiff_rate", False, True),
             ("Chase%", "chase_rate", False, True),
@@ -600,90 +635,104 @@ def render_season_trends(
         "csw_pct": (22, 38),     # pct
         "zone_pct": (38, 55),    # pct
         "barrel_pct": (2, 18),   # pct
+        "woba": (0.280, 0.420),  # raw scale (not pct)
     }
 
-    # Create multi-panel chart — compact size matching other dashboard charts
-    n_stats = len(available_stats)
-    n_cols = min(3, n_stats)
-    n_rows = (n_stats + n_cols - 1) // n_cols
+    # Build a trend figure with the given column count
+    def _build_trend_fig(
+        stats: list, n_cols: int, row_height: float = 1.5,
+    ) -> Figure:
+        n = len(stats)
+        n_r = (n + n_cols - 1) // n_cols
+        fig = Figure(figsize=(7, row_height * n_r), facecolor=DARK)
+        axs = fig.subplots(n_r, n_cols, squeeze=False)
 
-    fig, axes = plt.subplots(
-        n_rows, n_cols, figsize=(7, 1.5 * n_rows),
-        facecolor=DARK, squeeze=False,
-    )
+        for idx, (label, key, higher_better, is_pct) in enumerate(stats):
+            ax = axs[idx // n_cols][idx % n_cols]
+            ax.set_facecolor(DARK)
 
-    for idx, (label, key, higher_better, is_pct) in enumerate(available_stats):
-        ax = axes[idx // n_cols][idx % n_cols]
-        ax.set_facecolor(DARK)
+            vals = player_data[key].values
+            valid_mask = ~pd.isna(vals)
+            valid_seasons = seasons[valid_mask]
+            valid_vals = vals[valid_mask].astype(float)
+            if is_pct:
+                valid_vals = valid_vals * 100
 
-        vals = player_data[key].values
-        valid_mask = ~pd.isna(vals)
-        valid_seasons = seasons[valid_mask]
-        valid_vals = vals[valid_mask].astype(float)
+            ax.plot(valid_seasons, valid_vals, color=GOLD, linewidth=1.5,
+                    marker="o", markersize=4, zorder=3)
 
-        if is_pct:
-            valid_vals = valid_vals * 100
+            if selected_season and selected_season in valid_seasons:
+                sel_idx = list(valid_seasons).index(selected_season)
+                ax.plot(selected_season, valid_vals[sel_idx], "o",
+                        color=SAGE, markersize=7, zorder=4)
 
-        # Main line
-        ax.plot(valid_seasons, valid_vals, color=GOLD, linewidth=1.5, marker="o",
-                markersize=4, zorder=3)
+            if key in _Y_RANGES:
+                y_lo, y_hi = _Y_RANGES[key]
+                data_lo, data_hi = float(valid_vals.min()), float(valid_vals.max())
+                y_lo = min(y_lo, data_lo - 1)
+                y_hi = max(y_hi, data_hi + 1)
+                ax.set_ylim(y_lo, y_hi)
+            else:
+                data_lo, data_hi = float(valid_vals.min()), float(valid_vals.max())
+                pad = max((data_hi - data_lo) * 0.3, 2.0)
+                ax.set_ylim(data_lo - pad, data_hi + pad)
 
-        # Highlight selected season
-        if selected_season and selected_season in valid_seasons:
-            sel_idx = list(valid_seasons).index(selected_season)
-            ax.plot(selected_season, valid_vals[sel_idx], "o",
-                    color=SAGE, markersize=7, zorder=4)
+            ax.set_title(label, color=CREAM, fontsize=9, fontweight="bold", pad=4)
+            ax.tick_params(colors=SLATE, labelsize=7)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.spines["bottom"].set_color(SLATE)
+            ax.spines["left"].set_color(SLATE)
+            ax.grid(axis="y", color=SLATE, alpha=0.15, linewidth=0.5)
+            ax.set_xlim(TRAIN_START - 0.5, PRIOR_SEASON + 0.5)
+            ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True, nbins=6))
 
-        # Set y-axis range: use league-wide range, expanded to include player data
-        if key in _Y_RANGES:
-            y_lo, y_hi = _Y_RANGES[key]
-            data_lo, data_hi = float(valid_vals.min()), float(valid_vals.max())
-            y_lo = min(y_lo, data_lo - 1)
-            y_hi = max(y_hi, data_hi + 1)
-            ax.set_ylim(y_lo, y_hi)
-        else:
-            # Fallback: pad by 20% of data range (minimum 2 units)
-            data_lo, data_hi = float(valid_vals.min()), float(valid_vals.max())
-            pad = max((data_hi - data_lo) * 0.3, 2.0)
-            ax.set_ylim(data_lo - pad, data_hi + pad)
+            if is_pct:
+                ax.yaxis.set_major_formatter(mticker.PercentFormatter(decimals=0))
 
-        # Style
-        ax.set_title(label, color=CREAM, fontsize=9, fontweight="bold", pad=4)
-        ax.tick_params(colors=SLATE, labelsize=7)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.spines["bottom"].set_color(SLATE)
-        ax.spines["left"].set_color(SLATE)
-        ax.grid(axis="y", color=SLATE, alpha=0.15, linewidth=0.5)
-        ax.set_xlim(TRAIN_START - 0.5, PRIOR_SEASON + 0.5)
-        ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True, nbins=6))
+            if len(valid_vals) >= 2:
+                delta = valid_vals[-1] - valid_vals[-2]
+                if abs(delta) > 0.1:
+                    arrow = "+" if delta > 0 else ""
+                    clr = SAGE if (delta > 0) == higher_better else EMBER
+                    fmt_delta = f"{arrow}{delta:.1f}{'%' if is_pct else ''}"
+                    ax.annotate(
+                        fmt_delta,
+                        xy=(valid_seasons[-1], valid_vals[-1]),
+                        xytext=(5, 6), textcoords="offset points",
+                        fontsize=7, color=clr, fontweight="bold",
+                    )
 
-        if is_pct:
-            ax.yaxis.set_major_formatter(mticker.PercentFormatter(decimals=0))
+        for idx in range(n, n_r * n_cols):
+            axs[idx // n_cols][idx % n_cols].set_visible(False)
 
-        # Trend arrow annotation
-        if len(valid_vals) >= 2:
-            delta = valid_vals[-1] - valid_vals[-2]
-            if abs(delta) > 0.1:
-                arrow = "+" if delta > 0 else ""
-                color = SAGE if (delta > 0) == higher_better else EMBER
-                fmt_delta = f"{arrow}{delta:.1f}{'%' if is_pct else ''}"
-                ax.annotate(
-                    fmt_delta,
-                    xy=(valid_seasons[-1], valid_vals[-1]),
-                    xytext=(5, 6), textcoords="offset points",
-                    fontsize=7, color=color, fontweight="bold",
-                )
+        fig.tight_layout(pad=1.0)
+        return fig
 
-    # Hide empty subplots
-    for idx in range(n_stats, n_rows * n_cols):
-        axes[idx // n_cols][idx % n_cols].set_visible(False)
-
-    fig.tight_layout(pad=1.0)
     st.markdown('<div class="section-header">Season Trends</div>',
                 unsafe_allow_html=True)
-    st.pyplot(fig, use_container_width=True)
-    plt.close(fig)
+
+    # Desktop: 3 columns (wider, more compact layout)
+    # Mobile:  1 column (taller, larger charts for better readability on phones)
+    n_stats = len(available_stats)
+    
+    # Desktop version: 3 columns, standard figure size
+    fig_desktop = _build_trend_fig(available_stats, n_cols=min(3, n_stats), row_height=1.4)
+    
+    # Mobile version: 1 column, much taller figure with large individual charts
+    fig_mobile = _build_trend_fig(available_stats, n_cols=1, row_height=2.5)
+
+    # Embed as base64 images inside real HTML divs so hide-mobile/hide-desktop CSS works
+    desktop_img = _fig_to_b64_img(fig_desktop)
+    mobile_img = _fig_to_b64_img(fig_mobile)
+    plt.close(fig_desktop)
+    plt.close(fig_mobile)
+
+    st.markdown(
+        f'<div class="hide-mobile">{desktop_img}</div>'
+        f'<div class="hide-desktop">{mobile_img}</div>',
+        unsafe_allow_html=True,
+    )
     st.caption(
         f"Year-over-year trends for {selected_name}. "
         f"{'Green dot' if selected_season else 'Gold line'} = {'selected season' if selected_season else 'trajectory'}. "
@@ -1264,204 +1313,11 @@ def page_player_profile() -> None:
     # --- Season Trends (also on projection view) ---
     render_season_trends(player_type, player_id, selected_name)
 
-    # --- Pitch Profile Tables ---
-    if player_type == "Pitcher":
-        # Platoon split toggle for pitcher arsenal (projection view)
-        proj_platoon_choice = st.radio(
-            "Batter handedness",
-            ["All Batters", "vs LHH", "vs RHH"],
-            horizontal=True,
-            key="profile_platoon_split",
-        )
-        _proj_platoon_stand = {"vs LHH": "L", "vs RHH": "R"}.get(proj_platoon_choice)
-        _proj_platoon_suffix = f" — {proj_platoon_choice}" if _proj_platoon_stand else ""
-
-        if _proj_platoon_stand:
-            # Load split data from the _all file and filter by batter_stand
-            arsenal_all = load_pitcher_arsenal_all()
-            if not arsenal_all.empty and "batter_stand" in arsenal_all.columns:
-                _mask = (arsenal_all["pitcher_id"] == player_id) & (arsenal_all["batter_stand"] == _proj_platoon_stand)
-                # Use most recent season if season column exists
-                if "season" in arsenal_all.columns:
-                    _mask = _mask & (arsenal_all["season"] == PRIOR_SEASON)
-                p_arsenal = arsenal_all[_mask].copy()
-                # Recompute usage_pct within the filtered subset
-                if not p_arsenal.empty:
-                    total_p = p_arsenal["pitches"].sum()
-                    p_arsenal["usage_pct"] = p_arsenal["pitches"] / total_p if total_p > 0 else 0
-            else:
-                p_arsenal = pd.DataFrame()
-        else:
-            arsenal_df = load_pitcher_arsenal()
-            p_arsenal = arsenal_df[arsenal_df["pitcher_id"] == player_id].copy() if not arsenal_df.empty else pd.DataFrame()
-
-        if not p_arsenal.empty:
-            st.markdown(f'<div class="section-header">Pitch Arsenal{_proj_platoon_suffix}</div>',
-                        unsafe_allow_html=True)
-            table_html = build_pitcher_profile_table(p_arsenal)
-            if table_html:
-                st.markdown(
-                    f'<div class="insight-card">{table_html}</div>',
-                    unsafe_allow_html=True,
-                )
-                st.caption(
-                    "Colors relative to league average per pitch type. "
-                    f'<span style="color:{SAGE};">Green</span> = above avg, '
-                    f'<span style="color:{GOLD};">gold</span> = avg, '
-                    f'<span style="color:{EMBER};">orange</span> = below avg. '
-                    "CSW% = called strikes + whiffs / pitches.",
-                    unsafe_allow_html=True,
-                )
-
-        # --- Pitcher Location Heatmap ---
-        ploc_df = load_pitcher_location_grid()
-        if not ploc_df.empty:
-            p_loc = ploc_df[ploc_df["pitcher_id"] == player_id]
-            if not p_loc.empty:
-                st.markdown('<div class="section-header">Pitch Location Profile</div>',
-                            unsafe_allow_html=True)
-                from lib.zone_charts import plot_pitcher_location_heatmap
-
-                loc_stand = st.radio(
-                    "Batter handedness",
-                    ["All", "vs LHH", "vs RHH"],
-                    horizontal=True,
-                    key="profile_pitcher_loc_stand",
-                )
-                stand_filter = {"vs LHH": "L", "vs RHH": "R"}.get(loc_stand)
-
-                # Pitch-type filter
-                _avail_pts = (
-                    p_loc.groupby("pitch_type")["pitches"].sum()
-                    .sort_values(ascending=False)
-                )
-                _pt_options = [pt for pt in _avail_pts.index if pt in PITCH_DISPLAY]
-                _pt_labels = {pt: PITCH_DISPLAY.get(pt, pt) for pt in _pt_options}
-                _selected_pts = st.multiselect(
-                    "Pitch types",
-                    options=_pt_options,
-                    format_func=lambda pt: _pt_labels[pt],
-                    default=[],
-                    key="profile_pitch_type_filter",
-                    help="Leave empty to auto-select top 4 pitch types by volume",
-                )
-
-                fig_loc = plot_pitcher_location_heatmap(
-                    p_loc, pitch_types=_selected_pts or None,
-                    pitcher_name=selected_name, batter_stand=stand_filter,
-                )
-                st.pyplot(fig_loc, use_container_width=True)
-                plt.close(fig_loc)
-                st.caption("Pitch count shown per cell. Catcher's perspective.")
-    else:
-        vuln_df = load_hitter_vulnerability(career=True)
-        if not vuln_df.empty:
-            h_vuln_all = vuln_df[vuln_df["batter_id"] == player_id].copy()
-            if not h_vuln_all.empty:
-                # Detect switch hitter: significant data on both sides
-                side_counts = h_vuln_all.groupby("batter_stand")["pitches"].sum()
-                is_switch = (
-                    len(side_counts) > 1
-                    and all(v >= 50 for v in side_counts.values)
-                )
-
-                section_label = "Pitch-Type Profile (Career)"
-                if is_switch:
-                    platoon_side = st.radio(
-                        "Batter side",
-                        ["vs RHP (bats L)", "vs LHP (bats R)", "Combined"],
-                        horizontal=True,
-                        key="profile_platoon",
-                    )
-                    if platoon_side.startswith("vs RHP"):
-                        h_vuln = h_vuln_all[h_vuln_all["batter_stand"] == "L"].copy()
-                        section_label = "Pitch-Type Profile (Career — vs RHP)"
-                    elif platoon_side.startswith("vs LHP"):
-                        h_vuln = h_vuln_all[h_vuln_all["batter_stand"] == "R"].copy()
-                        section_label = "Pitch-Type Profile (Career — vs LHP)"
-                    else:
-                        # Combined: sum raw counts across sides, recompute rates
-                        h_vuln = combine_platoon_vuln(h_vuln_all)
-                        section_label = "Pitch-Type Profile (Career — Combined)"
-                else:
-                    h_vuln = h_vuln_all
-
-                st.markdown(f'<div class="section-header">{section_label}</div>',
-                            unsafe_allow_html=True)
-                table_html = build_hitter_profile_table(h_vuln)
-                if table_html:
-                    st.markdown(
-                        f'<div class="insight-card">{table_html}</div>',
-                        unsafe_allow_html=True,
-                    )
-                    st.caption(
-                        "Colors relative to league average per pitch type. "
-                        f'<span style="color:{EMBER};">Orange</span> = exploitable, '
-                        f'<span style="color:{SAGE};">green</span> = strength. '
-                        "CStr% = called strikes / pitches. "
-                        "Bar opacity reflects sample confidence.",
-                        unsafe_allow_html=True,
-                    )
-
-        # --- Hitter Zone Grid ---
-        hzone_df = load_hitter_zone_grid(career=True)
-        if not hzone_df.empty:
-            h_zone = hzone_df[hzone_df["batter_id"] == player_id]
-            if not h_zone.empty:
-                st.markdown('<div class="section-header">Zone Profile (Career)</div>',
-                            unsafe_allow_html=True)
-                from lib.zone_charts import plot_hitter_zone_grid
-
-                # Determine platoon stand for zone charts (match pitch-type profile)
-                zone_stand = None
-                if is_switch:
-                    if platoon_side.startswith("vs RHP"):
-                        zone_stand = "L"
-                    elif platoon_side.startswith("vs LHP"):
-                        zone_stand = "R"
-                    # else Combined -> zone_stand = None
-
-                # Pitch-type filter (only when data includes pitch_type column)
-                _hz_career_selected_pts: list[str] | None = None
-                if "pitch_type" in h_zone.columns:
-                    _hz_career_avail_pts = (
-                        h_zone.groupby("pitch_type")["pitches"].sum()
-                        .sort_values(ascending=False)
-                    )
-                    _hz_career_pt_options = [pt for pt in _hz_career_avail_pts.index if pt in PITCH_DISPLAY]
-                    _hz_career_pt_labels = {pt: PITCH_DISPLAY.get(pt, pt) for pt in _hz_career_pt_options}
-                    _hz_career_selected_pts = st.multiselect(
-                        "Pitch types",
-                        options=_hz_career_pt_options,
-                        format_func=lambda pt: _hz_career_pt_labels[pt],
-                        default=[],
-                        key="hitter_zone_career_pitch_type_filter",
-                        help="Leave empty to show all pitch types combined",
-                    )
-
-                zone_col1, zone_col2 = st.columns(2)
-                with zone_col1:
-                    fig_whiff = plot_hitter_zone_grid(
-                        h_zone, metric="whiff_rate",
-                        batter_name=selected_name, batter_stand=zone_stand,
-                        pitch_types=_hz_career_selected_pts or None,
-                    )
-                    st.pyplot(fig_whiff, use_container_width=True)
-                    plt.close(fig_whiff)
-                with zone_col2:
-                    fig_xwoba = plot_hitter_zone_grid(
-                        h_zone, metric="xwoba",
-                        batter_name=selected_name, batter_stand=zone_stand,
-                        pitch_types=_hz_career_selected_pts or None,
-                    )
-                    st.pyplot(fig_xwoba, use_container_width=True)
-                    plt.close(fig_xwoba)
-                st.caption(
-                    f"Left: whiff vulnerability (<span style='color:{EMBER};'>orange</span> = exploitable). "
-                    f"Right: damage on contact (<span style='color:{SAGE};'>green</span> = hitter strength). "
-                    "Catcher's perspective. Cells with insufficient data dimmed.",
-                    unsafe_allow_html=True,
-                )
+    # --- Pitch profile + zone charts (reuse the season-aware renderer) ---
+    render_pitch_profiles(
+        player_type, player_id, selected_name,
+        selected_season=PRIOR_SEASON, is_career=False,
+    )
 
     # --- Posterior KDE (for pitchers with K% samples) ---
     k_samples = load_k_samples()

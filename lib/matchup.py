@@ -499,12 +499,27 @@ def score_matchup_by_archetype(
         }
 
     # Aggregate to pitcher-level per archetype
-    arch_agg = p_off.groupby("pitch_archetype", as_index=False).agg(
-        pitches=("pitches", "sum"),
-        swings=("swings", "sum"),
-        whiffs=("whiffs", "sum"),
-    )
-    arch_agg["whiff_rate"] = arch_agg["whiffs"] / arch_agg["swings"].replace(0, np.nan)
+    # pitcher_offerings may lack swings/whiffs — use weighted whiff_rate if available
+    if "swings" in p_off.columns and "whiffs" in p_off.columns:
+        arch_agg = p_off.groupby("pitch_archetype", as_index=False).agg(
+            pitches=("pitches", "sum"),
+            swings=("swings", "sum"),
+            whiffs=("whiffs", "sum"),
+        )
+        arch_agg["whiff_rate"] = arch_agg["whiffs"] / arch_agg["swings"].replace(0, np.nan)
+    elif "whiff_rate" in p_off.columns:
+        p_off["_weighted_whiff"] = p_off["whiff_rate"] * p_off["pitches"]
+        arch_agg = p_off.groupby("pitch_archetype", as_index=False).agg(
+            pitches=("pitches", "sum"),
+            _weighted_whiff=("_weighted_whiff", "sum"),
+        )
+        arch_agg["whiff_rate"] = arch_agg["_weighted_whiff"] / arch_agg["pitches"]
+        arch_agg = arch_agg.drop(columns=["_weighted_whiff"])
+    else:
+        arch_agg = p_off.groupby("pitch_archetype", as_index=False).agg(
+            pitches=("pitches", "sum"),
+        )
+        arch_agg["whiff_rate"] = np.nan
     total_pitches = arch_agg["pitches"].sum()
     arch_agg["usage_norm"] = arch_agg["pitches"] / total_pitches if total_pitches > 0 else 1.0 / len(arch_agg)
 

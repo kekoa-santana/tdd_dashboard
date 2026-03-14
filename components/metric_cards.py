@@ -84,14 +84,13 @@ def pctile_bar_html(
         )
 
     return (
-        f'<div style="margin:12px 0;">'
-        f'<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">'
-        f'<span style="color:{SLATE}; font-size:0.85rem; font-weight:600;">{label}{prev_label}</span>'
-        f'<span style="color:{SLATE}; font-size:0.8rem;">{pctile:.0f}th percentile | Range: {ci_str}</span>'
+        f'<div class="pctile-bar-row">'
+        f'<div class="pctile-bar-header">'
+        f'<span class="pctile-bar-label">{label}{prev_label}</span>'
+        f'<span class="pctile-bar-detail">{pctile:.0f}th percentile | Range: {ci_str}</span>'
         f'</div>'
-        f'<div style="position:relative; width:100%; background:{DARK}; border-radius:6px; height:22px; '
-        f'overflow:hidden; border:1px solid {DARK_BORDER};">'
-        f'<div style="height:100%; width:{pctile:.0f}%; background:{color}; border-radius:5px;"></div>'
+        f'<div class="pctile-bar-track">'
+        f'<div class="pctile-bar-fill-inner" style="width:{pctile:.0f}%; background:{color};"></div>'
         f'{prev_line}'
         f'</div>'
         f'</div>'
@@ -109,14 +108,13 @@ def observed_pctile_bar_html(
     val_str = fmt_stat(value, key)
 
     return (
-        f'<div style="margin:12px 0;">'
-        f'<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">'
-        f'<span style="color:{SLATE}; font-size:0.85rem; font-weight:600;">{label}</span>'
-        f'<span style="color:{SLATE}; font-size:0.8rem;">{pctile:.0f}th percentile | {val_str}</span>'
+        f'<div class="pctile-bar-row">'
+        f'<div class="pctile-bar-header">'
+        f'<span class="pctile-bar-label">{label}</span>'
+        f'<span class="pctile-bar-detail">{pctile:.0f}th percentile | {val_str}</span>'
         f'</div>'
-        f'<div style="position:relative; width:100%; background:{DARK}; border-radius:6px; height:22px; '
-        f'overflow:hidden; border:1px solid {DARK_BORDER};">'
-        f'<div style="height:100%; width:{pctile:.0f}%; background:{color}; border-radius:5px;"></div>'
+        f'<div class="pctile-bar-track">'
+        f'<div class="pctile-bar-fill-inner" style="width:{pctile:.0f}%; background:{color};"></div>'
         f'</div>'
         f'</div>'
     )
