@@ -120,6 +120,54 @@ def dashboard_dir(tmp_path, monkeypatch):
     with open(d / "update_metadata.json", "w") as f:
         json.dump(metadata, f)
 
+    # -- backtest fixture: pitcher_k_backtest.parquet --
+    bt_pitcher_k = pd.DataFrame({
+        "test_season": [2023, 2024],
+        "bayes_mae": [0.032, 0.035],
+        "marcel_mae": [0.033, 0.033],
+        "mae_improvement_pct": [3.0, -5.7],
+        "bayes_rmse": [0.042, 0.045],
+        "marcel_rmse": [0.041, 0.043],
+        "rmse_improvement_pct": [-0.8, -5.0],
+        "coverage_95": [0.88, 0.81],
+        "bayes_brier": [0.17, 0.21],
+        "marcel_brier": [0.20, 0.25],
+        "n_players": [427, 424],
+        "converged": [True, True],
+    })
+    bt_pitcher_k.to_parquet(d / "backtest_pitcher_k_backtest.parquet", index=False)
+
+    # -- backtest fixture: game_k_backtest.parquet --
+    bt_game_k = pd.DataFrame({
+        "test_season": [2023, 2024],
+        "n_games": [3782, 3789],
+        "rmse": [2.31, 2.25],
+        "mae": [1.83, 1.80],
+        "avg_brier": [0.188, 0.189],
+        "coverage_50": [0.48, 0.48],
+        "coverage_80": [0.79, 0.79],
+        "coverage_90": [0.89, 0.90],
+        "log_score": [-2.24, -2.21],
+        "naive_rmse": [2.29, 2.26],
+        "naive_avg_brier": [0.184, 0.188],
+        "poisson_rmse": [2.34, 2.30],
+        "poisson_avg_brier": [0.190, 0.193],
+        "model_no_matchup_rmse": [2.34, 2.30],
+        "model_no_matchup_avg_brier": [0.190, 0.193],
+        "full_model_rmse": [2.31, 2.25],
+        "full_model_avg_brier": [0.188, 0.189],
+    })
+    bt_game_k.to_parquet(d / "backtest_game_k_backtest.parquet", index=False)
+
+    # -- snapshots/weekly/ fixture --
+    weekly_dir = d / "snapshots" / "weekly"
+    weekly_dir.mkdir(parents=True, exist_ok=True)
+    snap_pitcher = pitcher_proj.copy()
+    snap_pitcher["projected_k_rate"] = [0.290, 0.255]
+    snap_pitcher.to_parquet(
+        weekly_dir / "pitcher_projections_2026-03-01.parquet", index=False,
+    )
+
     # Patch DASHBOARD_DIR everywhere it's been imported
     import config
     monkeypatch.setattr(config, "DASHBOARD_DIR", d)

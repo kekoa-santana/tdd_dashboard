@@ -7,7 +7,7 @@ build/
 *.egg
 
 # Virtual environment
-myenv/
+dash-env/
 venv/
 .venv/
 
@@ -31,7 +31,6 @@ data/dashboard/snapshots/
 ideas.md
 
 .claude/
-CLAUDE.md
 
 SYNC_GUIDE.md
 

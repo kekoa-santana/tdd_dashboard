@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import matplotlib as mpl
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 from matplotlib.patches import FancyBboxPatch
 import numpy as np
 import pandas as pd
@@ -32,8 +32,12 @@ def apply_dark_mpl() -> None:
         "axes.spines.right": False,
         "axes.spines.left": False,
         "axes.spines.bottom": False,
-        "font.size": 12,
+        "font.size": 14,
         "font.family": "sans-serif",
+        "axes.titlesize": 14,
+        "axes.labelsize": 12,
+        "xtick.labelsize": 11,
+        "ytick.labelsize": 11,
     })
 
 
@@ -46,9 +50,10 @@ def create_posterior_fig(
     observed: float | None = None,
     stat_label: str = "K%",
     color: str = SAGE,
-) -> plt.Figure:
+) -> Figure:
     """Create a posterior KDE plot with brand styling."""
-    fig, ax = plt.subplots(figsize=(7, 3))
+    fig = Figure(figsize=(7, 3.5))
+    ax = fig.subplots()
     fig.patch.set_facecolor(DARK)
     ax.set_facecolor(DARK)
 
@@ -103,9 +108,10 @@ def create_posterior_fig(
 def create_game_k_fig(
     k_samples: np.ndarray,
     pitcher_name: str,
-) -> plt.Figure:
+) -> Figure:
     """Create a game K distribution histogram."""
-    fig, ax = plt.subplots(figsize=(7, 3))
+    fig = Figure(figsize=(7, 3.5))
+    ax = fig.subplots()
     fig.patch.set_facecolor(DARK)
     ax.set_facecolor(DARK)
 
@@ -148,7 +154,7 @@ def create_game_k_fig(
 def create_arsenal_fig(
     arsenal_df: pd.DataFrame,
     pitcher_name: str,
-) -> plt.Figure:
+) -> Figure:
     """Pitcher arsenal chart."""
     df = arsenal_df.sort_values("usage_pct", ascending=True).copy()
     df["label"] = (
@@ -163,7 +169,8 @@ def create_arsenal_fig(
         (df["usage_pct"] / max_usage) * (max_thickness - min_thickness)
     )
 
-    fig, ax = plt.subplots(figsize=(7, max(2.5, n * 0.6)))
+    fig = Figure(figsize=(7, max(2.5, n * 0.6)))
+    ax = fig.subplots()
     fig.patch.set_facecolor(DARK)
     ax.set_facecolor(DARK)
 
@@ -244,7 +251,7 @@ def create_hitter_vuln_fig(
     vuln_df: pd.DataFrame,
     strength_df: pd.DataFrame,
     hitter_name: str,
-) -> plt.Figure:
+) -> Figure:
     """Dual bar chart: vulnerabilities (whiff rate, sample-blended) and
     strengths (xwOBA on contact)."""
     merged = vuln_df[vuln_df["swings"] >= 10].copy() if "swings" in vuln_df.columns else vuln_df.copy()
@@ -260,7 +267,8 @@ def create_hitter_vuln_fig(
     merged = merged.sort_values("blended_whiff", ascending=True)
 
     n_rows = len(merged)
-    fig, axes = plt.subplots(1, 2, figsize=(7, max(2.2, n_rows * 0.5)))
+    fig = Figure(figsize=(7, max(2.2, n_rows * 0.5)))
+    axes = fig.subplots(1, 2)
     fig.patch.set_facecolor(DARK)
 
     ax1 = axes[0]
