@@ -42,8 +42,8 @@ def page_prospects() -> None:
         '<div class="brand-header">'
         '<div><div class="brand-title">Prospect Readiness</div>'
         '<div class="brand-subtitle">'
-        'MLB readiness scores powered by translated stats, '
-        'org depth, and scouting grades</div>'
+        'MLB readiness scores powered by translated stats '
+        'and organizational depth analysis</div>'
         '</div></div>',
         unsafe_allow_html=True,
     )
@@ -117,12 +117,6 @@ def page_prospects() -> None:
         "name": "Player",
         "pos_group": "Pos",
         "max_level": "Level",
-        "future_value": "FV",
-        "overall_rank": "FG Rank",
-        "org": "Org",
-        "org_rank": "Org Rk",
-        "risk": "Risk",
-        "eta": "ETA",
         "wtd_k_pct": "K%",
         "wtd_bb_pct": "BB%",
         "wtd_iso": "ISO",
@@ -152,14 +146,6 @@ def page_prospects() -> None:
         fmt["SB Rate"] = "{:.3f}"
     if "Age vs Lvl" in display_df.columns:
         fmt["Age vs Lvl"] = "{:+.1f}"
-    if "FV" in display_df.columns:
-        fmt["FV"] = "{:.0f}"
-    if "FG Rank" in display_df.columns:
-        fmt["FG Rank"] = "{:.0f}"
-    if "Org Rk" in display_df.columns:
-        fmt["Org Rk"] = "{:.0f}"
-    if "ETA" in display_df.columns:
-        fmt["ETA"] = "{:.0f}"
     if "Blocked By" in display_df.columns:
         fmt["Blocked By"] = "{:.0f}"
     if "MiLB PA" in display_df.columns:
@@ -181,10 +167,9 @@ def page_prospects() -> None:
 
     st.caption(
         "**Readiness Score** = probability of sticking in MLB (200+ PA season), "
-        "combining translated MiLB stats, organizational depth, and FanGraphs scouting grades. "
+        "combining translated MiLB stats and organizational depth analysis. "
         "**K%/BB%/ISO** are MLB-translated stats from MiLB performance. "
-        "**Blocked By** = prospects at same position ahead in the org pipeline. "
-        "Model test AUC: 0.974."
+        "**Blocked By** = prospects at same position ahead in the org pipeline."
     )
 
     # ── Expandable: translation factors reference ──
