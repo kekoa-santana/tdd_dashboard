@@ -322,6 +322,50 @@ def load_latest_weekly_snapshot(player_type: str) -> tuple[str, pd.DataFrame] | 
     return latest_date, snapshots[latest_date]
 
 
+@st.cache_data(ttl=600)  # 10-minute TTL for live schedule data
+def fetch_live_schedule(game_date: str | None = None) -> pd.DataFrame:
+    """Fetch live schedule from MLB Stats API with short TTL cache."""
+    from lib.schedule import fetch_todays_schedule
+    return fetch_todays_schedule(game_date=game_date)
+
+
+@st.cache_data(ttl=600)  # 10-minute TTL for live lineup data
+def fetch_live_lineups(schedule_df: pd.DataFrame) -> pd.DataFrame:
+    """Fetch live lineups from MLB Stats API with short TTL cache."""
+    from lib.schedule import fetch_all_lineups
+    if schedule_df.empty:
+        return pd.DataFrame()
+    # Convert to hashable form for caching
+    return fetch_all_lineups(schedule_df)
+
+
+@st.cache_data
+def load_milb_translated(player_type: str) -> pd.DataFrame:
+    """Load MiLB translated stats (batters or pitchers)."""
+    path = DASHBOARD_DIR / f"milb_translated_{player_type}.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
+def load_milb_factors(player_type: str) -> pd.DataFrame:
+    """Load MiLB translation factors (batters or pitchers)."""
+    path = DASHBOARD_DIR / f"milb_{player_type}_factors.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
+def load_prospect_readiness() -> pd.DataFrame:
+    """Load prospect readiness scores with rankings."""
+    path = DASHBOARD_DIR / "prospect_readiness.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
 def season_selector(key_prefix: str, include_career: bool = True) -> str:
     """Render a season selector and return the choice."""
     options = (
