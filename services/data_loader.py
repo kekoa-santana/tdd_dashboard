@@ -358,6 +358,16 @@ def load_milb_factors(player_type: str) -> pd.DataFrame:
 
 
 @st.cache_data
+def load_rankings(player_type: str) -> pd.DataFrame:
+    """Load precomputed rankings (hitters, pitchers, or prospects)."""
+    filename = f"{player_type}_rankings.parquet"
+    path = DASHBOARD_DIR / filename
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
 def load_prospect_readiness() -> pd.DataFrame:
     """Load prospect readiness scores with rankings."""
     path = DASHBOARD_DIR / "prospect_readiness.parquet"
