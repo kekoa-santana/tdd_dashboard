@@ -31,6 +31,7 @@
     border-radius: 10px;
     padding: 1rem 1.2rem;
     text-align: center;
+    margin-bottom: 0.5rem;
 }
 .metric-value {
     color: var(--tdd-gold);
@@ -125,6 +126,22 @@
 
 /* Table styling */
 .stDataFrame { font-size: 0.85rem; }
+
+/* Global spacing: breathing room between content blocks.
+   Streamlit wraps each st.columns() in stHorizontalBlock and each
+   st.dataframe/st.pyplot in a vertical block child.  These rules
+   ensure metric-card rows, tables, and charts don't crowd each other. */
+[data-testid="stDataFrame"],
+[data-testid="stImage"],
+[data-testid="stPyplotFigure"] {
+    margin-top: 0.75rem;
+}
+
+/* Section headers already have margin-top, but ensure the element
+   immediately following them gets a small gap too */
+.section-header + * {
+    margin-top: 0.25rem;
+}
 
 /* Sidebar branding */
 [data-testid="stSidebar"] {

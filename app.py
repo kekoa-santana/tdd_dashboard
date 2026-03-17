@@ -40,6 +40,7 @@ from views.game_k_sim import page_game_k_sim  # noqa: E402
 from views.preseason_snapshot import page_preseason_snapshot  # noqa: E402
 from views.data_health import page_data_health  # noqa: E402
 from views.model_performance import page_model_performance  # noqa: E402
+from views.prospects import page_prospects  # noqa: E402
 
 # Apply dark matplotlib theme at import time
 apply_dark_mpl()
@@ -89,6 +90,7 @@ PAGES = {
     "Matchup Explorer": page_matchup_explorer,
     "Game K Simulator": page_game_k_sim,
     "Preseason Snapshot": page_preseason_snapshot,
+    "Prospects": page_prospects,
     "Model Performance": page_model_performance,
     "Data Health": page_data_health,
 }

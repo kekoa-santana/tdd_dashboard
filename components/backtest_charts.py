@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from config import GOLD, EMBER, SAGE, SLATE, CREAM, DARK
-from lib.theme import add_watermark
+from components.charts import add_watermark
 
 
 def create_accuracy_bars(

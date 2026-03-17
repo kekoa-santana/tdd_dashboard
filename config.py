@@ -25,6 +25,11 @@ TRAIN_END: int = RUNTIME["train_end_season"]               # e.g. 2025
 PROJECTION_LABEL: str = f"{CURRENT_SEASON} Projection"     # "2026 Projection"
 TRAINING_RANGE: str = f"{TRAIN_START}-{TRAIN_END}"          # "2018-2025"
 
+# Live schedule refresh
+SCHEDULE_REFRESH_MINUTES: int = RUNTIME.get("schedule_refresh_interval_minutes", 10)
+GAME_WINDOW_START_HOUR: int = RUNTIME.get("game_window_start_hour", 11)
+GAME_WINDOW_END_HOUR: int = RUNTIME.get("game_window_end_hour", 24)
+
 # Derived colors for dashboard dark theme
 DARK_CARD = "#181b23"
 DARK_BORDER = "#2a2e3a"

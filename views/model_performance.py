@@ -75,8 +75,8 @@ def page_model_performance() -> None:
         unsafe_allow_html=True,
     )
 
-    tab_backtest, tab_game_k, tab_movers = st.tabs([
-        "Backtest Results", "Game K Model", "Projection Movers",
+    tab_backtest, tab_game_k, tab_hits_misses, tab_movers = st.tabs([
+        "Backtest Results", "Game K Model", "Biggest Hits & Misses", "Projection Movers",
     ])
 
     # ===================================================================
@@ -108,7 +108,13 @@ def page_model_performance() -> None:
         _render_game_k_tab()
 
     # ===================================================================
-    # Tab 3: Projection Movers
+    # Tab 3: Biggest Hits & Misses
+    # ===================================================================
+    with tab_hits_misses:
+        _render_hits_misses_tab()
+
+    # ===================================================================
+    # Tab 4: Projection Movers
     # ===================================================================
     with tab_movers:
         _render_movers_tab()
@@ -302,7 +308,134 @@ def _render_game_k_tab() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tab 3: Projection Movers
+# Tab 3: Biggest Hits & Misses
+# ---------------------------------------------------------------------------
+
+def _render_hits_misses_tab() -> None:
+    """Show players with largest prediction errors (positive and negative)."""
+    player_type = st.radio(
+        "Player Type", ["Pitcher", "Hitter"],
+        horizontal=True, key="hm_player_type",
+    )
+    ptype = player_type.lower()
+
+    id_col = "pitcher_id" if ptype == "pitcher" else "batter_id"
+    name_col = "pitcher_name" if ptype == "pitcher" else "batter_name"
+
+    current = load_projections(ptype)
+    if current.empty:
+        st.info("No projection data available.")
+        return
+
+    stat_col = st.selectbox(
+        "Stat", ["projected_k_rate", "projected_bb_rate"],
+        format_func=lambda x: "K%" if "k_rate" in x else "BB%",
+        key="hm_stat",
+    )
+    observed_col = stat_col.replace("projected_", "observed_")
+
+    if observed_col not in current.columns:
+        st.info(
+            f"No observed data for {stat_col.replace('projected_', '')}. "
+            "Observed stats appear once the season starts."
+        )
+        return
+
+    # Compute errors: predicted - actual
+    df = current[[id_col, name_col, stat_col, observed_col]].dropna(
+        subset=[stat_col, observed_col]
+    ).copy()
+
+    if df.empty:
+        st.info("No players with both projected and observed values.")
+        return
+
+    df["error"] = df[stat_col] - df[observed_col]
+    df["abs_error"] = df["error"].abs()
+
+    stat_label = "K%" if "k_rate" in stat_col else "BB%"
+    n_show = 10
+
+    # Biggest Misses (largest absolute error)
+    biggest_misses = df.nlargest(n_show, "abs_error")
+
+    # Biggest Hits (smallest absolute error, with meaningful projection)
+    biggest_hits = df.nsmallest(n_show, "abs_error")
+
+    import matplotlib.pyplot as plt
+
+    chart_col1, chart_col2 = st.columns(2)
+
+    with chart_col1:
+        st.markdown(
+            f'<div class="section-header" style="color:{SAGE};">Biggest Hits ({stat_label})</div>',
+            unsafe_allow_html=True,
+        )
+        if not biggest_hits.empty:
+            fig = create_movers_chart(
+                biggest_hits[name_col].tolist(),
+                (biggest_hits["error"] * 100).tolist(),
+                f"Closest Projections ({stat_label})",
+                positive_color=SAGE, negative_color=SAGE,
+            )
+            st.pyplot(fig, use_container_width=True)
+            plt.close(fig)
+
+            display = biggest_hits[[name_col, stat_col, observed_col, "error"]].copy()
+            for c in [stat_col, observed_col, "error"]:
+                display[c] = (display[c] * 100).round(1)
+            display.columns = [
+                "Player",
+                f"Projected {stat_label}",
+                f"Actual {stat_label}",
+                "Error (pp)",
+            ]
+            st.dataframe(display, use_container_width=True, hide_index=True)
+
+    with chart_col2:
+        st.markdown(
+            f'<div class="section-header" style="color:{EMBER};">Biggest Misses ({stat_label})</div>',
+            unsafe_allow_html=True,
+        )
+        if not biggest_misses.empty:
+            fig = create_movers_chart(
+                biggest_misses[name_col].tolist(),
+                (biggest_misses["error"] * 100).tolist(),
+                f"Largest Errors ({stat_label})",
+                positive_color=EMBER, negative_color=EMBER,
+            )
+            st.pyplot(fig, use_container_width=True)
+            plt.close(fig)
+
+            display = biggest_misses[[name_col, stat_col, observed_col, "error"]].copy()
+            for c in [stat_col, observed_col, "error"]:
+                display[c] = (display[c] * 100).round(1)
+            display.columns = [
+                "Player",
+                f"Projected {stat_label}",
+                f"Actual {stat_label}",
+                "Error (pp)",
+            ]
+            st.dataframe(display, use_container_width=True, hide_index=True)
+
+    # Summary stats
+    cols = st.columns(3)
+    with cols[0]:
+        st.markdown(metric_card(
+            "Mean Abs Error", f"{df['abs_error'].mean() * 100:.1f}pp",
+        ), unsafe_allow_html=True)
+    with cols[1]:
+        st.markdown(metric_card(
+            "Median Abs Error", f"{df['abs_error'].median() * 100:.1f}pp",
+        ), unsafe_allow_html=True)
+    with cols[2]:
+        st.markdown(metric_card(
+            "Players Evaluated", f"{len(df):,}",
+        ), unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Tab 4: Projection Movers
 # ---------------------------------------------------------------------------
 
 def _render_movers_tab() -> None:

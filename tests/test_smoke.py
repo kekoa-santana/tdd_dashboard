@@ -83,10 +83,19 @@ class TestImports:
         from lib.bf_model import get_bf_distribution  # noqa: F401
 
     def test_import_lib_game_k_model(self):
-        from lib.game_k_model import simulate_game_ks  # noqa: F401
+        from lib.game_k_model import simulate_game_ks, build_tto_logit_lifts  # noqa: F401
+
+    def test_import_lib_rest_adjustment(self):
+        from lib.rest_adjustment import get_rest_adjustment, apply_rest_to_bf  # noqa: F401
+
+    def test_import_lib_matchup_for_stat(self):
+        from lib.matchup import score_matchup_for_stat  # noqa: F401
 
     def test_import_model_performance(self):
         from views.model_performance import page_model_performance  # noqa: F401
+
+    def test_import_prospects(self):
+        from views.prospects import page_prospects  # noqa: F401
 
     def test_import_backtest_charts(self):
         from components.backtest_charts import create_accuracy_bars  # noqa: F401
@@ -341,3 +350,65 @@ class TestBacktestCharts:
             "Test Movers",
         )
         assert isinstance(fig, Figure)
+
+
+# =====================================================================
+# 7. Config schedule refresh tests
+# =====================================================================
+class TestScheduleConfig:
+    """Verify schedule refresh config values."""
+
+    def test_schedule_refresh_minutes(self):
+        from config import SCHEDULE_REFRESH_MINUTES
+        assert isinstance(SCHEDULE_REFRESH_MINUTES, int)
+        assert SCHEDULE_REFRESH_MINUTES > 0
+
+    def test_game_window_hours(self):
+        from config import GAME_WINDOW_START_HOUR, GAME_WINDOW_END_HOUR
+        assert 0 <= GAME_WINDOW_START_HOUR < 24
+        assert 0 < GAME_WINDOW_END_HOUR <= 24
+        assert GAME_WINDOW_START_HOUR < GAME_WINDOW_END_HOUR
+
+
+# =====================================================================
+# 8. MiLB data loader tests
+# =====================================================================
+class TestMilbLoaders:
+    """Verify MiLB data loaders."""
+
+    def test_load_milb_translated_batters(self, dashboard_dir):
+        import pandas as _pd
+        from services.data_loader import load_milb_translated
+        # No fixture data — should return empty gracefully
+        df = load_milb_translated("batters")
+        assert isinstance(df, _pd.DataFrame)
+
+    def test_load_milb_factors_missing(self, dashboard_dir):
+        import pandas as _pd
+        from services.data_loader import load_milb_factors
+        df = load_milb_factors("batter")
+        assert isinstance(df, _pd.DataFrame)
+
+
+# =====================================================================
+# 9. Rest adjustment tests
+# =====================================================================
+class TestRestAdjustment:
+    """Verify rest adjustment module."""
+
+    def test_classify_rest_bucket(self):
+        from lib.rest_adjustment import classify_rest_bucket
+        assert classify_rest_bucket(3) == "short"
+        assert classify_rest_bucket(5) == "normal"
+        assert classify_rest_bucket(7) == "extended"
+        assert classify_rest_bucket(None) == "normal"
+
+    def test_apply_rest_to_bf(self):
+        from lib.rest_adjustment import apply_rest_to_bf
+        mu, sigma = apply_rest_to_bf(23.0, 3.5, 3)  # short rest
+        assert mu < 23.0  # should reduce BF
+        assert sigma > 3.5  # should increase variance
+
+        mu_n, sigma_n = apply_rest_to_bf(23.0, 3.5, 5)  # normal rest
+        assert mu_n == 23.0
+        assert sigma_n == 3.5
