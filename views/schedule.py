@@ -1,5 +1,7 @@
-"""Schedule page — Today's Games + Game Browser combined."""
+"""Schedule page — Today's Games (with live updates) + Game Browser combined."""
 from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
@@ -8,23 +10,123 @@ import streamlit as st
 from config import (
     GOLD, EMBER, SAGE, SLATE, CREAM, DARK_CARD, DARK_BORDER,
     POSITIVE, NEGATIVE, DASHBOARD_DIR, PRIOR_SEASON,
+    SCHEDULE_REFRESH_MINUTES, GAME_WINDOW_START_HOUR, GAME_WINDOW_END_HOUR,
 )
 from services.data_loader import (
     load_todays_games, load_todays_sims, load_todays_lineups,
     load_update_metadata, load_pitcher_arsenal, load_hitter_vulnerability,
     load_projections, load_game_info, load_player_teams,
+    fetch_live_schedule, fetch_live_lineups,
 )
 from utils.helpers import get_team_lookup
 from components.metric_cards import metric_card
 
 
+def _is_game_window() -> bool:
+    """Check if current ET time is within the game window."""
+    # Approximate ET as UTC-4 (EDT during baseball season)
+    utc_now = datetime.now(timezone.utc)
+    et_now = utc_now - timedelta(hours=4)
+    return GAME_WINDOW_START_HOUR <= et_now.hour < GAME_WINDOW_END_HOUR
+
+
+def _staleness_indicator(ts_str: str | None) -> str:
+    """Return colored staleness indicator HTML based on timestamp age."""
+    if not ts_str:
+        return f'<span style="color:{SLATE};">unknown</span>'
+    try:
+        ts = datetime.fromisoformat(ts_str)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - ts
+        minutes = age.total_seconds() / 60
+        if minutes < 15:
+            color = SAGE
+        elif minutes < 60:
+            color = GOLD
+        else:
+            color = EMBER
+        return (
+            f'<span style="color:{color};">●</span> '
+            f'{ts.strftime("%I:%M %p")}'
+        )
+    except Exception:
+        return f'<span style="color:{SLATE};">unknown</span>'
+
+
 def _render_todays_games() -> None:
-    """Today's MLB games with matchup analysis and K prop projections."""
+    """Today's MLB games with matchup analysis and K prop projections.
+
+    During game windows, auto-refreshes schedule/lineup data from MLB API
+    every 10 minutes via st.fragment. Projection data stays cached from
+    the morning update.
+    """
     meta = load_update_metadata()
-    schedule = load_todays_games()
     sims = load_todays_sims()
+
+    in_game_window = _is_game_window()
+
+    # --- Live schedule data (fragment auto-reruns during game windows) ---
+    if in_game_window:
+        _render_live_schedule_fragment(meta, sims)
+    else:
+        _render_cached_schedule(meta, sims)
+
+
+@st.fragment(run_every=timedelta(minutes=SCHEDULE_REFRESH_MINUTES))
+def _render_live_schedule_fragment(
+    meta: dict,
+    sims: pd.DataFrame,
+) -> None:
+    """Fragment that auto-reruns to poll MLB API for fresh schedule data."""
+    schedule = fetch_live_schedule()
+    lineups = fetch_live_lineups(schedule) if not schedule.empty else pd.DataFrame()
+
+    live_ts = datetime.now(timezone.utc).isoformat()
+    proj_ts = meta.get("last_updated")
+
+    # Refresh button
+    col_info, col_btn = st.columns([4, 1])
+    with col_info:
+        st.markdown(
+            f'<div style="color:{SLATE}; font-size:0.85rem;">'
+            f'Projections from: {_staleness_indicator(proj_ts)} '
+            f'&nbsp;|&nbsp; Schedule updated: {_staleness_indicator(live_ts)}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    with col_btn:
+        if st.button("Refresh", key="schedule_refresh"):
+            st.cache_data.clear()
+            st.rerun()
+
+    _render_schedule_cards(schedule, sims, lineups, meta)
+
+
+def _render_cached_schedule(meta: dict, sims: pd.DataFrame) -> None:
+    """Render schedule from cached parquets (outside game window)."""
+    schedule = load_todays_games()
     lineups = load_todays_lineups()
 
+    proj_ts = meta.get("last_updated")
+    st.markdown(
+        f'<div style="color:{SLATE}; font-size:0.85rem;">'
+        f'Projections from: {_staleness_indicator(proj_ts)} '
+        f'&nbsp;|&nbsp; <span style="color:{SLATE};">Outside game window — using cached data</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    _render_schedule_cards(schedule, sims, lineups, meta)
+
+
+def _render_schedule_cards(
+    schedule: pd.DataFrame,
+    sims: pd.DataFrame,
+    lineups: pd.DataFrame,
+    meta: dict,
+) -> None:
+    """Render game cards from schedule + sim + lineup data."""
     if schedule.empty:
         game_date = meta.get("game_date", "")
         st.info(
@@ -36,18 +138,9 @@ def _render_todays_games() -> None:
     game_date = schedule.iloc[0].get("game_date", "")
     n_games = len(schedule)
 
-    updated_str = ""
-    if meta.get("last_updated"):
-        try:
-            from datetime import datetime as _dt
-            ts = _dt.fromisoformat(meta["last_updated"])
-            updated_str = f" | Updated {ts.strftime('%I:%M %p')}"
-        except Exception:
-            pass
-
     st.markdown(
         f'<div style="color:{SLATE}; font-size:0.9rem; margin-bottom:1rem;">'
-        f'{game_date} | {n_games} games{updated_str}'
+        f'{game_date} | {n_games} games'
         f'</div>',
         unsafe_allow_html=True,
     )
@@ -79,7 +172,16 @@ def _render_todays_games() -> None:
         away_sim = game_sims[game_sims["side"] == "away"].iloc[0] if not game_sims.empty and (game_sims["side"] == "away").any() else None
         home_sim = game_sims[game_sims["side"] == "home"].iloc[0] if not game_sims.empty and (game_sims["side"] == "home").any() else None
 
-        status_str = f" — {status}" if status and "Scheduled" not in status else ""
+        # Status styling — highlight live games
+        status_str = ""
+        if status:
+            if status in ("In Progress", "Live"):
+                status_str = f' — <span style="color:{SAGE};">● {status}</span>'
+            elif "Final" in status:
+                status_str = f' — <span style="color:{SLATE};">{status}</span>'
+            elif "Scheduled" not in status:
+                status_str = f" — {status}"
+
         st.markdown(
             f'<div style="background:{DARK_CARD}; border:1px solid {DARK_BORDER}; '
             f'border-radius:8px; padding:1rem 1.5rem; margin-bottom:1rem;">'
@@ -140,6 +242,7 @@ def _render_todays_games() -> None:
         st.markdown('</div>', unsafe_allow_html=True)
 
         if not lineups.empty:
+            # Match lineups — handle both parquet format (player_id) and live API format (batter_id)
             game_lu = lineups[lineups["game_pk"] == gpk]
             if not game_lu.empty:
                 with st.expander(f"Lineup Details — {away_abbr} @ {home_abbr}"):
@@ -151,6 +254,8 @@ def _render_todays_games() -> None:
                             continue
 
                         pitcher_name = sim["pitcher_name"]
+
+                        # Try both team_id matching approaches
                         opp_team_id = game.get(f"{'home' if side == 'away' else 'away'}_team_id")
                         opp_lu = game_lu[game_lu["team_id"] == opp_team_id].sort_values("batting_order")
 
@@ -165,10 +270,11 @@ def _render_todays_games() -> None:
                         )
 
                         lu_rows = []
+                        name_col = "batter_name" if "batter_name" in opp_lu.columns else "player_name"
                         for _, brow in opp_lu.head(9).iterrows():
                             lu_rows.append({
                                 "#": int(brow["batting_order"]),
-                                "Batter": brow.get("batter_name", "Unknown"),
+                                "Batter": brow.get(name_col, "Unknown"),
                             })
 
                         if lu_rows:

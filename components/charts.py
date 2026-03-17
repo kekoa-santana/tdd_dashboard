@@ -13,7 +13,35 @@ from config import (
     PITCH_DISPLAY, PITCH_TYPE_TO_FAMILY, PITCH_FAMILY_COLORS,
     PRIOR_SEASON, CURRENT_SEASON,
 )
-from lib.theme import add_watermark
+from lib.theme import add_watermark as _theme_watermark
+
+
+def add_watermark(fig) -> None:
+    """Dashboard-specific watermark that scales to figure size."""
+    try:
+        from tdd_theme import LOGO_PATH
+        import matplotlib.image as mpimg
+        from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+
+        if not LOGO_PATH.exists():
+            return
+        logo_img = mpimg.imread(str(LOGO_PATH))
+        # Scale zoom to figure size — smaller charts get smaller watermarks
+        w, h = fig.get_size_inches()
+        zoom = min(w, h) * 0.04  # ~0.12–0.16 for typical 3–4 inch charts
+        zoom = max(0.08, min(zoom, 0.25))  # clamp range
+        imagebox = OffsetImage(logo_img, zoom=zoom, alpha=0.025)
+        imagebox.image.axes = fig.axes[0] if fig.axes else None
+        ab = AnnotationBbox(
+            imagebox, (0.5, 0.5),
+            xycoords="figure fraction",
+            frameon=False,
+            box_alignment=(0.5, 0.5),
+            zorder=0,
+        )
+        fig.add_artist(ab)
+    except (ImportError, Exception):
+        _theme_watermark(fig)
 from utils.formatters import whiff_quality_color, xwoba_quality_color
 
 

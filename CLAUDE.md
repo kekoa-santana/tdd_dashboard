@@ -35,19 +35,21 @@ tdd-dashboard/
 │   ├── bf_model.py               # Batters-faced distribution lookup
 │   ├── game_k_model.py           # Game K Monte Carlo simulator
 │   ├── zone_charts.py            # Pitcher location + hitter zone heatmaps
+│   ├── rest_adjustment.py        # Days-rest K/BB/BF adjustments
 │   ├── in_season_updater.py      # Beta-Binomial conjugate updating
 │   ├── schedule.py               # MLB Stats API schedule/lineup fetcher
 │   └── db.py                     # SQLAlchemy read_sql helper
 ├── pages/                        # Modular dashboard pages
-│   ├── schedule.py               # Today's Games + Game Browser (unified)
+│   ├── schedule.py               # Today's Games (live refresh) + Game Browser
 │   ├── projections.py            # Projections + Stats (unified)
 │   ├── player_profile.py         # Full player analytics page
 │   ├── team_overview.py          # Team identity and roster analysis
 │   ├── matchup_explorer.py       # Pitcher vs batter matchup scoring
 │   ├── game_k_sim.py             # Interactive K prop simulator
 │   ├── preseason_snapshot.py     # Preseason vs current comparison
+│   ├── prospects.py              # MiLB translated prospect stats
 │   ├── data_health.py            # Data freshness and manifest validation
-│   └── model_performance.py      # Model accuracy and backtest results
+│   └── model_performance.py      # Model accuracy, backtest, hits/misses
 ├── components/                   # Shared UI components
 │   ├── charts.py                 # Common chart utilities
 │   ├── tables.py                 # Data table components
@@ -79,8 +81,9 @@ tdd-dashboard/
 5. **Matchup Explorer** — Pitcher vs batter matchup scoring with zone overlay
 6. **Game K Simulator** — Interactive K prop simulator (lineup, umpire, weather controls)
 7. **Preseason Snapshot** — Compare current vs preseason projections
-8. **Data Health** — Data freshness, artifact inventory, manifest validation
-9. **Model Performance** — Predicted vs actual tracking, backtest results, calibration curves
+8. **Prospects** — MiLB translated stats, MLB-equivalent projections by level
+9. **Data Health** — Data freshness, artifact inventory, manifest validation
+10. **Model Performance** — Predicted vs actual tracking, backtest results, biggest hits/misses, calibration curves
 
 ## Data Flow
 
@@ -166,4 +169,4 @@ python scripts/update_in_season.py --snapshot          # force a weekly projecti
 - **Season selector** on Player Profile, Projections, Stats pages — any season 2018-2025 + career + 2026 projection
 - **Pre-2022 batted ball warning** — Statcast coverage unreliable before 2022, affected stats are hidden
 - **Contract validation** — manifest.json validates artifact schemas and row counts on startup
-- **Automated testing** — 41 smoke tests ensure all pages render with fixture data
+- **Automated testing** — 62 smoke tests ensure all pages render with fixture data

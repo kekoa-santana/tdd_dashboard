@@ -18,7 +18,7 @@ import matplotlib as mpl
 # ---------------------------------------------------------------------------
 try:
     from tdd_theme import (                       # noqa: F401 -- re-exports
-        GOLD, EMBER, SAGE, SLATE, CREAM, DARK,
+        GOLD, EMBER, SAGE, SLATE, CREAM, DARK, DARK_CARD, DARK_BORDER,
         apply_theme, add_watermark, add_brand_footer, add_header,
         save_card, format_pct,
         ASPECT_SIZES, SUBTITLE_PRESETS, LOGO_PATH,
@@ -63,9 +63,12 @@ except ImportError:
         })
 
     def add_watermark(fig) -> None:
+        # Scale font size to figure dimensions so watermark fits consistently
+        w, h = fig.get_size_inches()
+        fontsize = min(w, h) * 5  # ~15-25pt for typical 3-5 inch charts
         fig.text(
             0.5, 0.5, "TheDataDiamond",
-            fontsize=60, color=SLATE, alpha=0.03,
+            fontsize=fontsize, color=SLATE, alpha=0.02,
             ha="center", va="center", rotation=30,
             transform=fig.transFigure, zorder=0,
         )

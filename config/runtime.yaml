@@ -15,3 +15,8 @@ game_types_in_scope:
 
 # Schema version for artifact contracts
 schema_version: 1
+
+# Live schedule refresh settings
+schedule_refresh_interval_minutes: 10
+game_window_start_hour: 11   # ET, earliest MLB game time
+game_window_end_hour: 24     # ET, latest game end
