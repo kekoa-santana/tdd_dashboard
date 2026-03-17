@@ -19,12 +19,6 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Data (tracked separately or synced from projection repo)
-data/dashboard/*.parquet
-data/dashboard/*.npz
-data/dashboard/*.json
-data/dashboard/snapshots/
-
 # Environment
 .env
 
