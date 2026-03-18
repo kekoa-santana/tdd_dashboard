@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from config import EMBER, GOLD, SAGE, SLATE
+from config import EMBER, GOLD, SAGE, SLATE, CREAM, DARK_BORDER
 from services.data_loader import (
     load_baselines_arch,
     load_cluster_metadata,
@@ -19,6 +19,8 @@ from services.data_loader import (
     load_pitcher_location_grid,
     load_pitcher_offerings,
     load_projections,
+    load_hitter_archetypes, load_pitcher_archetypes,
+    load_archetype_matchup_matrix,
 )
 from utils.formatters import delta_html, fmt_pct
 from utils.helpers import get_team_lookup
@@ -462,6 +464,103 @@ def page_matchup_explorer() -> None:
                     f'<div class="insight-card">{h_table}</div>',
                     unsafe_allow_html=True,
                 )
+
+    # --- Archetype Matchup Matrix ---
+    _mm_df = load_archetype_matchup_matrix()
+    if not _mm_df.empty:
+        st.markdown('<div class="section-header">Archetype Matchup Matrix</div>',
+                    unsafe_allow_html=True)
+
+        # Determine selected player archetypes for highlighting
+        _p_arch_df = load_pitcher_archetypes()
+        _h_arch_df = load_hitter_archetypes()
+        _sel_p_arch = None
+        _sel_h_arch = None
+        if not _p_arch_df.empty:
+            _pa_row = _p_arch_df[_p_arch_df["pitcher_id"] == pitcher_id]
+            if not _pa_row.empty:
+                _sel_p_arch = _pa_row.iloc[0]["archetype_name"]
+        if not _h_arch_df.empty:
+            _ha_row = _h_arch_df[_h_arch_df["batter_id"] == batter_id]
+            if not _ha_row.empty:
+                _sel_h_arch = _ha_row.iloc[0]["archetype_name"]
+
+        _mm_stat = st.radio(
+            "Stat", ["K%", "BB%", "HR%"], horizontal=True, key="mm_stat",
+        )
+        _stat_col = {"K%": "k_pct", "BB%": "bb_pct", "HR%": "hr_pct"}[_mm_stat]
+
+        # Pivot to matrix
+        _pivot = _mm_df.pivot(
+            index="pitcher_archetype_name",
+            columns="hitter_archetype_name",
+            values=_stat_col,
+        )
+        _p_names = _pivot.index.tolist()
+        _h_names = _pivot.columns.tolist()
+
+        # Color scale: for K% higher → ember, lower → sage; for BB%/HR% higher → ember, lower → sage
+        _all_vals = _pivot.values.flatten()
+        _vmin, _vmax = float(_all_vals.min()), float(_all_vals.max())
+
+        def _cell_color(val: float) -> str:
+            if _vmax == _vmin:
+                return SLATE
+            t = (val - _vmin) / (_vmax - _vmin)
+            if _mm_stat == "K%":
+                # Higher K% → ember (pitcher advantage)
+                return EMBER if t > 0.66 else SAGE if t < 0.33 else SLATE
+            else:
+                # Higher BB%/HR% → ember (hitter advantage)
+                return EMBER if t > 0.66 else SAGE if t < 0.33 else SLATE
+
+        # Build HTML table
+        _hdr = "".join(
+            f'<th style="padding:6px 8px; font-size:0.75rem; color:'
+            f'{GOLD if name == _sel_h_arch else CREAM}; '
+            f'{"font-weight:700; text-decoration:underline;" if name == _sel_h_arch else ""}'
+            f'border-bottom:1px solid {DARK_BORDER};">{name}</th>'
+            for name in _h_names
+        )
+        _rows = ""
+        for p_name in _p_names:
+            _is_sel_row = (p_name == _sel_p_arch)
+            _row_label_style = (
+                f'color:{GOLD}; font-weight:700; text-decoration:underline;'
+                if _is_sel_row else f'color:{CREAM};'
+            )
+            _cells = f'<td style="padding:6px 8px; {_row_label_style} font-size:0.8rem; white-space:nowrap;">{p_name}</td>'
+            for h_name in _h_names:
+                val = _pivot.loc[p_name, h_name]
+                color = _cell_color(val)
+                _is_highlight = _is_sel_row or (h_name == _sel_h_arch)
+                _bg = f"{color}33" if _is_highlight else f"{color}18"
+                _fw = "700" if _is_highlight else "400"
+                _cells += (
+                    f'<td style="padding:6px 8px; text-align:center; font-size:0.8rem; '
+                    f'color:{color}; font-weight:{_fw}; background:{_bg};">'
+                    f'{val:.1%}</td>'
+                )
+            _rows += f'<tr style="border-bottom:1px solid {DARK_BORDER}22;">{_cells}</tr>'
+
+        _matrix_html = (
+            f'<table style="width:100%; border-collapse:collapse;">'
+            f'<thead><tr><th style="padding:6px 8px;"></th>{_hdr}</tr></thead>'
+            f'<tbody>{_rows}</tbody></table>'
+        )
+        st.markdown(f'<div class="insight-card">{_matrix_html}</div>', unsafe_allow_html=True)
+
+        _highlight_parts = []
+        if _sel_p_arch:
+            _highlight_parts.append(f"{selected_pitcher} → **{_sel_p_arch}** (row highlighted)")
+        if _sel_h_arch:
+            _highlight_parts.append(f"{selected_hitter} → **{_sel_h_arch}** (column highlighted)")
+        if _highlight_parts:
+            st.caption(" | ".join(_highlight_parts))
+        st.caption(
+            f"6×6 matrix of historical {_mm_stat} by pitcher/hitter archetype pair. "
+            "Red = higher rate, green = lower rate."
+        )
 
     # --- Scouting report ---
     st.markdown('<div class="section-header">Matchup Scouting Report</div>',

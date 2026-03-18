@@ -15,7 +15,8 @@ from config import (
 from services.data_loader import (
     load_todays_games, load_todays_sims, load_todays_lineups,
     load_update_metadata, load_pitcher_arsenal, load_hitter_vulnerability,
-    load_projections, load_game_info, load_player_teams,
+    load_projections, load_counting, load_game_info, load_player_teams,
+    load_hitter_archetypes, load_pitcher_archetypes,
     fetch_live_schedule, fetch_live_lineups,
 )
 from utils.helpers import get_team_lookup
@@ -143,6 +144,40 @@ def _render_schedule_cards(
     meta: dict,
 ) -> None:
     """Render game cards from schedule + sim + lineup data."""
+    # Pre-build archetype + projection lookups for enrichment
+    _h_arch = load_hitter_archetypes()
+    _p_arch = load_pitcher_archetypes()
+    _h_proj = load_projections("hitter")
+    _h_count = load_counting("hitter")
+
+    # Hitter archetype lookup: batter_id → archetype_name
+    _h_arch_lookup: dict[int, str] = {}
+    if not _h_arch.empty:
+        for _, _r in _h_arch.iterrows():
+            _h_arch_lookup[int(_r["batter_id"])] = _r["archetype_name"]
+
+    # Pitcher archetype lookup: pitcher_id → archetype_name
+    _p_arch_lookup: dict[int, str] = {}
+    if not _p_arch.empty:
+        for _, _r in _p_arch.iterrows():
+            _p_arch_lookup[int(_r["pitcher_id"])] = _r["archetype_name"]
+
+    # Hitter projection lookup: batter_id → {k_rate, bb_rate, hr}
+    _h_stat_lookup: dict[int, dict] = {}
+    if not _h_proj.empty:
+        for _, _r in _h_proj.iterrows():
+            _h_stat_lookup[int(_r["batter_id"])] = {
+                "k_rate": _r.get("projected_k_rate"),
+                "bb_rate": _r.get("projected_bb_rate"),
+            }
+    if not _h_count.empty and "batter_id" in _h_count.columns:
+        for _, _r in _h_count.iterrows():
+            bid = int(_r["batter_id"])
+            if bid in _h_stat_lookup:
+                _h_stat_lookup[bid]["hr"] = _r.get("total_hr_mean")
+            else:
+                _h_stat_lookup[bid] = {"k_rate": None, "bb_rate": None, "hr": _r.get("total_hr_mean")}
+
     if schedule.empty:
         game_date = meta.get("game_date", "")
         st.info(
@@ -239,6 +274,11 @@ def _render_schedule_cards(
                 if not pp_name:
                     pp_name = "TBD"
 
+                # Append pitcher archetype if available
+                _pp_id = game.get(pitcher_id_field)
+                _pp_arch = _p_arch_lookup.get(int(_pp_id)) if pd.notna(_pp_id) else None
+                _pp_arch_tag = f' <span style="color:{SLATE}; font-size:0.8rem;">({_pp_arch})</span>' if _pp_arch else ""
+
                 if sim is not None:
                     k_rate_pct = sim["projected_k_rate"] * 100
                     exp_k = sim["expected_k"]
@@ -260,7 +300,7 @@ def _render_schedule_cards(
 
                     st.markdown(
                         f'<div style="font-size:0.95rem; font-weight:600; color:{CREAM};">'
-                        f'{side_label}: {pp_name}</div>'
+                        f'{side_label}: {pp_name}{_pp_arch_tag}</div>'
                         f'<div style="font-size:0.8rem; color:{SLATE}; margin-top:2px;">'
                         f'K%: {k_rate_pct:.1f}% | E[K]: {exp_k:.1f}{lineup_tag}</div>'
                         f'<div style="font-size:0.8rem; margin-top:2px;">{p_line_html}</div>',
@@ -277,7 +317,7 @@ def _render_schedule_cards(
                         bb_html = f" | BB%: {bb_pct * 100:.1f}%" if pd.notna(bb_pct) else ""
                         st.markdown(
                             f'<div style="font-size:0.95rem; font-weight:600; color:{CREAM};">'
-                            f'{side_label}: {pp_name}</div>'
+                            f'{side_label}: {pp_name}{_pp_arch_tag}</div>'
                             f'<div style="font-size:0.8rem; color:{SLATE}; margin-top:2px;">'
                             f'K%: {k_pct:.1f}%{bb_html} (projection)</div>',
                             unsafe_allow_html=True,
@@ -285,7 +325,7 @@ def _render_schedule_cards(
                     else:
                         st.markdown(
                             f'<div style="font-size:0.95rem; font-weight:600; color:{CREAM};">'
-                            f'{side_label}: {pp_name}</div>'
+                            f'{side_label}: {pp_name}{_pp_arch_tag}</div>'
                             f'<div style="font-size:0.8rem; color:{SLATE};">No projection available</div>',
                             unsafe_allow_html=True,
                         )
@@ -325,11 +365,24 @@ def _render_schedule_cards(
 
                         lu_rows = []
                         name_col = "batter_name" if "batter_name" in opp_lu.columns else "player_name"
+                        id_col = "batter_id" if "batter_id" in opp_lu.columns else "player_id"
                         for _, brow in opp_lu.head(9).iterrows():
-                            lu_rows.append({
+                            _bid = int(brow[id_col]) if pd.notna(brow.get(id_col)) else None
+                            _row_data: dict[str, object] = {
                                 "#": int(brow["batting_order"]),
                                 "Batter": brow.get(name_col, "Unknown"),
-                            })
+                            }
+                            if _bid and _h_arch_lookup:
+                                _row_data["Type"] = _h_arch_lookup.get(_bid, "")
+                            if _bid and _h_stat_lookup:
+                                _st = _h_stat_lookup.get(_bid, {})
+                                _k = _st.get("k_rate")
+                                _bb = _st.get("bb_rate")
+                                _hr = _st.get("hr")
+                                _row_data["K%"] = f"{_k:.1%}" if pd.notna(_k) else ""
+                                _row_data["BB%"] = f"{_bb:.1%}" if pd.notna(_bb) else ""
+                                _row_data["HR"] = int(round(_hr)) if pd.notna(_hr) else ""
+                            lu_rows.append(_row_data)
 
                         if lu_rows:
                             st.dataframe(

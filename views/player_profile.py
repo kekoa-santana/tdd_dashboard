@@ -47,6 +47,8 @@ from services.data_loader import (
     load_hitter_aggressiveness, load_hitter_aggressiveness_all,
     load_pitcher_efficiency, load_pitcher_efficiency_all,
     load_full_stats, load_preseason_injuries,
+    load_hitter_archetypes, load_pitcher_archetypes,
+    load_archetype_matchup_matrix,
     season_selector,
 )
 from utils.helpers import get_team_lookup, get_injury_lookup
@@ -1034,6 +1036,20 @@ def page_player_profile() -> None:
     if tier_label:
         header_parts.append(f"Skill Tier: {tier_label}")
 
+    # Archetype badge
+    if player_type == "Pitcher":
+        _arch_df = load_pitcher_archetypes()
+        if not _arch_df.empty:
+            _arch_row = _arch_df[_arch_df["pitcher_id"] == player_id]
+            if not _arch_row.empty:
+                header_parts.append(_arch_row.iloc[0]["archetype_name"])
+    else:
+        _arch_df = load_hitter_archetypes()
+        if not _arch_df.empty:
+            _arch_row = _arch_df[_arch_df["batter_id"] == player_id]
+            if not _arch_row.empty:
+                header_parts.append(_arch_row.iloc[0]["archetype_name"])
+
     # Park factor for hitters
     if player_type == "Hitter":
         counting_df = load_counting("hitter")
@@ -1330,6 +1346,42 @@ def page_player_profile() -> None:
                     bullets.append((POSITIVE, f"Home park boosts HR rate (park factor {_pf:.3f}). Projected HRs adjusted up."))
                 elif pd.notna(_pf) and _pf < 0.97:
                     bullets.append((NEGATIVE, f"Home park suppresses HR rate (park factor {_pf:.3f}). Projected HRs adjusted down."))
+
+    # Archetype classification + matchup insight
+    _arch_df_scout = load_hitter_archetypes() if player_type == "Hitter" else load_pitcher_archetypes()
+    _id_col_arch = "batter_id" if player_type == "Hitter" else "pitcher_id"
+    if not _arch_df_scout.empty:
+        _arch_match = _arch_df_scout[_arch_df_scout[_id_col_arch] == player_id]
+        if not _arch_match.empty:
+            _a_name = _arch_match.iloc[0]["archetype_name"]
+            _a_desc = _arch_match.iloc[0]["archetype_desc"]
+            bullets.append((GOLD, f"Classified as <b>{_a_name}</b> — {_a_desc.lower()}."))
+
+            # Matchup edge from matrix
+            _mm = load_archetype_matchup_matrix()
+            if not _mm.empty:
+                if player_type == "Hitter":
+                    _mm_sub = _mm[_mm["hitter_archetype_name"] == _a_name]
+                    if not _mm_sub.empty:
+                        _worst = _mm_sub.loc[_mm_sub["k_pct"].idxmax()]
+                        _best = _mm_sub.loc[_mm_sub["k_pct"].idxmin()]
+                        bullets.append((
+                            SLATE,
+                            f"{_a_name} hitters see highest K% vs "
+                            f"<b>{_worst['pitcher_archetype_name']}</b> ({_worst['k_pct']:.1%}), "
+                            f"lowest vs <b>{_best['pitcher_archetype_name']}</b> ({_best['k_pct']:.1%})."
+                        ))
+                else:
+                    _mm_sub = _mm[_mm["pitcher_archetype_name"] == _a_name]
+                    if not _mm_sub.empty:
+                        _best_k = _mm_sub.loc[_mm_sub["k_pct"].idxmax()]
+                        _worst_k = _mm_sub.loc[_mm_sub["k_pct"].idxmin()]
+                        bullets.append((
+                            SLATE,
+                            f"{_a_name} pitchers get highest K% vs "
+                            f"<b>{_best_k['hitter_archetype_name']}</b> ({_best_k['k_pct']:.1%}), "
+                            f"lowest vs <b>{_worst_k['hitter_archetype_name']}</b> ({_worst_k['k_pct']:.1%})."
+                        ))
 
     if bullets:
         bullet_html = "".join(
