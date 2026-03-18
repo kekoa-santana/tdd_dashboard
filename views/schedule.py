@@ -120,6 +120,22 @@ def _render_cached_schedule(meta: dict, sims: pd.DataFrame) -> None:
     _render_schedule_cards(schedule, sims, lineups, meta)
 
 
+def _build_projection_lookup() -> dict:
+    """Build pitcher_id → projection dict from pitcher_projections.parquet."""
+    proj = load_projections("pitcher")
+    if proj.empty or "pitcher_id" not in proj.columns:
+        return {}
+    lookup = {}
+    for _, row in proj.iterrows():
+        lookup[int(row["pitcher_id"])] = {
+            "projected_k_rate": row.get("projected_k_rate"),
+            "pitcher_name": row.get("pitcher_name", ""),
+            "projected_bb_rate": row.get("projected_bb_rate"),
+            "composite_score": row.get("composite_score"),
+        }
+    return lookup
+
+
 def _render_schedule_cards(
     schedule: pd.DataFrame,
     sims: pd.DataFrame,
@@ -137,6 +153,25 @@ def _render_schedule_cards(
 
     game_date = schedule.iloc[0].get("game_date", "")
     n_games = len(schedule)
+
+    # Check if sims are stale (different date than schedule)
+    sims_stale = False
+    if not sims.empty and "game_pk" in sims.columns:
+        sims_gpks = set(sims["game_pk"].tolist())
+        sched_gpks = set(schedule["game_pk"].tolist())
+        sims_stale = len(sims_gpks & sched_gpks) == 0
+
+    # Load projection fallback if sims are stale or empty
+    proj_lookup = _build_projection_lookup() if (sims.empty or sims_stale) else {}
+
+    if sims_stale:
+        st.markdown(
+            f'<div style="color:{EMBER}; font-size:0.85rem; margin-bottom:0.5rem;">'
+            f'Simulations are from a previous date — showing base projections. '
+            f'Run <code>python scripts/update_in_season.py</code> to update.'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
     st.markdown(
         f'<div style="color:{SLATE}; font-size:0.9rem; margin-bottom:1rem;">'
@@ -195,9 +230,9 @@ def _render_schedule_cards(
 
         col_a, col_h = st.columns(2)
 
-        for col, sim, side_label, pitcher_name_field in [
-            (col_a, away_sim, f"{away_abbr} SP", "away_pitcher_name"),
-            (col_h, home_sim, f"{home_abbr} SP", "home_pitcher_name"),
+        for col, sim, side_label, pitcher_name_field, pitcher_id_field in [
+            (col_a, away_sim, f"{away_abbr} SP", "away_pitcher_name", "away_pitcher_id"),
+            (col_h, home_sim, f"{home_abbr} SP", "home_pitcher_name", "home_pitcher_id"),
         ]:
             with col:
                 pp_name = game.get(pitcher_name_field, "TBD")
@@ -232,12 +267,28 @@ def _render_schedule_cards(
                         unsafe_allow_html=True,
                     )
                 else:
-                    st.markdown(
-                        f'<div style="font-size:0.95rem; font-weight:600; color:{CREAM};">'
-                        f'{side_label}: {pp_name}</div>'
-                        f'<div style="font-size:0.8rem; color:{SLATE};">No projection available</div>',
-                        unsafe_allow_html=True,
-                    )
+                    # Fallback: show projection K% from pitcher_projections
+                    pid = game.get(pitcher_id_field)
+                    proj_info = proj_lookup.get(int(pid)) if pd.notna(pid) else None
+
+                    if proj_info and pd.notna(proj_info.get("projected_k_rate")):
+                        k_pct = proj_info["projected_k_rate"] * 100
+                        bb_pct = proj_info.get("projected_bb_rate")
+                        bb_html = f" | BB%: {bb_pct * 100:.1f}%" if pd.notna(bb_pct) else ""
+                        st.markdown(
+                            f'<div style="font-size:0.95rem; font-weight:600; color:{CREAM};">'
+                            f'{side_label}: {pp_name}</div>'
+                            f'<div style="font-size:0.8rem; color:{SLATE}; margin-top:2px;">'
+                            f'K%: {k_pct:.1f}%{bb_html} (projection)</div>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f'<div style="font-size:0.95rem; font-weight:600; color:{CREAM};">'
+                            f'{side_label}: {pp_name}</div>'
+                            f'<div style="font-size:0.8rem; color:{SLATE};">No projection available</div>',
+                            unsafe_allow_html=True,
+                        )
 
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -246,16 +297,19 @@ def _render_schedule_cards(
             game_lu = lineups[lineups["game_pk"] == gpk]
             if not game_lu.empty:
                 with st.expander(f"Lineup Details — {away_abbr} @ {home_abbr}"):
-                    for sim, side, opp_label in [
-                        (away_sim, "away", home_abbr),
-                        (home_sim, "home", away_abbr),
+                    for side, opp_label, pitcher_name_fld, pitcher_id_fld in [
+                        ("away", home_abbr, "away_pitcher_name", "away_pitcher_id"),
+                        ("home", away_abbr, "home_pitcher_name", "home_pitcher_id"),
                     ]:
-                        if sim is None:
-                            continue
+                        sim = away_sim if side == "away" else home_sim
 
-                        pitcher_name = sim["pitcher_name"]
+                        # Get pitcher name from sim or schedule
+                        if sim is not None:
+                            pitcher_name = sim["pitcher_name"]
+                        else:
+                            pitcher_name = game.get(pitcher_name_fld, "TBD") or "TBD"
 
-                        # Try both team_id matching approaches
+                        # Get opposing team's lineup
                         opp_team_id = game.get(f"{'home' if side == 'away' else 'away'}_team_id")
                         opp_lu = game_lu[game_lu["team_id"] == opp_team_id].sort_values("batting_order")
 
@@ -285,7 +339,13 @@ def _render_schedule_cards(
                                 height=350,
                             )
 
-    if not sims.empty:
+                    # If no lineups rendered for either side
+                    if game_lu[game_lu["team_id"].isin([
+                        game.get("away_team_id"), game.get("home_team_id"),
+                    ])].empty:
+                        st.caption("Lineups not yet available for this game.")
+
+    if not sims.empty and not sims_stale:
         st.markdown("---")
         st.markdown(
             f'<div style="color:{SLATE}; font-size:0.8rem;">'
