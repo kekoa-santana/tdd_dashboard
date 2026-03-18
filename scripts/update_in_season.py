@@ -12,11 +12,12 @@ to it via subprocess.
 
 Usage
 -----
-    python scripts/update_in_season.py                    # today's date
+    python scripts/update_in_season.py                    # today's date (full update)
     python scripts/update_in_season.py --date 2026-04-15  # specific date
     python scripts/update_in_season.py --skip-schedule    # skip API calls
     python scripts/update_in_season.py --skip-engine      # skip projection engine, just do bookkeeping
     python scripts/update_in_season.py --snapshot          # force a weekly snapshot
+    python scripts/update_in_season.py --schedule-only    # refresh schedule/lineups/sims only (hourly mode)
 """
 from __future__ import annotations
 
@@ -44,6 +45,167 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 SEASON = CURRENT_SEASON
+
+
+# ---------------------------------------------------------------------------
+# Schedule-only refresh (hourly mode)
+# ---------------------------------------------------------------------------
+
+def run_schedule_refresh(game_date: str) -> None:
+    """Fetch schedule/lineups and re-run sims using existing projections.
+
+    This is the lightweight hourly mode: no DB queries, no conjugate
+    updates — just MLB API calls and Monte Carlo sims with whatever
+    projections and K samples are already on disk.
+    """
+    import numpy as np
+    import pandas as pd
+    from lib.schedule import fetch_todays_schedule, fetch_all_lineups
+    from lib.game_k_model import simulate_game_ks, compute_k_over_probs
+    from lib.bf_model import get_bf_distribution
+    from lib.matchup import score_matchup
+    from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
+
+    # Fetch schedule
+    logger.info("Fetching schedule for %s...", game_date)
+    schedule = fetch_todays_schedule(game_date)
+    if schedule.empty:
+        logger.info("No games scheduled for %s", game_date)
+        return
+
+    schedule.to_parquet(DASHBOARD_DIR / "todays_games.parquet", index=False)
+    logger.info("Saved schedule: %d games", len(schedule))
+
+    # Fetch lineups
+    lineups = fetch_all_lineups(schedule)
+    if not lineups.empty:
+        lineups.to_parquet(DASHBOARD_DIR / "todays_lineups.parquet", index=False)
+        logger.info("Saved lineups: %d batters across %d games",
+                     len(lineups), lineups["game_pk"].nunique())
+    else:
+        logger.info("No lineups available yet")
+
+    # Load existing projections and K samples from disk
+    p_path = DASHBOARD_DIR / "pitcher_projections.parquet"
+    k_path = DASHBOARD_DIR / "pitcher_k_samples.npz"
+    bf_path = DASHBOARD_DIR / "bf_priors.parquet"
+    arsenal_path = DASHBOARD_DIR / "pitcher_arsenal.parquet"
+    vuln_path = DASHBOARD_DIR / "hitter_vuln_career.parquet"
+
+    if not p_path.exists() or not k_path.exists():
+        logger.warning("Missing projections or K samples — cannot simulate. "
+                        "Run a full update first.")
+        return
+
+    pitcher_proj = pd.read_parquet(p_path)
+    k_data = np.load(k_path)
+    k_samples = {k: k_data[k] for k in k_data.files}
+    bf_priors = pd.read_parquet(bf_path) if bf_path.exists() else pd.DataFrame()
+    arsenal_df = pd.read_parquet(arsenal_path) if arsenal_path.exists() else pd.DataFrame()
+    vuln_df = pd.read_parquet(vuln_path) if vuln_path.exists() else pd.DataFrame()
+
+    baselines_pt = {
+        pt: {"whiff_rate": vals.get("whiff_rate", 0.25)}
+        for pt, vals in LEAGUE_AVG_BY_PITCH_TYPE.items()
+    }
+
+    # Simulate each starter
+    logger.info("Simulating K props for today's starters...")
+    results = []
+    for _, game in schedule.iterrows():
+        gpk = game["game_pk"]
+
+        for side in ("away", "home"):
+            pid = game.get(f"{side}_pitcher_id")
+            pname = game.get(f"{side}_pitcher_name", "")
+
+            if pd.isna(pid):
+                continue
+            pid = int(pid)
+            pid_str = str(pid)
+
+            if pid_str not in k_samples:
+                logger.debug("No K samples for pitcher %s (%s) — skipping", pname, pid)
+                continue
+
+            samples = k_samples[pid_str]
+
+            # BF distribution
+            bf_info = get_bf_distribution(pid, SEASON - 1, bf_priors)
+            bf_mu = bf_info["mu_bf"]
+            bf_sigma = bf_info["sigma_bf"]
+
+            # Lineup matchup lifts
+            lineup_lifts = None
+            opp_side = "home" if side == "away" else "away"
+            opp_team_id = game.get(f"{opp_side}_team_id")
+
+            if not lineups.empty and not arsenal_df.empty and not vuln_df.empty:
+                game_lu = lineups[
+                    (lineups["game_pk"] == gpk) &
+                    (lineups["team_id"] == opp_team_id)
+                ].sort_values("batting_order")
+
+                if len(game_lu) >= 9:
+                    lifts = []
+                    for _, brow in game_lu.head(9).iterrows():
+                        bid = int(brow["batter_id"])
+                        m = score_matchup(
+                            pid, bid, arsenal_df, vuln_df, baselines_pt,
+                        )
+                        lift = m.get("matchup_k_logit_lift", 0.0)
+                        lifts.append(0.0 if np.isnan(lift) else lift)
+                    lineup_lifts = np.array(lifts)
+
+            # Simulate
+            game_ks = simulate_game_ks(
+                pitcher_k_rate_samples=samples,
+                bf_mu=float(bf_mu),
+                bf_sigma=float(bf_sigma),
+                lineup_matchup_lifts=lineup_lifts,
+                n_draws=10000,
+                random_seed=42 + gpk,
+            )
+
+            k_over = compute_k_over_probs(game_ks)
+
+            p_over_dict = {}
+            for _, kr in k_over.iterrows():
+                line = kr["line"]
+                if line in (4.5, 5.5, 6.5, 7.5):
+                    p_over_dict[f"p_over_{line:.1f}".replace(".", "_")] = kr["p_over"]
+
+            p_row = pitcher_proj[pitcher_proj["pitcher_id"] == pid]
+            proj_k_rate = float(p_row.iloc[0]["projected_k_rate"]) if not p_row.empty else np.mean(samples)
+            composite = float(p_row.iloc[0].get("composite_score", 0)) if not p_row.empty else 0.0
+
+            results.append({
+                "game_pk": gpk,
+                "side": side,
+                "pitcher_id": pid,
+                "pitcher_name": pname,
+                "team_abbr": game.get(f"{side}_abbr", ""),
+                "opp_abbr": game.get(f"{opp_side}_abbr", ""),
+                "projected_k_rate": proj_k_rate,
+                "composite_score": composite,
+                "expected_k": float(np.mean(game_ks)),
+                "k_std": float(np.std(game_ks)),
+                "median_k": float(np.median(game_ks)),
+                "has_lineup": lineup_lifts is not None,
+                "avg_matchup_lift": float(np.mean(lineup_lifts)) if lineup_lifts is not None else 0.0,
+                **p_over_dict,
+            })
+
+    if results:
+        sim_df = pd.DataFrame(results)
+        sim_df.to_parquet(DASHBOARD_DIR / "todays_sims.parquet", index=False)
+        logger.info("Saved K simulations for %d pitcher appearances", len(sim_df))
+
+        n_with_lineup = sim_df["has_lineup"].sum()
+        logger.info("  %d with lineup data, %d without",
+                     n_with_lineup, len(sim_df) - n_with_lineup)
+    else:
+        logger.warning("No pitchers could be simulated (missing K samples?)")
 
 
 # ---------------------------------------------------------------------------
@@ -124,12 +286,35 @@ def main() -> None:
                         help="Skip projection engine; only run dashboard bookkeeping.")
     parser.add_argument("--snapshot", action="store_true",
                         help="Force saving a weekly projection snapshot.")
+    parser.add_argument("--schedule-only", action="store_true",
+                        help="Refresh schedule/lineups/sims only (no projection updates).")
     args = parser.parse_args()
 
     game_date = args.date or date.today().isoformat()
     logger.info("=" * 60)
     logger.info("Dashboard update for %s (season %d)", game_date, SEASON)
     logger.info("=" * 60)
+
+    # Schedule-only mode: lightweight refresh, then exit
+    if args.schedule_only:
+        logger.info("Mode: schedule-only (hourly refresh)")
+        run_schedule_refresh(game_date)
+
+        # Update metadata timestamp
+        meta_path = DASHBOARD_DIR / "update_metadata.json"
+        if meta_path.exists():
+            with open(meta_path) as f:
+                metadata = json.load(f)
+        else:
+            metadata = {}
+        metadata["last_schedule_refresh"] = datetime.now().isoformat()
+        metadata["game_date"] = game_date
+        with open(meta_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        logger.info("=" * 60)
+        logger.info("Done! (schedule-only)")
+        return
 
     # Step 1: Run projection engine (model work lives in player_profiles)
     if not args.skip_engine:
