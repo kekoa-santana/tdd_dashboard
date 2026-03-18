@@ -348,6 +348,110 @@ def _render_prospect_rankings(df: pd.DataFrame) -> None:
     )
 
 
+# ── Pitching Prospect Rankings ───────────────────────────────────────────────
+
+def _render_pitching_prospect_rankings(df: pd.DataFrame) -> None:
+    """Render pitching prospect rankings table with filters."""
+    col_tier, col_role, col_level, col_search = st.columns([1, 1, 1, 2])
+
+    with col_tier:
+        tiers = ["All", "Elite", "Impact", "Solid", "Developing", "Org Filler"]
+        tier_filter = st.selectbox("Tier", tiers, key="rank_pp_tier")
+    with col_role:
+        roles = ["All", "SP", "RP"]
+        role_filter = st.selectbox("Role", roles, key="rank_pp_role")
+    with col_level:
+        levels = [lv for lv in _LEVEL_ORDER if lv in df["max_level"].unique()] if "max_level" in df.columns else []
+        level_filter = st.selectbox("Highest Level", ["All"] + levels, key="rank_pp_level")
+    with col_search:
+        search = st.text_input("Search prospect", key="rank_pp_search")
+
+    filtered = df.copy()
+    if tier_filter != "All" and "tdd_tier" in filtered.columns:
+        filtered = filtered[filtered["tdd_tier"] == tier_filter]
+    if role_filter != "All" and "pitcher_role" in filtered.columns:
+        filtered = filtered[filtered["pitcher_role"] == role_filter]
+    if level_filter != "All" and "max_level" in filtered.columns:
+        filtered = filtered[filtered["max_level"] == level_filter]
+    if search:
+        filtered = filtered[
+            filtered["name"].str.contains(search, case=False, na=False)
+        ]
+
+    # Summary metrics
+    cols = st.columns(4)
+    with cols[0]:
+        st.markdown(metric_card("Prospects Ranked", f"{len(filtered):,}"), unsafe_allow_html=True)
+    with cols[1]:
+        n_elite = (filtered["tdd_tier"] == "Elite").sum() if "tdd_tier" in filtered.columns else 0
+        n_impact = (filtered["tdd_tier"] == "Impact").sum() if "tdd_tier" in filtered.columns else 0
+        st.markdown(metric_card("Elite + Impact", f"{n_elite + n_impact}"), unsafe_allow_html=True)
+    with cols[2]:
+        n_fg = filtered["fg_overall_rank"].notna().sum() if "fg_overall_rank" in filtered.columns else 0
+        st.markdown(metric_card("FG Ranked", f"{int(n_fg)}"), unsafe_allow_html=True)
+    with cols[3]:
+        avg_score = filtered["tdd_prospect_score"].mean() if "tdd_prospect_score" in filtered.columns and len(filtered) > 0 else 0
+        st.markdown(metric_card("Avg TDD Score", f"{avg_score:.3f}"), unsafe_allow_html=True)
+
+    display_map = {
+        "tdd_rank": "#",
+        "name": "Player",
+        "pitcher_role": "Role",
+        "max_level": "Level",
+        "min_age": "Age",
+        "tdd_prospect_score": "TDD Score",
+        "tdd_tier": "Tier",
+        "comp_readiness": "Readiness",
+        "comp_rate_quality": "Rate Qual",
+        "comp_age": "Age Score",
+        "comp_trajectory": "Trajectory",
+        "comp_positional": "Pos Scarcity",
+        "wtd_k_pct": "K%",
+        "wtd_bb_pct": "BB%",
+        "wtd_hr_bf": "HR/BF",
+        "youngest_age_rel": "Age vs Lvl",
+        "career_milb_bf": "MiLB BF",
+        "sp_pct": "SP%",
+        "fg_future_value": "FG FV",
+        "fg_overall_rank": "FG Rank",
+    }
+
+    available = [c for c in display_map if c in filtered.columns]
+    display_df = filtered[available].copy()
+    sort_col = "tdd_rank" if "tdd_rank" in available else "tdd_prospect_score"
+    ascending = sort_col == "tdd_rank"
+    display_df = display_df.sort_values(sort_col, ascending=ascending)
+    display_df.columns = [display_map[c] for c in available]
+
+    fmt: dict[str, str] = {}
+    for col, f in [
+        ("TDD Score", "{:.3f}"), ("Readiness", "{:.3f}"), ("Rate Qual", "{:.3f}"),
+        ("Age Score", "{:.3f}"), ("Trajectory", "{:.3f}"), ("Pos Scarcity", "{:.3f}"),
+        ("K%", "{:.1%}"), ("BB%", "{:.1%}"), ("HR/BF", "{:.4f}"),
+        ("Age vs Lvl", "{:+.1f}"), ("MiLB BF", "{:,.0f}"), ("SP%", "{:.0%}"),
+        ("#", "{:.0f}"), ("Age", "{:.0f}"),
+        ("FG FV", "{:.0f}"), ("FG Rank", "{:.0f}"),
+    ]:
+        if col in display_df.columns:
+            fmt[col] = f
+
+    styler = display_df.style.format(fmt, na_rep="—")
+    if "TDD Score" in display_df.columns:
+        styler = styler.map(_score_color, subset=["TDD Score"])
+    if "Tier" in display_df.columns:
+        styler = styler.map(_style_tier, subset=["Tier"])
+
+    st.dataframe(styler, use_container_width=True, hide_index=True, height=600)
+
+    st.caption(
+        "**TDD Score** = weighted composite of Rate Quality (30%), Readiness (25%), "
+        "Age-Relative (15%), Trajectory (15%), Positional Scarcity (15%). "
+        "**K%/BB%/HR/BF** are MLB-translated MiLB stats. "
+        "**SP%** = share of appearances as a starter. "
+        "**FG FV/Rank** are FanGraphs reference values (not used in TDD scoring)."
+    )
+
+
 # ── Main page ────────────────────────────────────────────────────────────────
 
 def page_player_rankings() -> None:
@@ -364,7 +468,7 @@ def page_player_rankings() -> None:
 
     category = st.selectbox(
         "Category",
-        ["Pitchers", "Batters", "Prospects"],
+        ["Pitchers", "Batters", "Hitting Prospects", "Pitching Prospects"],
         key="rankings_category",
     )
 
@@ -388,7 +492,7 @@ def page_player_rankings() -> None:
             return
         _render_batter_rankings(df)
 
-    else:  # Prospects
+    elif category == "Hitting Prospects":
         df = load_rankings("prospect")
         if df.empty:
             st.warning(
@@ -397,3 +501,13 @@ def page_player_rankings() -> None:
             )
             return
         _render_prospect_rankings(df)
+
+    else:  # Pitching Prospects
+        df = load_rankings("pitching_prospect")
+        if df.empty:
+            st.warning(
+                "No pitching prospect rankings data found. "
+                "Run `precompute_dashboard_data.py` to generate pitching_prospect_rankings.parquet."
+            )
+            return
+        _render_pitching_prospect_rankings(df)
