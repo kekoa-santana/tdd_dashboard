@@ -16,6 +16,7 @@ from services.data_loader import (
     load_pitcher_arsenal, load_preseason_injuries,
     load_pitcher_offerings, load_hitter_vuln_arch_career,
     load_cluster_metadata, load_baselines_arch,
+    load_hitter_archetypes, load_pitcher_archetypes,
 )
 from utils.helpers import get_team_lookup, get_injury_lookup
 from utils.formatters import fmt_stat
@@ -217,6 +218,69 @@ def page_team_overview() -> None:
         )
         st.markdown(f'<div style="margin-bottom:16px;">{tags_html}</div>',
                     unsafe_allow_html=True)
+
+    # ── Roster Archetype Composition ────────────────────────────────
+    _pill_colors = {
+        # Pitcher archetypes
+        "Command Specialist": SAGE, "Breaking-Ball Heavy": EMBER,
+        "Balanced Mix": SLATE, "Power Arm": GOLD,
+        "Fastball Dominant": "#3498DB", "Ground-Ball Artist": "#9B59B6",
+        # Hitter archetypes
+        "Patient Power": GOLD, "Contact-Over-Power": SAGE,
+        "Speed Threat": "#3498DB", "Power Slugger": EMBER,
+        "Balanced All-Around": SLATE, "Free Swinger": "#9B59B6",
+    }
+    _p_arch_df = load_pitcher_archetypes()
+    _h_arch_df = load_hitter_archetypes()
+    _has_roster_arch = False
+
+    if not _p_arch_df.empty or not _h_arch_df.empty:
+        staff_pills = ""
+        lineup_pills = ""
+
+        if not _p_arch_df.empty and not team_pitchers.empty:
+            _tp_ids = set(team_pitchers["pitcher_id"].astype(int))
+            _tp_arch = _p_arch_df[_p_arch_df["pitcher_id"].isin(_tp_ids)]
+            if not _tp_arch.empty:
+                _counts = _tp_arch["archetype_name"].value_counts()
+                for name, count in _counts.items():
+                    color = _pill_colors.get(name, SLATE)
+                    staff_pills += (
+                        f'<span style="background:{color}22; color:{color}; border:1px solid {color}44; '
+                        f'padding:3px 10px; border-radius:12px; font-size:0.8rem; font-weight:600; '
+                        f'margin-right:5px; white-space:nowrap;">{count}× {name}</span>'
+                    )
+
+        if not _h_arch_df.empty and not team_hitters.empty:
+            _th_ids = set(team_hitters["batter_id"].astype(int))
+            _th_arch = _h_arch_df[_h_arch_df["batter_id"].isin(_th_ids)]
+            if not _th_arch.empty:
+                _counts = _th_arch["archetype_name"].value_counts()
+                for name, count in _counts.items():
+                    color = _pill_colors.get(name, SLATE)
+                    lineup_pills += (
+                        f'<span style="background:{color}22; color:{color}; border:1px solid {color}44; '
+                        f'padding:3px 10px; border-radius:12px; font-size:0.8rem; font-weight:600; '
+                        f'margin-right:5px; white-space:nowrap;">{count}× {name}</span>'
+                    )
+
+        if staff_pills or lineup_pills:
+            _has_roster_arch = True
+            st.markdown("### Roster Composition")
+            if staff_pills:
+                st.markdown(
+                    f'<div style="margin-bottom:8px;">'
+                    f'<span style="color:{CREAM}; font-size:0.85rem; font-weight:600; margin-right:8px;">Staff:</span>'
+                    f'{staff_pills}</div>',
+                    unsafe_allow_html=True,
+                )
+            if lineup_pills:
+                st.markdown(
+                    f'<div style="margin-bottom:12px;">'
+                    f'<span style="color:{CREAM}; font-size:0.85rem; font-weight:600; margin-right:8px;">Lineup:</span>'
+                    f'{lineup_pills}</div>',
+                    unsafe_allow_html=True,
+                )
 
     # ── Staff Arsenal Breakdown ─────────────────────────────────────
     if team_arsenal_summary is not None and not team_arsenal_summary.empty:

@@ -278,6 +278,46 @@ def load_baselines_arch() -> pd.DataFrame:
     return pd.read_parquet(path)
 
 
+@st.cache_data
+def load_hitter_archetypes() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "hitter_archetypes.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
+def load_pitcher_archetypes() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "pitcher_archetypes.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
+def load_hitter_archetype_metadata() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "hitter_archetype_metadata.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
+def load_pitcher_archetype_metadata() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "pitcher_archetype_metadata.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
+def load_archetype_matchup_matrix() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "archetype_matchup_matrix.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
 def load_update_metadata() -> dict:
     path = DASHBOARD_DIR / "update_metadata.json"
     if not path.exists():
