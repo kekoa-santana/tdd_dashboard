@@ -42,6 +42,8 @@ from services.data_loader import (
     load_hitter_strength,
     load_pitcher_location_grid, load_pitcher_location_grid_all,
     load_hitter_zone_grid, load_hitter_zone_grid_all,
+    load_pitcher_offerings, load_hitter_vuln_arch, load_hitter_vuln_arch_career,
+    load_cluster_metadata, load_baselines_arch,
     load_hitter_aggressiveness, load_hitter_aggressiveness_all,
     load_pitcher_efficiency, load_pitcher_efficiency_all,
     load_full_stats, load_preseason_injuries,
@@ -316,6 +318,37 @@ def render_pitch_profiles(
             if table_html:
                 st.markdown(f'<div class="insight-card">{table_html}</div>', unsafe_allow_html=True)
 
+        # Arsenal Archetype Map
+        offerings_df = load_pitcher_offerings()
+        cluster_meta = load_cluster_metadata()
+        if not offerings_df.empty and not cluster_meta.empty:
+            p_off = offerings_df[offerings_df["pitcher_id"] == player_id].copy()
+            if not p_off.empty:
+                p_off = p_off.merge(
+                    cluster_meta[["pitch_archetype", "archetype_name"]],
+                    on="pitch_archetype", how="left",
+                )
+                p_off = p_off.sort_values("pitches", ascending=False)
+                arch_rows = []
+                for _, row in p_off.iterrows():
+                    pt_name = PITCH_DISPLAY.get(row.get("pitch_type", ""), row.get("pitch_name", ""))
+                    velo = f'{row["release_speed"]:.1f} mph' if pd.notna(row.get("release_speed")) else "--"
+                    ivb = f'{row["pfx_z"]:.1f}"' if pd.notna(row.get("pfx_z")) else "--"
+                    hb = f'{row["pfx_x_flipped"]:.1f}"' if pd.notna(row.get("pfx_x_flipped")) else (
+                        f'{row["pfx_x"]:.1f}"' if pd.notna(row.get("pfx_x")) else "--"
+                    )
+                    arch_rows.append({
+                        "Pitch": pt_name,
+                        "Archetype": row.get("archetype_name", f'Cluster {row["pitch_archetype"]}'),
+                        "Velo": velo,
+                        "IVB": ivb,
+                        "HB": hb,
+                    })
+                if arch_rows:
+                    st.markdown(f'<div class="section-header">Arsenal Archetype Map</div>',
+                                unsafe_allow_html=True)
+                    st.dataframe(pd.DataFrame(arch_rows), use_container_width=True, hide_index=True)
+
         # Location heatmap
         if is_career:
             ploc_all = load_pitcher_location_grid_all()
@@ -417,6 +450,82 @@ def render_pitch_profiles(
                         f"Note: Batted ball coverage was limited in {selected_season}. "
                         "xwOBA and barrel metrics may be unreliable."
                     )
+
+        # Archetype Vulnerability
+        cluster_meta = load_cluster_metadata()
+        baselines = load_baselines_arch()
+        if is_career:
+            vuln_arch_df = load_hitter_vuln_arch_career()
+            min_swings = 20
+        else:
+            vuln_arch_df = load_hitter_vuln_arch()
+            min_swings = 10
+
+        if not vuln_arch_df.empty and not cluster_meta.empty and not baselines.empty:
+            h_vuln_arch = vuln_arch_df[vuln_arch_df["batter_id"] == player_id].copy()
+            if not h_vuln_arch.empty and not is_career and "season" in h_vuln_arch.columns:
+                _season = selected_season if selected_season else PRIOR_SEASON
+                h_vuln_arch = h_vuln_arch[h_vuln_arch["season"] == _season]
+
+            if not h_vuln_arch.empty:
+                # Aggregate across platoon sides if multiple rows per archetype
+                agg_cols = {"swings": "sum", "whiffs": "sum", "out_of_zone_pitches": "sum", "chase_swings": "sum"}
+                available_agg = {k: v for k, v in agg_cols.items() if k in h_vuln_arch.columns}
+                if available_agg:
+                    h_vuln_arch = h_vuln_arch.groupby("pitch_archetype").agg(available_agg).reset_index()
+                    h_vuln_arch["whiff_rate"] = h_vuln_arch["whiffs"] / h_vuln_arch["swings"].clip(lower=1)
+                    h_vuln_arch["chase_rate"] = h_vuln_arch["chase_swings"] / h_vuln_arch["out_of_zone_pitches"].clip(lower=1)
+
+                h_vuln_arch = h_vuln_arch[h_vuln_arch["swings"] >= min_swings]
+
+                if not h_vuln_arch.empty:
+                    # Get league baselines (average across batter hands)
+                    bl_avg = baselines.groupby("pitch_archetype").agg(
+                        lg_whiff=("whiff_rate", "mean"),
+                        lg_chase=("chase_rate", "mean"),
+                    ).reset_index()
+
+                    h_vuln_arch = h_vuln_arch.merge(
+                        cluster_meta[["pitch_archetype", "archetype_name"]],
+                        on="pitch_archetype", how="left",
+                    ).merge(bl_avg, on="pitch_archetype", how="left")
+
+                    arch_vuln_rows = []
+                    for _, row in h_vuln_arch.sort_values("whiff_rate", ascending=False).iterrows():
+                        whiff_delta = row["whiff_rate"] - row["lg_whiff"] if pd.notna(row.get("lg_whiff")) else 0
+                        chase_delta = row["chase_rate"] - row["lg_chase"] if pd.notna(row.get("lg_chase")) else 0
+                        arch_vuln_rows.append({
+                            "Archetype": row.get("archetype_name", f'Cluster {row["pitch_archetype"]}'),
+                            "Whiff%": row["whiff_rate"],
+                            "Whiff Δ": whiff_delta,
+                            "Chase%": row["chase_rate"],
+                            "Chase Δ": chase_delta,
+                            "Swings": int(row["swings"]),
+                        })
+
+                    if arch_vuln_rows:
+                        st.markdown(f'<div class="section-header">Archetype Vulnerability ({season_label})</div>',
+                                    unsafe_allow_html=True)
+                        st.caption(f"Min {min_swings} swings. Δ = vs league avg. Green = handles well, orange = vulnerable.")
+                        av_df = pd.DataFrame(arch_vuln_rows)
+
+                        def _color_delta(val: float) -> str:
+                            """Negative delta (fewer whiffs/chases) is good for hitter."""
+                            if val < -0.01:
+                                return f"color: {POSITIVE}"
+                            elif val > 0.01:
+                                return f"color: {NEGATIVE}"
+                            return f"color: {SLATE}"
+
+                        styled = (
+                            av_df.style
+                            .format({
+                                "Whiff%": "{:.1%}", "Chase%": "{:.1%}",
+                                "Whiff Δ": "{:+.1%}", "Chase Δ": "{:+.1%}",
+                            })
+                            .map(_color_delta, subset=["Whiff Δ", "Chase Δ"])
+                        )
+                        st.dataframe(styled, use_container_width=True, hide_index=True)
 
         # Hitter zone grid
         if is_career:
