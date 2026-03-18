@@ -1,4 +1,4 @@
-"""Player Rankings page — TDD composite rankings for pitchers, hitters, and prospects."""
+"""Player Rankings page — TDD composite rankings for pitchers, batters, and prospects."""
 from __future__ import annotations
 
 import pandas as pd
@@ -9,7 +9,7 @@ from components.metric_cards import metric_card
 from services.data_loader import load_rankings
 
 
-# ── Tier / score color helpers ──────────────────────────────────────────────
+# ── Tier / score / health color helpers ─────────────────────────────────────
 
 _PROSPECT_TIER_COLORS = {
     "Elite": GOLD,
@@ -17,6 +17,14 @@ _PROSPECT_TIER_COLORS = {
     "Solid": SAGE,
     "Developing": SLATE,
     "Org Filler": CREAM,
+}
+
+_HEALTH_COLORS = {
+    "Excellent": SAGE,
+    "Good": GOLD,
+    "Fair": SLATE,
+    "Caution": EMBER,
+    "Unknown": CREAM,
 }
 
 _LEVEL_ORDER = ["AAA", "AA", "A+", "A", "ROK"]
@@ -36,6 +44,12 @@ def _score_color(val: float) -> str:
 def _style_tier(val: str) -> str:
     """Color-code prospect tier."""
     color = _PROSPECT_TIER_COLORS.get(val, CREAM)
+    return f"color: {color}; font-weight: bold"
+
+
+def _style_health(val: str) -> str:
+    """Color-code health label."""
+    color = _HEALTH_COLORS.get(val, CREAM)
     return f"color: {color}; font-weight: bold"
 
 
@@ -87,6 +101,7 @@ def _render_pitcher_rankings(df: pd.DataFrame) -> None:
         "age": "Age",
         "pitch_hand": "Throws",
         "tdd_value_score": "TDD Score",
+        "health_label": "Health",
         "stuff_score": "Stuff",
         "command_score": "Command",
         "workload_score": "Workload",
@@ -121,20 +136,23 @@ def _render_pitcher_rankings(df: pd.DataFrame) -> None:
     styler = display_df.style.format(fmt, na_rep="—")
     if "TDD Score" in display_df.columns:
         styler = styler.map(_score_color, subset=["TDD Score"])
+    if "Health" in display_df.columns:
+        styler = styler.map(_style_health, subset=["Health"])
 
     st.dataframe(styler, use_container_width=True, hide_index=True, height=600)
 
     st.caption(
         "**TDD Score** = weighted composite of Stuff (50%), Command (20%), "
         "Workload (15%), Trajectory (15%). Sub-scores are percentile-ranked (0-1). "
+        "**Health** = injury risk tier blended into Workload score. "
         "**K%/BB%** are 2025 observed; **Proj** columns are 2026 Bayesian projections."
     )
 
 
-# ── Hitter Rankings ─────────────────────────────────────────────────────────
+# ── Batter Rankings ─────────────────────────────────────────────────────────
 
-def _render_hitter_rankings(df: pd.DataFrame) -> None:
-    """Render hitter rankings table with filters."""
+def _render_batter_rankings(df: pd.DataFrame) -> None:
+    """Render batter rankings table with filters."""
     col_pos, col_bat, col_search = st.columns([1, 1, 2])
     with col_pos:
         positions = ["All"] + sorted(df["position"].dropna().unique().tolist()) if "position" in df.columns else ["All"]
@@ -143,7 +161,7 @@ def _render_hitter_rankings(df: pd.DataFrame) -> None:
         bats = ["All", "L", "R", "B"]
         bat_filter = st.selectbox("Bats", bats, key="rank_h_bat")
     with col_search:
-        search = st.text_input("Search hitter", key="rank_h_search")
+        search = st.text_input("Search batter", key="rank_h_search")
 
     filtered = df.copy()
     if pos_filter != "All" and "position" in filtered.columns:
@@ -158,7 +176,7 @@ def _render_hitter_rankings(df: pd.DataFrame) -> None:
     # Summary metrics
     cols = st.columns(4)
     with cols[0]:
-        st.markdown(metric_card("Hitters Ranked", f"{len(filtered):,}"), unsafe_allow_html=True)
+        st.markdown(metric_card("Batters Ranked", f"{len(filtered):,}"), unsafe_allow_html=True)
     with cols[1]:
         n_pos = filtered["position"].nunique() if "position" in filtered.columns else 0
         st.markdown(metric_card("Positions", f"{n_pos}"), unsafe_allow_html=True)
@@ -172,11 +190,12 @@ def _render_hitter_rankings(df: pd.DataFrame) -> None:
     display_map = {
         "overall_rank": "#",
         "pos_rank": "Pos #",
-        "batter_name": "Hitter",
+        "batter_name": "Batter",
         "position": "Pos",
         "age": "Age",
         "batter_stand": "Bats",
         "tdd_value_score": "TDD Score",
+        "health_label": "Health",
         "offense_score": "Offense",
         "fielding_combined": "Fielding",
         "pt_score": "Play Time",
@@ -214,12 +233,15 @@ def _render_hitter_rankings(df: pd.DataFrame) -> None:
     styler = display_df.style.format(fmt, na_rep="—")
     if "TDD Score" in display_df.columns:
         styler = styler.map(_score_color, subset=["TDD Score"])
+    if "Health" in display_df.columns:
+        styler = styler.map(_style_health, subset=["Health"])
 
     st.dataframe(styler, use_container_width=True, hide_index=True, height=600)
 
     st.caption(
         "**TDD Score** = weighted composite of Offense (55%), Fielding (20%), "
         "Playing Time (15%), Trajectory (10%). Sub-scores are percentile-ranked (0-1). "
+        "**Health** = injury risk tier blended into Playing Time score. "
         "**wOBA/xwOBA/Barrel%** are 2025 observed; **Proj** columns are 2026 Bayesian projections."
     )
 
@@ -342,7 +364,7 @@ def page_player_rankings() -> None:
 
     category = st.selectbox(
         "Category",
-        ["Pitchers", "Hitters", "Prospects"],
+        ["Pitchers", "Batters", "Prospects"],
         key="rankings_category",
     )
 
@@ -356,15 +378,15 @@ def page_player_rankings() -> None:
             return
         _render_pitcher_rankings(df)
 
-    elif category == "Hitters":
+    elif category == "Batters":
         df = load_rankings("hitters")
         if df.empty:
             st.warning(
-                "No hitter rankings data found. "
+                "No batter rankings data found. "
                 "Run `precompute_dashboard_data.py` to generate hitters_rankings.parquet."
             )
             return
-        _render_hitter_rankings(df)
+        _render_batter_rankings(df)
 
     else:  # Prospects
         df = load_rankings("prospect")
