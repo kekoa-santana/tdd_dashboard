@@ -373,15 +373,15 @@ def _render_schedule_cards(
                                 "Batter": brow.get(name_col, "Unknown"),
                             }
                             if _bid and _h_arch_lookup:
-                                _row_data["Type"] = _h_arch_lookup.get(_bid, "")
+                                _row_data["Type"] = _h_arch_lookup.get(_bid, "--")
                             if _bid and _h_stat_lookup:
                                 _st = _h_stat_lookup.get(_bid, {})
                                 _k = _st.get("k_rate")
                                 _bb = _st.get("bb_rate")
                                 _hr = _st.get("hr")
-                                _row_data["K%"] = f"{_k:.1%}" if pd.notna(_k) else ""
-                                _row_data["BB%"] = f"{_bb:.1%}" if pd.notna(_bb) else ""
-                                _row_data["HR"] = int(round(_hr)) if pd.notna(_hr) else ""
+                                _row_data["K%"] = f"{_k:.1%}" if pd.notna(_k) else "--"
+                                _row_data["BB%"] = f"{_bb:.1%}" if pd.notna(_bb) else "--"
+                                _row_data["HR"] = str(int(round(_hr))) if pd.notna(_hr) else "--"
                             lu_rows.append(_row_data)
 
                         if lu_rows:
