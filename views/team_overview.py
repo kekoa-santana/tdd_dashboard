@@ -14,6 +14,8 @@ from config import (
 from services.data_loader import (
     load_projections, load_counting, load_player_teams,
     load_pitcher_arsenal, load_preseason_injuries,
+    load_pitcher_offerings, load_hitter_vuln_arch_career,
+    load_cluster_metadata, load_baselines_arch,
 )
 from utils.helpers import get_team_lookup, get_injury_lookup
 from utils.formatters import fmt_stat
@@ -248,6 +250,47 @@ def page_team_overview() -> None:
             with st.expander("Pitch type detail"):
                 st.dataframe(pd.DataFrame(pt_rows), use_container_width=True, hide_index=True)
 
+    # ── Staff Archetype Mix ─────────────────────────────────────────
+    offerings_df = load_pitcher_offerings()
+    cluster_meta = load_cluster_metadata()
+    if not offerings_df.empty and not cluster_meta.empty and not team_pitchers.empty:
+        team_pitcher_ids = set(team_pitchers["pitcher_id"].astype(int))
+        team_off = offerings_df[offerings_df["pitcher_id"].isin(team_pitcher_ids)]
+        if not team_off.empty and "pitches" in team_off.columns:
+            arch_agg = (
+                team_off.groupby("pitch_archetype")
+                .agg(pitches=("pitches", "sum"))
+                .reset_index()
+            )
+            arch_agg = arch_agg.merge(
+                cluster_meta[["pitch_archetype", "archetype_name"]],
+                on="pitch_archetype", how="left",
+            )
+            arch_agg["pct"] = arch_agg["pitches"] / arch_agg["pitches"].sum()
+            arch_agg = arch_agg.sort_values("pct", ascending=False)
+
+            st.markdown("### Staff Archetype Mix")
+            st.caption("Pitch archetype distribution across the team's pitching staff.")
+
+            # Horizontal bar chart
+            _n_arch = len(arch_agg)
+            _bar_colors = [GOLD, EMBER, SAGE, SLATE, CREAM, "#9B59B6", "#3498DB", "#E67E22"]
+            bars_html = ""
+            for i, (_, row) in enumerate(arch_agg.iterrows()):
+                color = _bar_colors[i % len(_bar_colors)]
+                pct = row["pct"]
+                name = row.get("archetype_name", f'Cluster {row["pitch_archetype"]}')
+                bars_html += (
+                    f'<div style="display:flex;align-items:center;margin-bottom:6px;">'
+                    f'<div style="width:140px;color:{CREAM};font-size:0.85rem;flex-shrink:0;">{name}</div>'
+                    f'<div style="flex:1;background:#1a1d24;border-radius:4px;height:22px;overflow:hidden;">'
+                    f'<div style="width:{pct*100:.1f}%;background:{color};height:100%;border-radius:4px;'
+                    f'display:flex;align-items:center;padding-left:6px;">'
+                    f'<span style="color:#fff;font-size:0.75rem;font-weight:600;">{pct:.0%}</span>'
+                    f'</div></div></div>'
+                )
+            st.markdown(f'<div class="insight-card">{bars_html}</div>', unsafe_allow_html=True)
+
     # ── Team Strengths & Weaknesses (offense) ───────────────────────
     # Compare team averages to league averages across all projected hitters
     if not team_hitters.empty and not h_proj.empty:
@@ -327,6 +370,69 @@ def page_team_overview() -> None:
                 else:
                     st.markdown(f'<span style="color:{SLATE};">None vs league average</span>',
                                 unsafe_allow_html=True)
+
+    # ── Offense Archetype Vulnerability ─────────────────────────────
+    vuln_arch_career = load_hitter_vuln_arch_career()
+    baselines_arch = load_baselines_arch()
+    if (not vuln_arch_career.empty and not baselines_arch.empty
+            and not cluster_meta.empty and not team_hitters.empty):
+        team_hitter_ids = set(team_hitters["batter_id"].astype(int))
+        team_vuln = vuln_arch_career[vuln_arch_career["batter_id"].isin(team_hitter_ids)]
+        if not team_vuln.empty and "swings" in team_vuln.columns:
+            # Average rates per archetype across team hitters
+            team_arch = (
+                team_vuln.groupby("pitch_archetype")
+                .agg(swings=("swings", "sum"), whiffs=("whiffs", "sum"),
+                     out_of_zone_pitches=("out_of_zone_pitches", "sum"),
+                     chase_swings=("chase_swings", "sum"))
+                .reset_index()
+            )
+            team_arch["whiff_rate"] = team_arch["whiffs"] / team_arch["swings"].clip(lower=1)
+            team_arch["chase_rate"] = team_arch["chase_swings"] / team_arch["out_of_zone_pitches"].clip(lower=1)
+
+            # League baselines (average across batter hands)
+            bl_avg = baselines_arch.groupby("pitch_archetype").agg(
+                lg_whiff=("whiff_rate", "mean"),
+                lg_chase=("chase_rate", "mean"),
+            ).reset_index()
+
+            team_arch = team_arch.merge(
+                cluster_meta[["pitch_archetype", "archetype_name"]],
+                on="pitch_archetype", how="left",
+            ).merge(bl_avg, on="pitch_archetype", how="left")
+            team_arch = team_arch.sort_values("whiff_rate", ascending=False)
+
+            st.markdown("### Offense Archetype Vulnerability")
+            st.caption("Team batting rates vs each pitch archetype, compared to league average.")
+
+            vuln_rows = []
+            for _, row in team_arch.iterrows():
+                w_delta = row["whiff_rate"] - row["lg_whiff"] if pd.notna(row.get("lg_whiff")) else 0
+                c_delta = row["chase_rate"] - row["lg_chase"] if pd.notna(row.get("lg_chase")) else 0
+                w_color = NEGATIVE if w_delta > 0.01 else POSITIVE if w_delta < -0.01 else SLATE
+                c_color = NEGATIVE if c_delta > 0.01 else POSITIVE if c_delta < -0.01 else SLATE
+                name = row.get("archetype_name", f'Cluster {row["pitch_archetype"]}')
+                vuln_rows.append(
+                    f'<tr>'
+                    f'<td style="color:{CREAM};padding:6px 10px;">{name}</td>'
+                    f'<td style="padding:6px 10px;">{row["whiff_rate"]:.1%}</td>'
+                    f'<td style="color:{w_color};padding:6px 10px;">{w_delta:+.1%}</td>'
+                    f'<td style="padding:6px 10px;">{row["chase_rate"]:.1%}</td>'
+                    f'<td style="color:{c_color};padding:6px 10px;">{c_delta:+.1%}</td>'
+                    f'</tr>'
+                )
+            if vuln_rows:
+                table_html = (
+                    f'<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">'
+                    f'<thead><tr style="border-bottom:1px solid {SLATE}44;">'
+                    f'<th style="text-align:left;padding:6px 10px;color:{GOLD};">Archetype</th>'
+                    f'<th style="padding:6px 10px;color:{SLATE};">Whiff%</th>'
+                    f'<th style="padding:6px 10px;color:{SLATE};">Δ Lg</th>'
+                    f'<th style="padding:6px 10px;color:{SLATE};">Chase%</th>'
+                    f'<th style="padding:6px 10px;color:{SLATE};">Δ Lg</th>'
+                    f'</tr></thead><tbody>{"".join(vuln_rows)}</tbody></table>'
+                )
+                st.markdown(f'<div class="insight-card">{table_html}</div>', unsafe_allow_html=True)
 
     # ── Pitching staff profile ──────────────────────────────────────
     if not team_pitchers.empty and not p_proj.empty:
