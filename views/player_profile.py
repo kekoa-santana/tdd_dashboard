@@ -49,6 +49,7 @@ from services.data_loader import (
     load_full_stats, load_preseason_injuries,
     load_hitter_archetypes, load_pitcher_archetypes,
     load_archetype_matchup_matrix,
+    load_hitter_breakout_candidates,
     season_selector,
 )
 from utils.helpers import get_team_lookup, get_injury_lookup
@@ -1050,6 +1051,23 @@ def page_player_profile() -> None:
             if not _arch_row.empty:
                 header_parts.append(_arch_row.iloc[0]["archetype_name"])
 
+    # Breakout tier badge (hitters only)
+    _breakout_tier_label = ""
+    _breakout_hole = ""
+    if player_type == "Hitter":
+        _bo_df = load_hitter_breakout_candidates()
+        if not _bo_df.empty:
+            _bo_row = _bo_df[_bo_df["batter_id"] == player_id]
+            if not _bo_row.empty:
+                _bt = _bo_row.iloc[0].get("breakout_tier", "")
+                _bh = _bo_row.iloc[0].get("breakout_hole", "")
+                _b_type = _bo_row.iloc[0].get("breakout_type", "")
+                if _bt:
+                    _breakout_tier_label = f"Breakout: {_bt} ({_b_type})"
+                    header_parts.append(_breakout_tier_label)
+                if pd.notna(_bh) and _bh:
+                    _breakout_hole = str(_bh)
+
     # Park factor for hitters
     if player_type == "Hitter":
         counting_df = load_counting("hitter")
@@ -1346,6 +1364,22 @@ def page_player_profile() -> None:
                     bullets.append((POSITIVE, f"Home park boosts HR rate (park factor {_pf:.3f}). Projected HRs adjusted up."))
                 elif pd.notna(_pf) and _pf < 0.97:
                     bullets.append((NEGATIVE, f"Home park suppresses HR rate (park factor {_pf:.3f}). Projected HRs adjusted down."))
+
+    # Breakout hole (hitters only)
+    if player_type == "Hitter" and _breakout_hole:
+        _bo_df_scout = load_hitter_breakout_candidates()
+        if not _bo_df_scout.empty:
+            _bo_r = _bo_df_scout[_bo_df_scout["batter_id"] == player_id]
+            if not _bo_r.empty:
+                _bo_score = _bo_r.iloc[0].get("breakout_score", 0)
+                _bo_tier = _bo_r.iloc[0].get("breakout_tier", "")
+                _bo_type = _bo_r.iloc[0].get("breakout_type", "")
+                _tier_color = GOLD if _bo_tier == "High" else SAGE
+                bullets.append((
+                    _tier_color,
+                    f"<b>{_bo_tier} breakout candidate</b> ({_bo_type}, score {_bo_score:.2f}). "
+                    f"Key hole to address: <b>{_breakout_hole}</b>.",
+                ))
 
     # Archetype classification + matchup insight
     _arch_df_scout = load_hitter_archetypes() if player_type == "Hitter" else load_pitcher_archetypes()
