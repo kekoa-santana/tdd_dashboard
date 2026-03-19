@@ -65,10 +65,12 @@ class TestImports:
         from views.matchup_explorer import page_matchup_explorer  # noqa: F401
 
     def test_import_page_game_k_sim(self):
-        from views.game_k_sim import page_game_k_sim  # noqa: F401
+        """game_k_sim merged into schedule — verify schedule still imports."""
+        from views.schedule import page_schedule  # noqa: F401
 
     def test_import_page_preseason_snapshot(self):
-        from views.preseason_snapshot import page_preseason_snapshot  # noqa: F401
+        """preseason_snapshot merged into model_performance."""
+        from views.model_performance import page_model_performance  # noqa: F401
 
     def test_import_lib_theme(self):
         from lib.theme import GOLD, EMBER, SAGE, SLATE, CREAM, DARK  # noqa: F401
@@ -95,7 +97,8 @@ class TestImports:
         from views.model_performance import page_model_performance  # noqa: F401
 
     def test_import_prospects(self):
-        from views.prospects import page_prospects  # noqa: F401
+        """prospects merged into player_rankings."""
+        from views.player_rankings import page_player_rankings  # noqa: F401
 
     def test_import_backtest_charts(self):
         from components.backtest_charts import create_accuracy_bars  # noqa: F401
