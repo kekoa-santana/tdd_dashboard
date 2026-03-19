@@ -37,7 +37,9 @@ def fetch_todays_schedule(
         away_team_id, away_team_name, away_abbr,
         home_team_id, home_team_name, home_abbr,
         away_pitcher_id, away_pitcher_name,
-        home_pitcher_id, home_pitcher_name.
+        home_pitcher_id, home_pitcher_name,
+        venue_id, venue_name, hp_umpire_name,
+        weather_temp, weather_wind, weather_condition.
     """
     import urllib.request
 
@@ -47,7 +49,7 @@ def fetch_todays_schedule(
     url = (
         f"{MLB_API_BASE}/schedule"
         f"?date={game_date}&sportId=1"
-        f"&hydrate=probablePitcher,team"
+        f"&hydrate=probablePitcher,team,venue,weather,officials"
     )
 
     try:
@@ -90,6 +92,19 @@ def fetch_todays_schedule(
             away_pp = away.get("probablePitcher", {})
             home_pp = home.get("probablePitcher", {})
 
+            # Venue
+            venue = game.get("venue", {})
+
+            # Weather
+            weather = game.get("weather", {})
+
+            # HP umpire
+            hp_ump = ""
+            for official in game.get("officials", []):
+                if official.get("officialType") == "Home Plate":
+                    hp_ump = official.get("official", {}).get("fullName", "")
+                    break
+
             rows.append({
                 "game_pk": gpk,
                 "game_date": game_date,
@@ -105,6 +120,12 @@ def fetch_todays_schedule(
                 "away_pitcher_name": away_pp.get("fullName", ""),
                 "home_pitcher_id": home_pp.get("id"),
                 "home_pitcher_name": home_pp.get("fullName", ""),
+                "venue_id": venue.get("id"),
+                "venue_name": venue.get("name", ""),
+                "hp_umpire_name": hp_ump,
+                "weather_temp": weather.get("temp", ""),
+                "weather_wind": weather.get("wind", ""),
+                "weather_condition": weather.get("condition", ""),
             })
 
     df = pd.DataFrame(rows)

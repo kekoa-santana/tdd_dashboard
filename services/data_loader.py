@@ -408,6 +408,15 @@ def load_rankings(player_type: str) -> pd.DataFrame:
 
 
 @st.cache_data
+def load_position_eligibility() -> pd.DataFrame:
+    """Load hitter multi-position eligibility table."""
+    path = DASHBOARD_DIR / "hitter_position_eligibility.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
 def load_prospect_readiness() -> pd.DataFrame:
     """Load prospect readiness scores with rankings."""
     path = DASHBOARD_DIR / "prospect_readiness.parquet"

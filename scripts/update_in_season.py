@@ -48,6 +48,43 @@ SEASON = CURRENT_SEASON
 
 
 # ---------------------------------------------------------------------------
+# Weather / umpire parsing helpers
+# ---------------------------------------------------------------------------
+
+def _parse_temp_bucket(temp_str: object) -> str:
+    """Convert temperature string to weather bucket."""
+    if not temp_str:
+        return "warm"
+    try:
+        temp = int(temp_str)
+    except (ValueError, TypeError):
+        return "warm"
+    if temp < 55:
+        return "cold"
+    if temp < 70:
+        return "cool"
+    if temp < 85:
+        return "warm"
+    return "hot"
+
+
+def _parse_wind_category(wind_str: object) -> str:
+    """Convert wind string to category."""
+    if not wind_str:
+        return "none"
+    w = str(wind_str).lower()
+    if "calm" in w or w.strip() == "":
+        return "none"
+    if "out" in w:
+        return "out"
+    if "in from" in w or "in," in w:
+        return "in"
+    if "l to r" in w or "r to l" in w:
+        return "cross"
+    return "none"
+
+
+# ---------------------------------------------------------------------------
 # Schedule-only refresh (hourly mode)
 # ---------------------------------------------------------------------------
 
@@ -109,11 +146,47 @@ def run_schedule_refresh(game_date: str) -> None:
         for pt, vals in LEAGUE_AVG_BY_PITCH_TYPE.items()
     }
 
+    # Load umpire tendencies and weather effects for adjustments
+    ump_path = DASHBOARD_DIR / "umpire_tendencies.parquet"
+    wx_path = DASHBOARD_DIR / "weather_effects.parquet"
+    ump_lookup: dict[str, float] = {}
+    if ump_path.exists():
+        ump_df = pd.read_parquet(ump_path)
+        for _, ur in ump_df.iterrows():
+            ump_lookup[ur["hp_umpire_name"]] = float(ur["k_logit_lift"])
+        logger.info("Loaded %d umpire tendencies", len(ump_lookup))
+
+    wx_lookup: dict[tuple[str, str], dict] = {}
+    if wx_path.exists():
+        wx_df = pd.read_parquet(wx_path)
+        for _, wr in wx_df.iterrows():
+            wx_lookup[(wr["temp_bucket"], wr["wind_category"])] = {
+                "k_multiplier": float(wr["k_multiplier"]),
+                "overall_k_rate": float(wr["overall_k_rate"]),
+            }
+        logger.info("Loaded %d weather effect combos", len(wx_lookup))
+
     # Simulate each starter
     logger.info("Simulating K props for today's starters...")
     results = []
     for _, game in schedule.iterrows():
         gpk = game["game_pk"]
+
+        # Per-game umpire lift
+        hp_ump_name = game.get("hp_umpire_name", "")
+        ump_k_lift = ump_lookup.get(hp_ump_name, 0.0) if hp_ump_name else 0.0
+
+        # Per-game weather lift
+        wx_k_lift = 0.0
+        temp_bucket = _parse_temp_bucket(game.get("weather_temp"))
+        wind_cat = _parse_wind_category(game.get("weather_wind"))
+        wx_info = wx_lookup.get((temp_bucket, wind_cat))
+        if wx_info:
+            from scipy.special import logit as _logit
+            k_mult = wx_info["k_multiplier"]
+            overall_k = wx_info["overall_k_rate"]
+            adj_k = np.clip(overall_k * k_mult, 1e-6, 1 - 1e-6)
+            wx_k_lift = float(_logit(adj_k) - _logit(np.clip(overall_k, 1e-6, 1 - 1e-6)))
 
         for side in ("away", "home"):
             pid = game.get(f"{side}_pitcher_id")
@@ -163,6 +236,8 @@ def run_schedule_refresh(game_date: str) -> None:
                 bf_mu=float(bf_mu),
                 bf_sigma=float(bf_sigma),
                 lineup_matchup_lifts=lineup_lifts,
+                umpire_k_logit_lift=ump_k_lift,
+                weather_k_logit_lift=wx_k_lift,
                 n_draws=10000,
                 random_seed=42 + gpk,
             )
@@ -193,6 +268,10 @@ def run_schedule_refresh(game_date: str) -> None:
                 "median_k": float(np.median(game_ks)),
                 "has_lineup": lineup_lifts is not None,
                 "avg_matchup_lift": float(np.mean(lineup_lifts)) if lineup_lifts is not None else 0.0,
+                "umpire_k_logit_lift": ump_k_lift,
+                "weather_k_logit_lift": wx_k_lift,
+                "bf_mu": float(bf_mu),
+                "bf_sigma": float(bf_sigma),
                 **p_over_dict,
             })
 
