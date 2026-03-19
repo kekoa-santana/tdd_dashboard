@@ -36,11 +36,8 @@ from views.stats import page_stats  # noqa: E402
 from views.player_profile import page_player_profile  # noqa: E402
 from views.team_overview import page_team_overview  # noqa: E402
 from views.matchup_explorer import page_matchup_explorer  # noqa: E402
-from views.game_k_sim import page_game_k_sim  # noqa: E402
-from views.preseason_snapshot import page_preseason_snapshot  # noqa: E402
 from views.data_health import page_data_health  # noqa: E402
 from views.model_performance import page_model_performance  # noqa: E402
-from views.prospects import page_prospects  # noqa: E402
 from views.player_rankings import page_player_rankings  # noqa: E402
 
 # Apply dark matplotlib theme at import time
@@ -89,10 +86,7 @@ PAGES = {
     "Player Profile": page_player_profile,
     "Team Overview": page_team_overview,
     "Matchup Explorer": page_matchup_explorer,
-    "Game K Simulator": page_game_k_sim,
-    "Preseason Snapshot": page_preseason_snapshot,
     "Player Rankings": page_player_rankings,
-    "Prospects": page_prospects,
     "Model Performance": page_model_performance,
     "Data Health": page_data_health,
 }
