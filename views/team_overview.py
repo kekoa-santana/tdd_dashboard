@@ -37,7 +37,7 @@ _PILL_COLORS = {
 }
 
 _HEALTH_COLORS = {
-    "Iron Man": SAGE, "Durable": SAGE,
+    "Iron Man": GOLD, "Durable": SAGE,
     "Average": SLATE, "Unknown": SLATE,
     "Questionable": EMBER, "Injury Prone": NEGATIVE,
 }
@@ -366,6 +366,7 @@ def _find_trade_targets(
     teams_df: pd.DataFrame,
     target_position: str,
     trade_capital: float,
+    offered_positions: list[str] | None = None,
     tolerance: float = 0.15,
 ) -> pd.DataFrame:
     """Find league-wide trade targets at a position within value tolerance."""
@@ -419,7 +420,41 @@ def _find_trade_targets(
             matches = matches.drop(columns="archetype_name")
         matches = matches.merge(arch_cols, on="batter_id", how="left")
 
-    return matches.sort_values("pos_rank").head(10)
+    # Assess mutual fit — do partner teams need the offered positions?
+    if offered_positions:
+        hitter_pos = [p for p in offered_positions if p in _HITTER_POSITIONS]
+        fit_tiers: list[str] = []
+        for _, row in matches.iterrows():
+            partner_team = row.get("team", "")
+            if not partner_team or not hitter_pos:
+                fit_tiers.append("Low")
+                continue
+            partner_pids = set(
+                teams_df[teams_df["team_abbr"] == partner_team]["player_id"].astype(int)
+            )
+            partner_h = h_rank[h_rank["batter_id"].isin(partner_pids)]
+            tier = "Low"
+            for pos in hitter_pos:
+                pos_players = partner_h[partner_h["position"] == pos]
+                if pos_players.empty:
+                    tier = "High"
+                    break
+                best_rank = int(pos_players["pos_rank"].min())
+                if best_rank > 15:
+                    tier = "High"
+                    break
+                elif best_rank > 10 and tier != "High":
+                    tier = "Medium"
+            fit_tiers.append(tier)
+        matches["trade_fit"] = fit_tiers
+    else:
+        matches["trade_fit"] = "Low"
+
+    fit_order = {"High": 0, "Medium": 1, "Low": 2}
+    matches["_fit_order"] = matches["trade_fit"].map(fit_order)
+    return matches.sort_values(
+        ["_fit_order", "pos_rank"],
+    ).drop(columns="_fit_order").head(10)
 
 
 def _render_trade_simulator_tab(
@@ -469,10 +504,12 @@ def _render_trade_simulator_tab(
         for _, row in team_h.iterrows():
             assets.append({
                 "label": (
-                    f'{row["batter_name"]} ({row["position"]}) '
+                    f'{row["batter_name"]} ({row["position"]}, '
+                    f'#{int(row["pos_rank"])}) '
                     f'\u2014 {row["tdd_value_score"]:.2f}'
                 ),
                 "value": row["tdd_value_score"],
+                "position": row["position"],
             })
     if not p_rank.empty:
         team_p = p_rank[p_rank["pitcher_id"].isin(team_pids)].sort_values(
@@ -481,10 +518,12 @@ def _render_trade_simulator_tab(
         for _, row in team_p.iterrows():
             assets.append({
                 "label": (
-                    f'{row["pitcher_name"]} ({row["role"]}) '
+                    f'{row["pitcher_name"]} ({row["role"]}, '
+                    f'#{int(row["role_rank"])}) '
                     f'\u2014 {row["tdd_value_score"]:.2f}'
                 ),
                 "value": row["tdd_value_score"],
+                "position": row["role"],
             })
 
     if not assets:
@@ -525,8 +564,13 @@ def _render_trade_simulator_tab(
     if st.button(
         "Find Trade Matches", type="primary", disabled=trade_capital <= 0,
     ):
+        offered_positions = [
+            a["position"] for a in assets
+            if a["label"] in selected_assets and "position" in a
+        ]
         matches = _find_trade_targets(
             selected_team, teams_df, target_pos, trade_capital,
+            offered_positions=offered_positions,
         )
         if matches.empty:
             st.info(f"No trade candidates found at {target_pos}.")
@@ -569,6 +613,17 @@ def _render_trade_results(
         score = row["tdd_value_score"]
         match_pct = row.get("value_match_pct", 0)
         arch = row.get("archetype_name", "")
+        trade_fit = row.get("trade_fit", "Low")
+        fit_color = (
+            GOLD if trade_fit == "High"
+            else SAGE if trade_fit == "Medium"
+            else SLATE
+        )
+        fit_label = (
+            "Likely" if trade_fit == "High"
+            else "Possible" if trade_fit == "Medium"
+            else "Unlikely"
+        )
 
         if current_best_rank and rank < current_best_rank:
             upgrade = (
@@ -593,8 +648,8 @@ def _render_trade_results(
             )
 
         m_color = (
-            POSITIVE if match_pct >= 85
-            else GOLD if match_pct >= 70
+            GOLD if match_pct >= 85
+            else SAGE if match_pct >= 70
             else EMBER
         )
 
@@ -609,6 +664,11 @@ def _render_trade_results(
             f'<td style="padding:6px 10px;color:{m_color};">'
             f'{match_pct:.0f}%</td>'
             f'<td style="padding:6px 10px;">{upgrade}</td>'
+            f'<td style="padding:6px 10px;">'
+            f'<span style="background:{fit_color}22; color:{fit_color}; '
+            f'border:1px solid {fit_color}44; padding:2px 8px; '
+            f'border-radius:10px; font-size:0.75rem; font-weight:600;">'
+            f'{fit_label}</span></td>'
             f'</tr>'
         )
 
@@ -622,6 +682,7 @@ def _render_trade_results(
         f'<th style="padding:6px 10px;color:{SLATE};">Pos Rank</th>'
         f'<th style="padding:6px 10px;color:{SLATE};">Match %</th>'
         f'<th style="padding:6px 10px;color:{SLATE};">Upgrade</th>'
+        f'<th style="padding:6px 10px;color:{SLATE};">Trade Fit</th>'
         f'</tr></thead><tbody>{rows_html}</tbody></table>'
     )
     st.markdown(

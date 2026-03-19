@@ -326,7 +326,7 @@ def create_hitter_vuln_fig(
     for i, (_, row) in enumerate(merged.iterrows()):
         w = row["blended_whiff"]
         swings = row.get("swings", 50) or 50
-        color = EMBER if w >= 0.30 else GOLD if w >= 0.20 else SAGE
+        color = EMBER if w >= 0.30 else SAGE if w >= 0.20 else GOLD
         alpha = min(1.0, 0.4 + 0.6 * (min(swings, 100) - 10) / 90)
         bar_w = w * 100
         rsize = min(0.3, bar_w / 5) if bar_w > 0 else 0.1
@@ -363,7 +363,7 @@ def create_hitter_vuln_fig(
         v = vals.iloc[i]
         if v > 0 and pd.notna(v):
             bar_width = v * 100
-            color = SAGE if v >= 0.400 else GOLD if v >= 0.340 else SLATE
+            color = GOLD if v >= 0.400 else SAGE if v >= 0.340 else SLATE
             rsize = min(0.3, bar_width / 5)
             bar = FancyBboxPatch(
                 (0, y_pos[i] - 0.3), bar_width, 0.6,
