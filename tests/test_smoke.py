@@ -121,6 +121,30 @@ class TestImports:
     def test_import_render_trade_results(self):
         from views.team_overview import _render_trade_results  # noqa: F401
 
+    def test_import_score_matchup_bb(self):
+        from lib.matchup import score_matchup_bb  # noqa: F401
+
+    def test_import_score_matchup_hr(self):
+        from lib.matchup import score_matchup_hr  # noqa: F401
+
+    def test_import_archetype_matchup_matrix(self):
+        from services.data_loader import load_archetype_matchup_matrix  # noqa: F401
+
+    def test_import_load_bb_samples(self):
+        from services.data_loader import load_bb_samples  # noqa: F401
+
+    def test_import_load_hr_samples(self):
+        from services.data_loader import load_hr_samples  # noqa: F401
+
+    def test_import_simulate_game_outcomes(self):
+        from lib.game_k_model import simulate_game_outcomes  # noqa: F401
+
+    def test_import_compute_over_probs(self):
+        from lib.game_k_model import compute_over_probs  # noqa: F401
+
+    def test_import_create_game_stat_fig(self):
+        from components.charts import create_game_stat_fig  # noqa: F401
+
 
 # =====================================================================
 # 2. Config tests
@@ -433,3 +457,54 @@ class TestRestAdjustment:
         mu_n, sigma_n = apply_rest_to_bf(23.0, 3.5, 5)  # normal rest
         assert mu_n == 23.0
         assert sigma_n == 3.5
+
+
+# =====================================================================
+# 10. Multi-stat game outcome simulator tests
+# =====================================================================
+class TestSimulateGameOutcomes:
+    """Verify simulate_game_outcomes returns correct shapes and dtypes."""
+
+    def test_k_only_mode(self):
+        import numpy as np
+        from lib.game_k_model import simulate_game_outcomes
+        rng = np.random.default_rng(0)
+        k_samples = rng.beta(5, 17, size=500)  # ~22% K rate
+        results = simulate_game_outcomes(
+            k_rate_samples=k_samples,
+            bb_rate_samples=None,
+            hr_rate_samples=None,
+            bf_mu=24.0,
+            bf_sigma=3.0,
+            n_draws=200,
+            random_seed=42,
+        )
+        assert "k" in results
+        assert "bb" not in results
+        assert "hr" not in results
+        assert results["k"].shape == (200,)
+        assert results["k"].dtype == int
+
+    def test_all_three_stats(self):
+        import numpy as np
+        from lib.game_k_model import simulate_game_outcomes
+        rng = np.random.default_rng(0)
+        k_samples = rng.beta(5, 17, size=500)
+        bb_samples = rng.beta(2, 22, size=500)
+        hr_samples = rng.beta(1, 32, size=500)
+        results = simulate_game_outcomes(
+            k_rate_samples=k_samples,
+            bb_rate_samples=bb_samples,
+            hr_rate_samples=hr_samples,
+            bf_mu=24.0,
+            bf_sigma=3.0,
+            n_draws=200,
+            random_seed=42,
+        )
+        assert set(results.keys()) == {"k", "bb", "hr"}
+        for key in results:
+            assert results[key].shape == (200,)
+            assert results[key].dtype == int
+        # Sanity: K mean > BB mean > HR mean
+        assert np.mean(results["k"]) > np.mean(results["bb"])
+        assert np.mean(results["bb"]) > np.mean(results["hr"])
