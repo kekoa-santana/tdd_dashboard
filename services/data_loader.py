@@ -28,6 +28,24 @@ def load_k_samples() -> dict[str, np.ndarray]:
 
 
 @st.cache_data
+def load_bb_samples() -> dict[str, np.ndarray]:
+    path = DASHBOARD_DIR / "pitcher_bb_samples.npz"
+    if not path.exists():
+        return {}
+    data = np.load(path)
+    return {k: data[k] for k in data.files}
+
+
+@st.cache_data
+def load_hr_samples() -> dict[str, np.ndarray]:
+    path = DASHBOARD_DIR / "pitcher_hr_samples.npz"
+    if not path.exists():
+        return {}
+    data = np.load(path)
+    return {k: data[k] for k in data.files}
+
+
+@st.cache_data
 def load_bf_priors() -> pd.DataFrame:
     path = DASHBOARD_DIR / "bf_priors.parquet"
     if not path.exists():

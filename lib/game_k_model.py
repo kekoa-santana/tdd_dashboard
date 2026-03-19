@@ -293,6 +293,175 @@ def simulate_game_ks(
     return k_totals
 
 
+def simulate_game_outcomes(
+    k_rate_samples: np.ndarray,
+    bb_rate_samples: np.ndarray | None,
+    hr_rate_samples: np.ndarray | None,
+    bf_mu: float,
+    bf_sigma: float,
+    lineup_k_lifts: np.ndarray | None = None,
+    lineup_bb_lifts: np.ndarray | None = None,
+    lineup_hr_lifts: np.ndarray | None = None,
+    umpire_k_logit_lift: float = 0.0,
+    weather_k_logit_lift: float = 0.0,
+    tto_k_lifts: np.ndarray | None = None,
+    tto_bb_lifts: np.ndarray | None = None,
+    tto_hr_lifts: np.ndarray | None = None,
+    rest_k_logit_lift: float = 0.0,
+    n_draws: int = 4000,
+    bf_min: int = 3,
+    bf_max: int = 35,
+    random_seed: int = 42,
+) -> dict[str, np.ndarray]:
+    """Monte Carlo simulation of game K, BB, and HR totals.
+
+    Shares BF draws across all stats. BB and HR are optional — when None,
+    only K results are returned.
+
+    Parameters
+    ----------
+    k_rate_samples : np.ndarray
+        K% posterior samples (values in [0, 1]).
+    bb_rate_samples : np.ndarray or None
+        BB% posterior samples. None → K-only mode.
+    hr_rate_samples : np.ndarray or None
+        HR/BF posterior samples. None → no HR output.
+    bf_mu, bf_sigma : float
+        BF distribution parameters.
+    lineup_k_lifts, lineup_bb_lifts, lineup_hr_lifts : np.ndarray or None
+        Shape (9,) logit-scale lifts per batting order slot.
+    umpire_k_logit_lift, weather_k_logit_lift : float
+        K-only context lifts.
+    tto_k_lifts, tto_bb_lifts, tto_hr_lifts : np.ndarray or None
+        Shape (3,) logit lifts per TTO block.
+    rest_k_logit_lift : float
+        Days-rest K-rate logit lift.
+    n_draws, bf_min, bf_max, random_seed : int
+        Simulation parameters.
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Keys ``"k"`` (always), optionally ``"bb"`` and ``"hr"``.
+    """
+    rng = np.random.default_rng(random_seed)
+
+    # Shared BF draws
+    bf_draws = draw_bf_samples(
+        mu_bf=bf_mu, sigma_bf=bf_sigma,
+        n_draws=n_draws, bf_min=bf_min, bf_max=bf_max, rng=rng,
+    )
+
+    # Build per-stat config: (rate_samples, matchup_lifts, tto_lifts, context_lift)
+    stats_config: list[tuple[str, np.ndarray, np.ndarray, np.ndarray | None, float]] = [
+        ("k", k_rate_samples,
+         lineup_k_lifts if lineup_k_lifts is not None else np.zeros(9),
+         tto_k_lifts,
+         umpire_k_logit_lift + weather_k_logit_lift + rest_k_logit_lift),
+    ]
+    if bb_rate_samples is not None:
+        stats_config.append((
+            "bb", bb_rate_samples,
+            lineup_bb_lifts if lineup_bb_lifts is not None else np.zeros(9),
+            tto_bb_lifts,
+            0.0,  # no umpire/weather/rest lift for BB
+        ))
+    if hr_rate_samples is not None:
+        stats_config.append((
+            "hr", hr_rate_samples,
+            lineup_hr_lifts if lineup_hr_lifts is not None else np.zeros(9),
+            tto_hr_lifts,
+            0.0,  # no umpire/weather/rest lift for HR
+        ))
+
+    results: dict[str, np.ndarray] = {}
+
+    for stat_name, rate_samples, matchup_lifts, tto_lifts, ctx_lift in stats_config:
+        # Resample rate draws to n_draws
+        if len(rate_samples) != n_draws:
+            idx = rng.choice(len(rate_samples), size=n_draws, replace=True)
+            rate_draws = rate_samples[idx]
+        else:
+            rate_draws = rate_samples.copy()
+
+        base_logit = _safe_logit(rate_draws) + ctx_lift
+        totals = np.zeros(n_draws, dtype=int)
+        unique_bf = np.unique(bf_draws)
+
+        for bf_val in unique_bf:
+            mask = bf_draws == bf_val
+            n_bf_draws = mask.sum()
+            bf_int = int(bf_val)
+            game_counts = np.zeros(n_bf_draws, dtype=int)
+            logit_subset = base_logit[mask]
+
+            if tto_lifts is not None:
+                tto_slot_counts: dict[tuple[int, int], int] = {}
+                for bf_idx in range(bf_int):
+                    tto_block = min(bf_idx // _BF_PER_TTO, 2)
+                    slot = bf_idx % 9
+                    key = (tto_block, slot)
+                    tto_slot_counts[key] = tto_slot_counts.get(key, 0) + 1
+
+                for (tto_block, slot), count in tto_slot_counts.items():
+                    adjusted = logit_subset + matchup_lifts[slot] + tto_lifts[tto_block]
+                    game_counts += rng.binomial(n=count, p=expit(adjusted))
+            else:
+                base_pa = bf_int // 9
+                extra = bf_int % 9
+                pa_per_slot = np.full(9, base_pa, dtype=int)
+                pa_per_slot[:extra] += 1
+                for slot in range(9):
+                    if pa_per_slot[slot] == 0:
+                        continue
+                    adjusted = logit_subset + matchup_lifts[slot]
+                    game_counts += rng.binomial(n=pa_per_slot[slot], p=expit(adjusted))
+
+            totals[mask] = game_counts
+
+        results[stat_name] = totals
+
+    return results
+
+
+def compute_over_probs(
+    samples: np.ndarray,
+    lines: list[float] | None = None,
+) -> pd.DataFrame:
+    """Compute P(over) for a set of lines — stat-agnostic version.
+
+    Parameters
+    ----------
+    samples : np.ndarray
+        Monte Carlo game total samples.
+    lines : list[float] or None
+        Lines to evaluate. Default: [0.5, 1.5, ..., 12.5].
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: line, p_over, p_under, expected, std.
+    """
+    if lines is None:
+        lines = [x + 0.5 for x in range(13)]
+
+    expected = float(np.mean(samples))
+    std = float(np.std(samples))
+
+    records = []
+    for line in lines:
+        p_over = float(np.mean(samples > line))
+        records.append({
+            "line": line,
+            "p_over": p_over,
+            "p_under": 1.0 - p_over,
+            "expected": expected,
+            "std": std,
+        })
+
+    return pd.DataFrame(records)
+
+
 def compute_k_over_probs(
     k_samples: np.ndarray,
     lines: list[float] | None = None,

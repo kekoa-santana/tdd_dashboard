@@ -133,41 +133,54 @@ def create_posterior_fig(
     return fig
 
 
-def create_game_k_fig(
-    k_samples: np.ndarray,
+_STAT_CHART_CONFIG = {
+    "k":  {"xlabel": "Strikeouts", "title_stat": "K",  "color": SAGE},
+    "bb": {"xlabel": "Walks",      "title_stat": "BB", "color": EMBER},
+    "hr": {"xlabel": "Home Runs",  "title_stat": "HR", "color": GOLD},
+}
+
+
+def create_game_stat_fig(
+    samples: np.ndarray,
     pitcher_name: str,
+    stat: str = "k",
 ) -> Figure:
-    """Create a game K distribution histogram."""
+    """Create a game stat distribution histogram, parameterized by stat."""
+    cfg = _STAT_CHART_CONFIG.get(stat, _STAT_CHART_CONFIG["k"])
+    bar_color = cfg["color"]
+    xlabel = cfg["xlabel"]
+    title_stat = cfg["title_stat"]
+
     fig = Figure(figsize=(7, 3.5))
     ax = fig.subplots()
     fig.patch.set_facecolor(DARK)
     ax.set_facecolor(DARK)
 
-    max_k = int(k_samples.max()) + 1
-    bins = np.arange(-0.5, max_k + 1.5, 1)
+    max_val = int(samples.max()) + 1
+    bins = np.arange(-0.5, max_val + 1.5, 1)
     counts, _, bars = ax.hist(
-        k_samples, bins=bins, density=True,
-        color=SAGE, alpha=0.7, edgecolor=DARK, linewidth=0.5,
+        samples, bins=bins, density=True,
+        color=bar_color, alpha=0.7, edgecolor=DARK, linewidth=0.5,
     )
 
-    mode_k = int(np.median(k_samples))
+    mode_val = int(np.median(samples))
     for bar in bars:
-        if abs(bar.get_x() + 0.5 - mode_k) < 0.5:
+        if abs(bar.get_x() + 0.5 - mode_val) < 0.5:
             bar.set_facecolor(GOLD)
             bar.set_alpha(0.9)
 
-    mean_k = np.mean(k_samples)
-    ax.axvline(mean_k, color=GOLD, linewidth=2, linestyle="--", alpha=0.9)
+    mean_val = np.mean(samples)
+    ax.axvline(mean_val, color=GOLD, linewidth=2, linestyle="--", alpha=0.9)
     ax.text(
-        mean_k + 0.3, ax.get_ylim()[1] * 0.9,
-        f"E[K] = {mean_k:.1f}",
+        mean_val + 0.3, ax.get_ylim()[1] * 0.9,
+        f"E[{title_stat}] = {mean_val:.1f}",
         color=GOLD, fontsize=11, fontweight="bold", va="top",
     )
 
-    ax.set_xlabel("Strikeouts", color=SLATE, fontsize=11)
+    ax.set_xlabel(xlabel, color=SLATE, fontsize=11)
     ax.set_ylabel("Probability", color=SLATE, fontsize=10)
     ax.set_title(
-        f"{pitcher_name} -- Projected K Distribution ({CURRENT_SEASON})",
+        f"{pitcher_name} -- Projected {title_stat} Distribution ({CURRENT_SEASON})",
         color=CREAM, fontsize=13, fontweight="bold", pad=12,
     )
     ax.tick_params(colors=SLATE, labelsize=9)
@@ -177,6 +190,14 @@ def create_game_k_fig(
     add_watermark(fig)
     fig.tight_layout()
     return fig
+
+
+def create_game_k_fig(
+    k_samples: np.ndarray,
+    pitcher_name: str,
+) -> Figure:
+    """Create a game K distribution histogram (backward-compat wrapper)."""
+    return create_game_stat_fig(k_samples, pitcher_name, stat="k")
 
 
 def create_arsenal_fig(
