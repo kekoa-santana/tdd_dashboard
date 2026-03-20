@@ -13,7 +13,6 @@ from config import (
 )
 from services.data_loader import (
     load_projections, load_counting, load_player_teams,
-    load_hitter_breakout_candidates, load_rankings,
 )
 from utils.helpers import strip_accents, get_injury_lookup
 from utils.formatters import fmt_stat
@@ -89,17 +88,6 @@ _EDITORIAL_CSS = f"""
     font-size: 0.75rem;
     margin-top: 0.1rem;
 }}
-.breakout-type {{
-    font-size: 0.7rem;
-    color: {EMBER};
-    font-weight: 600;
-}}
-.breakout-narrative {{
-    font-size: 0.72rem;
-    color: {SLATE};
-    margin-top: 0.1rem;
-    line-height: 1.3;
-}}
 </style>
 """
 
@@ -172,146 +160,6 @@ def _render_top_risers(
         + '</div>',
         unsafe_allow_html=True,
     )
-
-
-def _render_breakout_watch(
-    player_type: str,
-    teams_lookup: dict[int, str],
-) -> None:
-    """Render Breakout Watch — hitter breakout candidates or pitcher risers."""
-    if player_type == "Hitter":
-        breakout_df = load_hitter_breakout_candidates()
-        if breakout_df.empty:
-            st.markdown(
-                '<div class="editorial-section">'
-                '<div class="editorial-header">Breakout Watch</div>'
-                f'<div class="editorial-muted">No breakout data available.</div>'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-            return
-
-        real_candidates = breakout_df[
-            breakout_df["breakout_tier"].isin(["Breakout Candidate", "On the Radar"])
-        ].nlargest(5, "breakout_score")
-
-        if real_candidates.empty:
-            real_candidates = breakout_df.nlargest(5, "breakout_score")
-
-        rows_html: list[str] = []
-        for i, (_, row) in enumerate(real_candidates.iterrows(), 1):
-            name = row["batter_name"]
-            pid = int(row["batter_id"])
-            team = teams_lookup.get(pid, "")
-            team_span = f'<span class="editorial-team">({team})</span>' if team else ""
-
-            b_type = row.get("breakout_type", "")
-            type_span = (
-                f'<span class="breakout-type">{b_type}</span>'
-                if b_type else ""
-            )
-
-            narrative = row.get("breakout_narrative", "")
-            narrative_span = ""
-            if narrative:
-                short = narrative[:80] + "..." if len(narrative) > 80 else narrative
-                narrative_span = (
-                    f'<div class="breakout-narrative">{short}</div>'
-                )
-
-            score = row.get("breakout_score", 0)
-            score_span = (
-                f'<span class="editorial-detail editorial-positive">'
-                f'{score:.0%}</span>'
-            )
-
-            rows_html.append(
-                f'<div class="editorial-row">'
-                f'<span class="editorial-rank">{i}.</span>'
-                f'<span class="editorial-name">{name}</span>'
-                f'{team_span}'
-                f'{score_span}'
-                f'</div>'
-                f'<div style="padding-left:1.8rem; margin-top:-0.2rem; '
-                f'margin-bottom:0.2rem;">'
-                f'{type_span}'
-                f'{narrative_span}'
-                f'</div>'
-            )
-
-        st.markdown(
-            '<div class="editorial-section">'
-            '<div class="editorial-header">Breakout Watch</div>'
-            + "".join(rows_html)
-            + '</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        rankings_df = load_rankings("pitchers")
-        if rankings_df.empty or "breakout_score" not in rankings_df.columns:
-            st.markdown(
-                '<div class="editorial-section">'
-                '<div class="editorial-header">Breakout Watch</div>'
-                f'<div class="editorial-muted">No pitcher breakout data available.</div>'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-            return
-
-        real_candidates = rankings_df[
-            rankings_df["breakout_tier"].isin(["Breakout Candidate", "On the Radar"])
-        ].nlargest(5, "breakout_score") if "breakout_tier" in rankings_df.columns else pd.DataFrame()
-
-        if real_candidates.empty:
-            real_candidates = rankings_df.nlargest(5, "breakout_score")
-
-        rows_html = []
-        for i, (_, row) in enumerate(real_candidates.iterrows(), 1):
-            name = row["pitcher_name"]
-            pid = int(row["pitcher_id"])
-            team = teams_lookup.get(pid, "")
-            team_span = f'<span class="editorial-team">({team})</span>' if team else ""
-
-            b_type = row.get("breakout_type", "")
-            type_span = (
-                f'<span class="breakout-type">{b_type}</span>'
-                if b_type else ""
-            )
-
-            b_hole = row.get("breakout_hole", "")
-            hole_span = ""
-            if b_hole:
-                hole_span = (
-                    f'<div class="breakout-narrative">Key: {b_hole}</div>'
-                )
-
-            score = row.get("breakout_score", 0)
-            score_span = (
-                f'<span class="editorial-detail editorial-positive">'
-                f'{score:.0%}</span>'
-            )
-
-            rows_html.append(
-                f'<div class="editorial-row">'
-                f'<span class="editorial-rank">{i}.</span>'
-                f'<span class="editorial-name">{name}</span>'
-                f'{team_span}'
-                f'{score_span}'
-                f'</div>'
-                f'<div style="padding-left:1.8rem; margin-top:-0.2rem; '
-                f'margin-bottom:0.2rem;">'
-                f'{type_span}'
-                f'{hole_span}'
-                f'</div>'
-            )
-
-        st.markdown(
-            '<div class="editorial-section">'
-            '<div class="editorial-header">Breakout Watch</div>'
-            + "".join(rows_html)
-            + '</div>',
-            unsafe_allow_html=True,
-        )
 
 
 def _render_diamond_leaders(
@@ -416,12 +264,10 @@ def page_projections() -> None:
     # ── Editorial highlights ──────────────────────────────────────────
     st.markdown(_EDITORIAL_CSS, unsafe_allow_html=True)
 
-    ed_cols = st.columns(3)
+    ed_cols = st.columns(2)
     with ed_cols[0]:
         _render_top_risers(df, id_col, name_col, teams_lookup, stat_configs)
     with ed_cols[1]:
-        _render_breakout_watch(player_type, teams_lookup)
-    with ed_cols[2]:
         _render_diamond_leaders(df, id_col, name_col, teams_lookup)
 
     st.markdown("---")
