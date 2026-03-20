@@ -21,6 +21,9 @@ from services.data_loader import (
     load_k_samples, load_bb_samples, load_hr_samples, load_bf_priors,
     load_pitcher_offerings, load_cluster_metadata,
     load_archetype_matchup_matrix,
+    load_exit_model, load_pitcher_pitch_count_features,
+    load_batter_pitch_count_features, load_tto_profiles,
+    load_pitcher_exit_tendencies,
     fetch_live_schedule, fetch_live_lineups,
 )
 from utils.helpers import get_team_lookup
@@ -206,6 +209,13 @@ def _render_schedule_cards(
     _cluster_meta_df = load_cluster_metadata()
     _matchup_matrix_df = load_archetype_matchup_matrix()
 
+    # Game sim v2 component data
+    _exit_model = load_exit_model()
+    _pitcher_pc = load_pitcher_pitch_count_features()
+    _batter_pc = load_batter_pitch_count_features()
+    _tto_profiles = load_tto_profiles()
+    _exit_tendencies = load_pitcher_exit_tendencies()
+
     # Always build projection lookup (used by cards + drilldown)
     proj_lookup = _build_projection_lookup()
 
@@ -335,6 +345,20 @@ def _render_schedule_cards(
                     has_lineup = sim.get("has_lineup", False)
                     lineup_tag = "" if has_lineup else " (no lineup)"
 
+                    # Multi-stat expectations line
+                    stat_parts = [f'E[K]: {exp_k:.1f}']
+                    exp_bb = sim.get("expected_bb")
+                    exp_h = sim.get("expected_h")
+                    exp_ip = sim.get("expected_ip")
+                    if pd.notna(exp_bb):
+                        stat_parts.append(f'BB: {exp_bb:.1f}')
+                    if pd.notna(exp_h):
+                        stat_parts.append(f'H: {exp_h:.1f}')
+                    if pd.notna(exp_ip):
+                        stat_parts.append(f'IP: {exp_ip:.1f}')
+                    stat_line = " | ".join(stat_parts)
+
+                    # K prop lines
                     p_lines = []
                     for line_col in ["p_over_5_5", "p_over_6_5", "p_over_7_5"]:
                         if line_col in sim.index and pd.notna(sim.get(line_col)):
@@ -345,15 +369,24 @@ def _render_schedule_cards(
                                 f'<span style="color:{color};">'
                                 f'O{line_val}: {p:.0f}%</span>'
                             )
-
                     p_line_html = " | ".join(p_lines) if p_lines else ""
+
+                    # Fantasy line
+                    dk_mean = sim.get("dk_mean")
+                    fantasy_html = ""
+                    if pd.notna(dk_mean):
+                        fantasy_html = (
+                            f'<div style="font-size:0.8rem; color:{SLATE}; margin-top:2px;">'
+                            f'DK: {dk_mean:.1f} pts</div>'
+                        )
 
                     st.markdown(
                         f'<div style="font-size:0.95rem; font-weight:600; color:{CREAM};">'
                         f'{side_label}: {pp_name}{_pp_arch_tag}</div>'
                         f'<div style="font-size:0.8rem; color:{SLATE}; margin-top:2px;">'
-                        f'K%: {k_rate_pct:.1f}% | E[K]: {exp_k:.1f}{lineup_tag}</div>'
-                        f'<div style="font-size:0.8rem; margin-top:2px;">{p_line_html}</div>',
+                        f'K%: {k_rate_pct:.1f}% | {stat_line}{lineup_tag}</div>'
+                        f'<div style="font-size:0.8rem; margin-top:2px;">{p_line_html}</div>'
+                        f'{fantasy_html}',
                         unsafe_allow_html=True,
                     )
                 else:
@@ -391,6 +424,11 @@ def _render_schedule_cards(
                 _offerings_df, _cluster_meta_df, _matchup_matrix_df,
                 bb_samples_dict=_bb_samples_dict,
                 hr_samples_dict=_hr_samples_dict,
+                exit_model=_exit_model,
+                pitcher_pc=_pitcher_pc,
+                batter_pc=_batter_pc,
+                tto_profiles=_tto_profiles,
+                exit_tendencies=_exit_tendencies,
             )
 
     if not sims.empty and not sims_stale:
@@ -425,6 +463,11 @@ def _render_game_drilldown(
     matchup_matrix_df: pd.DataFrame | None = None,
     bb_samples_dict: dict[str, np.ndarray] | None = None,
     hr_samples_dict: dict[str, np.ndarray] | None = None,
+    exit_model: object | None = None,
+    pitcher_pc: pd.DataFrame | None = None,
+    batter_pc: pd.DataFrame | None = None,
+    tto_profiles: pd.DataFrame | None = None,
+    exit_tendencies: pd.DataFrame | None = None,
 ) -> None:
     """Rich game drill-down: lineup matchups, archetype analysis, and game simulator."""
     away_abbr = game.get("away_abbr", "?")
@@ -491,6 +534,11 @@ def _render_game_drilldown(
             game_context=game_context,
             bb_samples_dict=bb_samples_dict or {},
             hr_samples_dict=hr_samples_dict or {},
+            exit_model=exit_model,
+            pitcher_pc=pitcher_pc if pitcher_pc is not None else pd.DataFrame(),
+            batter_pc=batter_pc if batter_pc is not None else pd.DataFrame(),
+            tto_profiles=tto_profiles if tto_profiles is not None else pd.DataFrame(),
+            exit_tendencies=exit_tendencies if exit_tendencies is not None else pd.DataFrame(),
         )
 
 
@@ -1077,10 +1125,18 @@ def _render_sim_tab(
     game_context: dict | None = None,
     bb_samples_dict: dict[str, np.ndarray] | None = None,
     hr_samples_dict: dict[str, np.ndarray] | None = None,
+    exit_model: object | None = None,
+    pitcher_pc: pd.DataFrame | None = None,
+    batter_pc: pd.DataFrame | None = None,
+    tto_profiles: pd.DataFrame | None = None,
+    exit_tendencies: pd.DataFrame | None = None,
 ) -> None:
-    """Multi-stat game simulator: K, BB, and HR projections per pitcher."""
-    from lib.bf_model import get_bf_distribution
-    from lib.game_k_model import simulate_game_outcomes, compute_over_probs
+    """Multi-stat game simulator using PA-by-PA engine (Layer 3 v2)."""
+    from lib.game_sim.simulator import simulate_game
+    from lib.game_sim.exit_model import ExitModel
+    from lib.game_sim.tto_model import build_all_tto_lifts
+    from lib.game_sim.pitch_count_model import build_pitch_count_features
+    from lib.game_sim.fantasy_scoring import compute_pitcher_fantasy
     from lib.matchup import score_matchup, score_matchup_bb, score_matchup_hr
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
 
@@ -1091,6 +1147,14 @@ def _render_sim_tab(
     bb_samples_dict = bb_samples_dict or {}
     hr_samples_dict = hr_samples_dict or {}
     ctx = game_context or {}
+    pitcher_pc = pitcher_pc if pitcher_pc is not None else pd.DataFrame()
+    batter_pc = batter_pc if batter_pc is not None else pd.DataFrame()
+    tto_profiles_df = tto_profiles if tto_profiles is not None else pd.DataFrame()
+    exit_tend_df = exit_tendencies if exit_tendencies is not None else pd.DataFrame()
+
+    # Ensure we have an ExitModel instance
+    if exit_model is None:
+        exit_model = ExitModel()
 
     # Game context bar
     context_parts = []
@@ -1136,8 +1200,25 @@ def _render_sim_tab(
     _STAT_META = {
         "k":  {"label": "K",  "word": "strikeouts", "lines": (3.5, 10.5), "hi": 6, "vhi": 8},
         "bb": {"label": "BB", "word": "walks",      "lines": (1.5, 5.5),  "hi": 3, "vhi": 4},
+        "h":  {"label": "H",  "word": "hits",       "lines": (3.5, 9.5),  "hi": 6, "vhi": 8},
         "hr": {"label": "HR", "word": "home runs",  "lines": (0.5, 2.5),  "hi": 1, "vhi": 2},
     }
+
+    # Helper: fallback rate samples
+    _rng = np.random.default_rng(99)
+
+    def _fallback(rate: float, n: int = 4000) -> np.ndarray:
+        r = np.clip(rate, 0.01, 0.99)
+        return _rng.beta(r * 200, (1 - r) * 200, size=n).astype(np.float32)
+
+    def _pitcher_avg_pitches(pid: int) -> float:
+        if exit_tend_df.empty:
+            return 88.0
+        row = exit_tend_df[
+            (exit_tend_df["pitcher_id"] == pid)
+            & (exit_tend_df["season"] == PRIOR_SEASON)
+        ]
+        return float(row.iloc[0]["avg_pitches"]) if not row.empty else 88.0
 
     rendered = False
     for side_info in sides:
@@ -1153,57 +1234,44 @@ def _render_sim_tab(
         p_proj = side_info["pitcher_proj"]
 
         pid_str = str(pid)
-        k_samples = k_samples_dict[pid_str]
-        bb_samples = bb_samples_dict.get(pid_str)
-        hr_samples = hr_samples_dict.get(pid_str)
+        k_samp = k_samples_dict[pid_str]
+        proj_bb = float(p_proj.get("projected_bb_rate", 0.08) or 0.08)
+        proj_hr = float(p_proj.get("projected_hr_per_bf", 0.03) or 0.03)
+        bb_samp = bb_samples_dict.get(pid_str) or _fallback(proj_bb)
+        hr_samp = hr_samples_dict.get(pid_str) or _fallback(proj_hr)
 
-        # BF distribution
-        bf_info = get_bf_distribution(pid, PRIOR_SEASON, bf_priors)
-        bf_mu = bf_info["mu_bf"]
-        bf_sigma = bf_info["sigma_bf"]
-
-        # Compute per-batter matchup lifts for all stats
-        lineup_k_lifts = None
-        lineup_bb_lifts = None
-        lineup_hr_lifts = None
+        # Compute per-batter matchup lifts
+        lineup_matchup_lifts: dict[str, np.ndarray] = {}
         per_batter_details: list[dict] = []
+        lineup_batter_ids: list[int] = []
+        has_lineup = False
 
         if not opp_lu.empty and not arsenal_df.empty and not vuln_df.empty:
             id_col = "batter_id" if "batter_id" in opp_lu.columns else "player_id"
             name_col = "batter_name" if "batter_name" in opp_lu.columns else "player_name"
 
-            k_lifts: list[float] = []
-            bb_lifts: list[float] = []
-            hr_lifts: list[float] = []
-
+            k_lifts, bb_lifts, hr_lifts = [], [], []
             for _, brow in opp_lu.head(9).iterrows():
                 bid = int(brow[id_col]) if pd.notna(brow.get(id_col)) else None
                 if bid:
+                    lineup_batter_ids.append(bid)
                     k_m = score_matchup(pid, bid, arsenal_df, vuln_df, baselines_pt)
-                    k_lift = k_m.get("matchup_k_logit_lift", 0.0)
-                    if np.isnan(k_lift):
-                        k_lift = 0.0
-                    k_lifts.append(k_lift)
+                    kl = k_m.get("matchup_k_logit_lift", 0.0)
+                    k_lifts.append(0.0 if np.isnan(kl) else kl)
 
-                    bb_lift = 0.0
-                    hr_lift = 0.0
-                    if bb_samples is not None:
-                        bb_m = score_matchup_bb(pid, bid, arsenal_df, vuln_df, baselines_pt)
-                        bb_lift = bb_m.get("matchup_bb_logit_lift", 0.0)
-                        if np.isnan(bb_lift):
-                            bb_lift = 0.0
-                    if hr_samples is not None:
-                        hr_m = score_matchup_hr(pid, bid, arsenal_df, vuln_df, baselines_pt)
-                        hr_lift = hr_m.get("matchup_hr_logit_lift", 0.0)
-                        if np.isnan(hr_lift):
-                            hr_lift = 0.0
-                    bb_lifts.append(bb_lift)
-                    hr_lifts.append(hr_lift)
+                    bb_m = score_matchup_bb(pid, bid, arsenal_df, vuln_df, baselines_pt)
+                    bl = bb_m.get("matchup_bb_logit_lift", 0.0)
+                    bb_lifts.append(0.0 if np.isnan(bl) else bl)
+
+                    hr_m = score_matchup_hr(pid, bid, arsenal_df, vuln_df, baselines_pt)
+                    hl = hr_m.get("matchup_hr_logit_lift", 0.0)
+                    hr_lifts.append(0.0 if np.isnan(hl) else hl)
 
                     k_m["batter_name"] = brow.get(name_col, "Unknown")
                     k_m["batting_order"] = int(brow["batting_order"])
                     per_batter_details.append(k_m)
                 else:
+                    lineup_batter_ids.append(0)
                     k_lifts.append(0.0)
                     bb_lifts.append(0.0)
                     hr_lifts.append(0.0)
@@ -1212,64 +1280,90 @@ def _render_sim_tab(
                 k_lifts.append(0.0)
                 bb_lifts.append(0.0)
                 hr_lifts.append(0.0)
-            lineup_k_lifts = np.array(k_lifts[:9])
-            lineup_bb_lifts = np.array(bb_lifts[:9])
-            lineup_hr_lifts = np.array(hr_lifts[:9])
+                lineup_batter_ids.append(0)
 
-        # Run multi-stat simulation
-        outcomes = simulate_game_outcomes(
-            k_rate_samples=k_samples,
-            bb_rate_samples=bb_samples,
-            hr_rate_samples=hr_samples,
-            bf_mu=float(bf_mu),
-            bf_sigma=bf_sigma,
-            lineup_k_lifts=lineup_k_lifts,
-            lineup_bb_lifts=lineup_bb_lifts,
-            lineup_hr_lifts=lineup_hr_lifts,
-            umpire_k_logit_lift=ump_k_lift,
-            weather_k_logit_lift=wx_k_lift,
-            n_draws=10_000,
-            random_seed=42 + gpk,
+            has_lineup = True
+            lineup_matchup_lifts = {
+                "k": np.array(k_lifts[:9]),
+                "bb": np.array(bb_lifts[:9]),
+                "hr": np.array(hr_lifts[:9]),
+            }
+
+        # TTO lifts
+        tto_lifts = build_all_tto_lifts(
+            tto_profiles_df if not tto_profiles_df.empty else None,
+            pid, PRIOR_SEASON,
         )
+
+        # Pitch count features
+        pitcher_ppa_adj = 0.0
+        batter_ppa_adjs = np.zeros(9)
+        if not pitcher_pc.empty and not batter_pc.empty and lineup_batter_ids:
+            pitcher_ppa_adj, batter_ppa_adjs = build_pitch_count_features(
+                pitcher_pc, batter_pc, pid, lineup_batter_ids[:9], PRIOR_SEASON,
+            )
+
+        avg_pitches = _pitcher_avg_pitches(pid)
+
+        # Run PA-by-PA simulation
+        result = simulate_game(
+            pitcher_k_rate_samples=k_samp,
+            pitcher_bb_rate_samples=bb_samp,
+            pitcher_hr_rate_samples=hr_samp,
+            lineup_matchup_lifts=lineup_matchup_lifts,
+            tto_lifts=tto_lifts,
+            pitcher_ppa_adj=pitcher_ppa_adj,
+            batter_ppa_adjs=batter_ppa_adjs,
+            exit_model=exit_model,
+            pitcher_avg_pitches=avg_pitches,
+            umpire_k_lift=ump_k_lift,
+            weather_k_lift=wx_k_lift,
+            n_sims=10_000,
+            random_seed=42 + gpk + (0 if side_info["side"] == "away" else 1),
+        )
+
+        # Fantasy points
+        fantasy = compute_pitcher_fantasy(result)
+        dk = fantasy.dk_summary()
 
         # Pitcher header with multi-stat expectations
         arch = side_info.get("pitcher_arch")
         arch_tag = f" ({arch})" if arch else ""
-        lineup_tag = f"vs {opp_abbr} lineup" if lineup_k_lifts is not None else "league-avg baseline"
+        lineup_tag = f"vs {opp_abbr} lineup" if has_lineup else "league-avg baseline"
 
-        exp_parts = [f"E[K]: {np.mean(outcomes['k']):.1f}"]
-        if "bb" in outcomes:
-            exp_parts.append(f"E[BB]: {np.mean(outcomes['bb']):.1f}")
-        if "hr" in outcomes:
-            exp_parts.append(f"E[HR]: {np.mean(outcomes['hr']):.1f}")
+        exp_parts = [
+            f"E[K]: {np.mean(result.k_samples):.1f}",
+            f"BB: {np.mean(result.bb_samples):.1f}",
+            f"H: {np.mean(result.h_samples):.1f}",
+            f"HR: {np.mean(result.hr_samples):.1f}",
+            f"IP: {np.mean(result.ip_samples()):.1f}",
+        ]
 
         st.markdown(
             f'<div style="color:{GOLD}; font-size:1rem; font-weight:600; '
             f'margin:0.8rem 0 0.3rem;">'
             f'{side_abbr} SP: {pitcher_name}{arch_tag}'
             f'<span style="color:{SLATE}; font-size:0.85rem; font-weight:400;">'
-            f' — {" | ".join(exp_parts)} | E[BF]: {bf_mu:.0f} | {lineup_tag}</span>'
+            f' — {" | ".join(exp_parts)} | {lineup_tag}</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
 
-        # Stat selector (only show available stats)
-        available_stats = ["K"]
-        if "bb" in outcomes:
-            available_stats.append("BB")
-        if "hr" in outcomes:
-            available_stats.append("HR")
+        # DK fantasy line
+        st.markdown(
+            f'<div style="font-size:0.85rem; color:{SLATE}; margin-bottom:0.5rem;">'
+            f'DK: {dk["mean"]:.1f} pts (median {dk["median"]:.1f}, '
+            f'10th {dk["q10"]:.1f}, 90th {dk["q90"]:.1f})</div>',
+            unsafe_allow_html=True,
+        )
 
-        if len(available_stats) > 1:
-            selected_stat_label = st.radio(
-                "Stat", available_stats, horizontal=True,
-                key=f"sim_stat_{side_info['side']}_{gpk}",
-            )
-        else:
-            selected_stat_label = "K"
-
+        # Stat selector
+        selected_stat_label = st.radio(
+            "Stat", ["K", "BB", "H", "HR"], horizontal=True,
+            key=f"sim_stat_{side_info['side']}_{gpk}",
+        )
         stat_key = selected_stat_label.lower()
-        stat_samples = outcomes[stat_key]
+        stat_samples = getattr(result, f"{stat_key}_samples")
         meta = _STAT_META[stat_key]
 
         # Distribution chart
@@ -1277,13 +1371,13 @@ def _render_sim_tab(
         st.pyplot(fig, use_container_width=True)
         plt.close(fig)
 
-        # Combined prop table for all available stats
+        # Combined prop table for all stats
         prop_rows = []
-        for skey in outcomes:
-            smeta = _STAT_META[skey]
+        for skey, smeta in _STAT_META.items():
+            s_samples = getattr(result, f"{skey}_samples")
             lo, hi = smeta["lines"]
             lines = [x + 0.5 for x in range(int(lo - 0.5), int(hi - 0.5) + 1)]
-            over_df = compute_over_probs(outcomes[skey], lines=lines)
+            over_df = result.over_probs(skey, lines=lines)
 
             for _, row in over_df.iterrows():
                 p = row["p_over"]

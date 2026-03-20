@@ -1004,17 +1004,35 @@ def _render_overview_tab(
     _h_arch_df = load_hitter_archetypes()
 
     if not _p_arch_df.empty or not _h_arch_df.empty:
-        staff_pills = ""
+        sp_pills = ""
+        bp_pills = ""
         lineup_pills = ""
 
         if not _p_arch_df.empty and not team_pitchers.empty:
-            _tp_ids = set(team_pitchers["pitcher_id"].astype(int))
-            _tp_arch = _p_arch_df[_p_arch_df["pitcher_id"].isin(_tp_ids)]
-            if not _tp_arch.empty:
-                _counts = _tp_arch["archetype_name"].value_counts()
-                for name, count in _counts.items():
+            _sp_ids = set(
+                team_pitchers[team_pitchers["is_starter"] == True]["pitcher_id"].astype(int)
+            )
+            _rp_ids = set(
+                team_pitchers[team_pitchers["is_starter"] == False]["pitcher_id"].astype(int)
+            )
+
+            _sp_arch = _p_arch_df[_p_arch_df["pitcher_id"].isin(_sp_ids)]
+            if not _sp_arch.empty:
+                for name, count in _sp_arch["archetype_name"].value_counts().items():
                     color = _PILL_COLORS.get(name, SLATE)
-                    staff_pills += (
+                    sp_pills += (
+                        f'<span style="background:{color}22; color:{color}; '
+                        f'border:1px solid {color}44; padding:3px 10px; '
+                        f'border-radius:12px; font-size:0.8rem; font-weight:600; '
+                        f'margin-right:5px; white-space:nowrap;">'
+                        f'{count}\u00d7 {name}</span>'
+                    )
+
+            _rp_arch = _p_arch_df[_p_arch_df["pitcher_id"].isin(_rp_ids)]
+            if not _rp_arch.empty:
+                for name, count in _rp_arch["archetype_name"].value_counts().items():
+                    color = _PILL_COLORS.get(name, SLATE)
+                    bp_pills += (
                         f'<span style="background:{color}22; color:{color}; '
                         f'border:1px solid {color}44; padding:3px 10px; '
                         f'border-radius:12px; font-size:0.8rem; font-weight:600; '
@@ -1026,8 +1044,7 @@ def _render_overview_tab(
             _th_ids = set(team_hitters["batter_id"].astype(int))
             _th_arch = _h_arch_df[_h_arch_df["batter_id"].isin(_th_ids)]
             if not _th_arch.empty:
-                _counts = _th_arch["archetype_name"].value_counts()
-                for name, count in _counts.items():
+                for name, count in _th_arch["archetype_name"].value_counts().items():
                     color = _PILL_COLORS.get(name, SLATE)
                     lineup_pills += (
                         f'<span style="background:{color}22; color:{color}; '
@@ -1037,14 +1054,22 @@ def _render_overview_tab(
                         f'{count}\u00d7 {name}</span>'
                     )
 
-        if staff_pills or lineup_pills:
+        if sp_pills or bp_pills or lineup_pills:
             st.markdown("### Roster Composition")
-            if staff_pills:
+            if sp_pills:
                 st.markdown(
                     f'<div style="margin-bottom:8px;">'
                     f'<span style="color:{CREAM}; font-size:0.85rem; '
-                    f'font-weight:600; margin-right:8px;">Staff:</span>'
-                    f'{staff_pills}</div>',
+                    f'font-weight:600; margin-right:8px;">SP:</span>'
+                    f'{sp_pills}</div>',
+                    unsafe_allow_html=True,
+                )
+            if bp_pills:
+                st.markdown(
+                    f'<div style="margin-bottom:8px;">'
+                    f'<span style="color:{CREAM}; font-size:0.85rem; '
+                    f'font-weight:600; margin-right:8px;">Bullpen:</span>'
+                    f'{bp_pills}</div>',
                     unsafe_allow_html=True,
                 )
             if lineup_pills:
