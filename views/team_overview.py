@@ -12,7 +12,7 @@ from config import (
     CURRENT_SEASON, PRIOR_SEASON,
 )
 from services.data_loader import (
-    load_projections, load_counting, load_player_teams,
+    load_projections, load_counting, load_player_teams, load_roster,
     load_pitcher_arsenal, load_preseason_injuries,
     load_pitcher_offerings, load_hitter_vuln_arch_career,
     load_cluster_metadata, load_baselines_arch,
@@ -73,18 +73,16 @@ def _build_depth_chart(
             # Keep only this team's eligibility rows
             team_elig = elig[elig["player_id"].isin(team_pids)].copy()
             team_elig = team_elig.rename(columns={"player_id": "batter_id"})
-            # Drop the single-position column; replace with eligibility rows
-            base = team_h.drop(columns=["position", "pos_rank"], errors="ignore")
+            # Drop position (replaced by eligibility); keep pos_rank (MLB-wide)
+            base = team_h.drop(columns=["position"], errors="ignore")
             team_h = base.merge(
                 team_elig[["batter_id", "position", "starts", "pct", "is_primary"]],
                 on="batter_id", how="inner",
             )
-            # Recompute pos_rank within each position for this team view
+            # Null out pos_rank for secondary positions (rank is primary-pos specific)
+            team_h.loc[~team_h["is_primary"], "pos_rank"] = pd.NA
             team_h = team_h.sort_values(
                 ["position", "tdd_value_score"], ascending=[True, False],
-            )
-            team_h["pos_rank_team"] = (
-                team_h.groupby("position").cumcount() + 1
             )
         # If no eligibility data, team_h keeps its original position column
     else:
@@ -173,13 +171,6 @@ def _player_row_html(
     )
 
 
-def _rank_col(team_h: pd.DataFrame) -> str:
-    """Return the best available rank column name."""
-    if "pos_rank_team" in team_h.columns:
-        return "pos_rank_team"
-    return "pos_rank"
-
-
 def _render_depth_chart_tab(selected_team: str, teams_df: pd.DataFrame) -> None:
     """Render the Depth Chart tab."""
     team_h, team_p = _build_depth_chart(selected_team, teams_df)
@@ -189,7 +180,6 @@ def _render_depth_chart_tab(selected_team: str, teams_df: pd.DataFrame) -> None:
 
     # ── Summary metric cards ─────────────────────────────────────
     if not team_h.empty:
-        rcol = _rank_col(team_h)
         # For summary cards, use only primary-position rows when available
         if "is_primary" in team_h.columns:
             primary_h = team_h[team_h["is_primary"]].copy()
@@ -216,16 +206,24 @@ def _render_depth_chart_tab(selected_team: str, teams_df: pd.DataFrame) -> None:
 
         cols = st.columns(4)
         with cols[0]:
-            val = (
-                f'{strongest["position"]} ({strongest["tdd_value_score"]:.2f})'
-                if strongest is not None else "--"
-            )
+            if strongest is not None:
+                s_rank = int(strongest["pos_rank"]) if pd.notna(strongest.get("pos_rank")) else None
+                val = (
+                    f'{strongest["position"]} (#{s_rank})'
+                    if s_rank else f'{strongest["position"]}'
+                )
+            else:
+                val = "--"
             st.metric("Strongest Position", val)
         with cols[1]:
-            val = (
-                f'{weakest["position"]} ({weakest["tdd_value_score"]:.2f})'
-                if weakest is not None else "--"
-            )
+            if weakest is not None:
+                w_rank = int(weakest["pos_rank"]) if pd.notna(weakest.get("pos_rank")) else None
+                val = (
+                    f'{weakest["position"]} (#{w_rank})'
+                    if w_rank else f'{weakest["position"]}'
+                )
+            else:
+                val = "--"
             st.metric("Weakest Position", val)
         with cols[2]:
             st.metric("Avg Value Score", f"{avg_score:.2f}" if avg_score else "--")
@@ -243,7 +241,6 @@ def _render_hitter_depth(team_h: pd.DataFrame) -> None:
     st.markdown("### Hitter Depth")
 
     has_elig = "is_primary" in team_h.columns
-    rcol = _rank_col(team_h)
 
     for pos in _HITTER_POSITIONS:
         pos_players = team_h[team_h["position"] == pos].sort_values(
@@ -270,7 +267,7 @@ def _render_hitter_depth(team_h: pd.DataFrame) -> None:
                 pct = row.get("pct", 0)
                 name += f" ({pct:.0%})" if pct else ""
 
-            rank_val = int(row[rcol]) if pd.notna(row.get(rcol)) else 0
+            rank_val = int(row["pos_rank"]) if pd.notna(row.get("pos_rank")) else 0
             rows_html += _player_row_html(
                 name=name,
                 rank=rank_val,
@@ -690,6 +687,161 @@ def _render_trade_results(
         f'<div class="insight-card">{table_html}</div>',
         unsafe_allow_html=True,
     )
+
+
+# ── Pitching staff helpers ────────────────────────────────────────────
+
+def _render_staff_metrics(
+    team_subset: pd.DataFrame,
+    lg_subset: pd.DataFrame,
+    k_col: str,
+    bb_col: str,
+) -> None:
+    """Render strengths/weaknesses comparison for a pitcher subset (SP or RP)."""
+    pitch_metrics: list[dict] = []
+    for label, key, higher_better in [
+        ("K%", k_col, True),
+        ("BB%", bb_col, False),
+        ("Whiff%", "whiff_rate", True),
+        ("Avg Velo", "avg_velo", True),
+        ("Zone%", "zone_pct", True),
+        ("GB%", "gb_pct", True),
+    ]:
+        if key not in team_subset.columns or key not in lg_subset.columns:
+            continue
+        team_avg = team_subset[key].dropna().mean()
+        league_avg = lg_subset[key].dropna().mean()
+        if pd.isna(team_avg) or pd.isna(league_avg) or league_avg == 0:
+            continue
+        diff = team_avg - league_avg
+        if key in (k_col, bb_col, "whiff_rate", "zone_pct", "gb_pct"):
+            diff_str = f"{diff * 100:+.1f}pp"
+            team_str = f"{team_avg * 100:.1f}%"
+            lg_str = f"{league_avg * 100:.1f}%"
+        else:
+            diff_str = f"{diff:+.1f}"
+            team_str = f"{team_avg:.1f}"
+            lg_str = f"{league_avg:.1f}"
+        is_good = (diff > 0 and higher_better) or (diff < 0 and not higher_better)
+        color = POSITIVE if is_good else NEGATIVE
+        pitch_metrics.append({
+            "Metric": label, "Team": team_str, "League Avg": lg_str,
+            "Diff": diff_str, "_color": color, "_is_good": is_good,
+        })
+
+    if not pitch_metrics:
+        return
+
+    strengths = [m for m in pitch_metrics if m["_is_good"]]
+    weaknesses_p = [m for m in pitch_metrics if not m["_is_good"]]
+    col_s, col_w = st.columns(2)
+    with col_s:
+        st.markdown(
+            f'<div style="color:{POSITIVE}; font-weight:600; '
+            f'margin-bottom:8px;">Strengths</div>',
+            unsafe_allow_html=True,
+        )
+        if strengths:
+            for m in strengths:
+                st.markdown(
+                    f'<div style="padding:4px 0;">'
+                    f'<span style="color:{CREAM};">{m["Metric"]}</span>: '
+                    f'<span style="color:{POSITIVE}; font-weight:600;">'
+                    f'{m["Team"]}</span> '
+                    f'<span style="color:{SLATE};">'
+                    f'(lg: {m["League Avg"]}, {m["Diff"]})</span></div>',
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.markdown(
+                f'<span style="color:{SLATE};">None vs league average</span>',
+                unsafe_allow_html=True,
+            )
+    with col_w:
+        st.markdown(
+            f'<div style="color:{NEGATIVE}; font-weight:600; '
+            f'margin-bottom:8px;">Weaknesses</div>',
+            unsafe_allow_html=True,
+        )
+        if weaknesses_p:
+            for m in weaknesses_p:
+                st.markdown(
+                    f'<div style="padding:4px 0;">'
+                    f'<span style="color:{CREAM};">{m["Metric"]}</span>: '
+                    f'<span style="color:{NEGATIVE}; font-weight:600;">'
+                    f'{m["Team"]}</span> '
+                    f'<span style="color:{SLATE};">'
+                    f'(lg: {m["League Avg"]}, {m["Diff"]})</span></div>',
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.markdown(
+                f'<span style="color:{SLATE};">None vs league average</span>',
+                unsafe_allow_html=True,
+            )
+
+
+def _build_pitcher_rows(
+    pitchers: pd.DataFrame,
+    injury_lookup: dict,
+    use_priors: bool,
+) -> list[dict]:
+    """Build display rows for a set of pitchers (SP or RP)."""
+    rows: list[dict] = []
+    for _, row in pitchers.sort_values(
+        "composite_score", ascending=False,
+    ).iterrows():
+        pid = int(row["pitcher_id"])
+        inj = injury_lookup.get(pid)
+        name = row["pitcher_name"]
+        if inj and inj["missed_games"] > 0:
+            sev = inj["severity"]
+            tag = (
+                "[IL-60]" if sev == "major"
+                else "[IL]" if sev == "significant"
+                else "[DTD]"
+            )
+            name = f"{tag} {name}"
+        r: dict[str, object] = {
+            "Name": name,
+            "Age": int(row["age"]) if pd.notna(row.get("age")) else "",
+            "Hand": row.get("pitch_hand", ""),
+            "Rating": diamond_rating_text_composite(row["composite_score"]),
+        }
+        if use_priors:
+            for label, key, _, _ in PITCHER_STATS:
+                obs_col = f"observed_{key}"
+                if obs_col in row.index and pd.notna(row.get(obs_col)):
+                    r[f"{label} ({PRIOR_SEASON})"] = fmt_stat(row[obs_col], key)
+                else:
+                    r[f"{label} ({PRIOR_SEASON})"] = "--"
+            for label, key in [
+                ("Whiff%", "whiff_rate"), ("Avg Velo", "avg_velo"),
+            ]:
+                if key in row.index and pd.notna(row.get(key)):
+                    r[label] = fmt_stat(row[key], key)
+                else:
+                    r[label] = "--"
+        else:
+            for label, key, _, _ in PITCHER_STATS:
+                proj_col = f"projected_{key}"
+                delta_col = f"delta_{key}"
+                if proj_col in row.index and pd.notna(row.get(proj_col)):
+                    proj_val = fmt_stat(row[proj_col], key)
+                    delta_pp = row[delta_col] * 100
+                    r[label] = (
+                        f"{proj_val} ({delta_pp:+.1f})"
+                        if abs(delta_pp) >= 0.05
+                        else proj_val
+                    )
+                else:
+                    r[label] = "--"
+            if "total_k_mean" in row.index and pd.notna(row.get("total_k_mean")):
+                r["Proj. K"] = int(round(row["total_k_mean"]))
+            else:
+                r["Proj. K"] = "--"
+        rows.append(r)
+    return rows
 
 
 # ── Overview tab (existing content) ──────────────────────────────────
@@ -1198,94 +1350,20 @@ def _render_overview_tab(
                     unsafe_allow_html=True,
                 )
 
-    # ── Pitching staff profile ──────────────────────────────────────
+    # ── Pitching staff profile — split by role ──────────────────────
     if not team_pitchers.empty and not p_proj.empty:
-        st.markdown(f"### Pitching Staff Profile ({_view_label})")
-        pitch_metrics = []
-        for label, key, higher_better in [
-            ("K%", _p_k_col, True),
-            ("BB%", _p_bb_col, False),
-            ("Whiff%", "whiff_rate", True),
-            ("Avg Velo", "avg_velo", True),
-            ("Zone%", "zone_pct", True),
-            ("GB%", "gb_pct", True),
-        ]:
-            if key not in team_pitchers.columns or key not in p_proj.columns:
-                continue
-            team_avg = team_pitchers[key].dropna().mean()
-            league_avg = p_proj[key].dropna().mean()
-            if pd.isna(team_avg) or pd.isna(league_avg) or league_avg == 0:
-                continue
-            diff = team_avg - league_avg
-            if key in (_p_k_col, _p_bb_col, "whiff_rate", "zone_pct", "gb_pct"):
-                diff_str = f"{diff * 100:+.1f}pp"
-                team_str = f"{team_avg * 100:.1f}%"
-                lg_str = f"{league_avg * 100:.1f}%"
-            else:
-                diff_str = f"{diff:+.1f}"
-                team_str = f"{team_avg:.1f}"
-                lg_str = f"{league_avg:.1f}"
+        team_sp = team_pitchers[team_pitchers["is_starter"] == True]
+        team_rp = team_pitchers[team_pitchers["is_starter"] == False]
+        lg_sp = p_proj[p_proj["is_starter"] == True]
+        lg_rp = p_proj[p_proj["is_starter"] == False]
 
-            is_good = (
-                (diff > 0 and higher_better)
-                or (diff < 0 and not higher_better)
-            )
-            color = POSITIVE if is_good else NEGATIVE
-            pitch_metrics.append({
-                "Metric": label, "Team": team_str, "League Avg": lg_str,
-                "Diff": diff_str, "_color": color, "_is_good": is_good,
-            })
+        if not team_sp.empty:
+            st.markdown(f"### Rotation Profile ({_view_label})")
+            _render_staff_metrics(team_sp, lg_sp, _p_k_col, _p_bb_col)
 
-        if pitch_metrics:
-            strengths = [m for m in pitch_metrics if m["_is_good"]]
-            weaknesses_p = [m for m in pitch_metrics if not m["_is_good"]]
-            col_s, col_w = st.columns(2)
-            with col_s:
-                st.markdown(
-                    f'<div style="color:{POSITIVE}; font-weight:600; '
-                    f'margin-bottom:8px;">Strengths</div>',
-                    unsafe_allow_html=True,
-                )
-                if strengths:
-                    for m in strengths:
-                        st.markdown(
-                            f'<div style="padding:4px 0;">'
-                            f'<span style="color:{CREAM};">{m["Metric"]}</span>: '
-                            f'<span style="color:{POSITIVE}; font-weight:600;">'
-                            f'{m["Team"]}</span> '
-                            f'<span style="color:{SLATE};">'
-                            f'(lg: {m["League Avg"]}, {m["Diff"]})</span></div>',
-                            unsafe_allow_html=True,
-                        )
-                else:
-                    st.markdown(
-                        f'<span style="color:{SLATE};">'
-                        f'None vs league average</span>',
-                        unsafe_allow_html=True,
-                    )
-            with col_w:
-                st.markdown(
-                    f'<div style="color:{NEGATIVE}; font-weight:600; '
-                    f'margin-bottom:8px;">Weaknesses</div>',
-                    unsafe_allow_html=True,
-                )
-                if weaknesses_p:
-                    for m in weaknesses_p:
-                        st.markdown(
-                            f'<div style="padding:4px 0;">'
-                            f'<span style="color:{CREAM};">{m["Metric"]}</span>: '
-                            f'<span style="color:{NEGATIVE}; font-weight:600;">'
-                            f'{m["Team"]}</span> '
-                            f'<span style="color:{SLATE};">'
-                            f'(lg: {m["League Avg"]}, {m["Diff"]})</span></div>',
-                            unsafe_allow_html=True,
-                        )
-                else:
-                    st.markdown(
-                        f'<span style="color:{SLATE};">'
-                        f'None vs league average</span>',
-                        unsafe_allow_html=True,
-                    )
+        if not team_rp.empty:
+            st.markdown(f"### Bullpen Profile ({_view_label})")
+            _render_staff_metrics(team_rp, lg_rp, _p_k_col, _p_bb_col)
 
     # ── Injured players ─────────────────────────────────────────────
     inj_df_full = load_preseason_injuries()
@@ -1374,76 +1452,33 @@ def _render_overview_tab(
                 unsafe_allow_html=True,
             )
 
-    # ── Pitchers table ──────────────────────────────────────────────
-    st.markdown("### Pitchers")
-
+    # ── Pitchers tables — split by role ─────────────────────────────
     if team_pitchers.empty:
+        st.markdown("### Pitchers")
         st.info("No pitcher projections for this team.")
     else:
-        p_rows = []
-        for _, row in team_pitchers.sort_values(
-            "composite_score", ascending=False,
-        ).iterrows():
-            pid = int(row["pitcher_id"])
-            inj = injury_lookup.get(pid)
-            name = row["pitcher_name"]
-            if inj and inj["missed_games"] > 0:
-                sev = inj["severity"]
-                tag = (
-                    "[IL-60]" if sev == "major"
-                    else "[IL]" if sev == "significant"
-                    else "[DTD]"
-                )
-                name = f"{tag} {name}"
-            role_str = "SP" if row.get("is_starter") else "RP"
-            r: dict[str, object] = {
-                "Name": name,
-                "Role": role_str,
-                "Age": int(row["age"]) if pd.notna(row.get("age")) else "",
-                "Hand": row.get("pitch_hand", ""),
-                "Rating": diamond_rating_text_composite(row["composite_score"]),
-            }
-            if use_priors:
-                for label, key, _, _ in PITCHER_STATS:
-                    obs_col = f"observed_{key}"
-                    if obs_col in row.index and pd.notna(row.get(obs_col)):
-                        r[f"{label} ({PRIOR_SEASON})"] = fmt_stat(
-                            row[obs_col], key,
-                        )
-                    else:
-                        r[f"{label} ({PRIOR_SEASON})"] = "--"
-                for label, key in [
-                    ("Whiff%", "whiff_rate"), ("Avg Velo", "avg_velo"),
-                ]:
-                    if key in row.index and pd.notna(row.get(key)):
-                        r[label] = fmt_stat(row[key], key)
-                    else:
-                        r[label] = "--"
-            else:
-                for label, key, _, _ in PITCHER_STATS:
-                    proj_col = f"projected_{key}"
-                    delta_col = f"delta_{key}"
-                    if proj_col in row.index and pd.notna(row.get(proj_col)):
-                        proj_val = fmt_stat(row[proj_col], key)
-                        delta_pp = row[delta_col] * 100
-                        r[label] = (
-                            f"{proj_val} ({delta_pp:+.1f})"
-                            if abs(delta_pp) >= 0.05
-                            else proj_val
-                        )
-                    else:
-                        r[label] = "--"
-                if "total_k_mean" in row.index and pd.notna(
-                    row.get("total_k_mean"),
-                ):
-                    r["Proj. K"] = int(round(row["total_k_mean"]))
-                else:
-                    r["Proj. K"] = "--"
-            p_rows.append(r)
-        st.dataframe(
-            pd.DataFrame(p_rows),
-            use_container_width=True, hide_index=True,
-        )
+        team_sp_tbl = team_pitchers[team_pitchers["is_starter"] == True]
+        team_rp_tbl = team_pitchers[team_pitchers["is_starter"] == False]
+
+        st.markdown("### Starting Rotation")
+        if team_sp_tbl.empty:
+            st.info("No starters projected for this team.")
+        else:
+            sp_rows = _build_pitcher_rows(team_sp_tbl, injury_lookup, use_priors)
+            st.dataframe(
+                pd.DataFrame(sp_rows),
+                use_container_width=True, hide_index=True,
+            )
+
+        st.markdown("### Bullpen")
+        if team_rp_tbl.empty:
+            st.info("No relievers projected for this team.")
+        else:
+            rp_rows = _build_pitcher_rows(team_rp_tbl, injury_lookup, use_priors)
+            st.dataframe(
+                pd.DataFrame(rp_rows),
+                use_container_width=True, hide_index=True,
+            )
 
     # ── Hitters table ───────────────────────────────────────────────
     st.markdown("### Hitters")
@@ -1541,8 +1576,8 @@ def page_team_overview() -> None:
         unsafe_allow_html=True,
     )
 
-    # Load data
-    teams_df = load_player_teams()
+    # Load data — dim_roster is the source of truth for team rosters
+    teams_df = load_roster()
     if teams_df.empty:
         st.warning("No team data found. Run precompute first.")
         return
