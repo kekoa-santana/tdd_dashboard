@@ -40,6 +40,7 @@ from views.data_health import page_data_health  # noqa: E402
 from views.model_performance import page_model_performance  # noqa: E402
 from views.player_rankings import page_player_rankings  # noqa: E402
 from views.compare import page_compare  # noqa: E402
+from views.breakout import page_breakout  # noqa: E402
 
 # Apply dark matplotlib theme at import time
 apply_dark_mpl()
@@ -83,6 +84,7 @@ with open(_css_path) as _f:
 PAGES = {
     "Schedule": page_schedule,
     "Projections": page_projections,
+    "Breakout Candidates": page_breakout,
     "Stats": page_stats,
     "Player Profile": page_player_profile,
     "Team Overview": page_team_overview,

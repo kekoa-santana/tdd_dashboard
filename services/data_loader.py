@@ -455,6 +455,14 @@ def load_hitter_breakout_candidates() -> pd.DataFrame:
     return pd.read_parquet(path)
 
 
+@st.cache_data
+def load_pitcher_breakout_candidates() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "pitcher_breakout_candidates.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
 def season_selector(key_prefix: str, include_career: bool = True) -> str:
     """Render a season selector and return the choice."""
     options = (
