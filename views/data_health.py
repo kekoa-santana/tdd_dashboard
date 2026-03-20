@@ -155,8 +155,8 @@ def page_data_health() -> None:
         cards = [
             ("Game Date", meta.get("game_date", "N/A")),
             ("Season", str(meta.get("season", "N/A"))),
-            ("Hitters Updated", str(meta.get("hitters_updated", "N/A"))),
-            ("Pitchers Updated", str(meta.get("pitchers_updated", "N/A"))),
+            ("Hitters", str(meta.get("hitters_updated", "N/A"))),
+            ("Pitchers", str(meta.get("pitchers_updated", "N/A"))),
             ("K Samples", str(meta.get("k_samples_count", "N/A"))),
         ]
         for col, (label, value) in zip(cols, cards):

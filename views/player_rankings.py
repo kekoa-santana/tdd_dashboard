@@ -6,6 +6,8 @@ import streamlit as st
 
 from config import GOLD, EMBER, SAGE, SLATE, CREAM, DARK_CARD, DARK_BORDER
 from components.metric_cards import metric_card
+from components.diamond_rating import diamond_rating_text
+from lib.diamond_rating import score_to_diamonds, diamond_tier
 from services.data_loader import (
     load_rankings,
     load_prospect_readiness,
@@ -44,12 +46,12 @@ _LEVEL_ORDER = ["AAA", "AA", "A+", "A", "ROK"]
 
 
 def _score_color(val: float) -> str:
-    """Color-code a 0-1 TDD value score."""
-    if val >= 0.80:
+    """Color-code a diamond rating value (0-5 scale)."""
+    if val >= 4.0:
         return f"color: {GOLD}; font-weight: bold"
-    if val >= 0.60:
+    if val >= 3.0:
         return f"color: {SAGE}; font-weight: bold"
-    if val >= 0.40:
+    if val >= 2.0:
         return f"color: {SLATE}"
     return f"color: {CREAM}"
 
@@ -103,7 +105,13 @@ def _render_pitcher_rankings(df: pd.DataFrame) -> None:
         st.markdown(metric_card("Relievers", f"{n_rp}"), unsafe_allow_html=True)
     with cols[3]:
         avg_score = filtered["tdd_value_score"].mean() if len(filtered) > 0 else 0
-        st.markdown(metric_card("Avg TDD Score", f"{avg_score:.3f}"), unsafe_allow_html=True)
+        avg_diamonds = score_to_diamonds(avg_score)
+        st.markdown(metric_card("Avg Rating", f"{avg_diamonds:.1f} / 5"), unsafe_allow_html=True)
+
+    # Compute diamond rating column
+    filtered = filtered.copy()
+    if "tdd_value_score" in filtered.columns:
+        filtered["_diamond_rating"] = filtered["tdd_value_score"].apply(score_to_diamonds)
 
     # Display table
     display_map = {
@@ -113,7 +121,7 @@ def _render_pitcher_rankings(df: pd.DataFrame) -> None:
         "role": "Role",
         "age": "Age",
         "pitch_hand": "Throws",
-        "tdd_value_score": "TDD Score",
+        "_diamond_rating": "Rating",
         "health_label": "Health",
         "stuff_score": "Stuff",
         "command_score": "Command",
@@ -130,14 +138,14 @@ def _render_pitcher_rankings(df: pd.DataFrame) -> None:
 
     available = [c for c in display_map if c in filtered.columns]
     display_df = filtered[available].copy()
-    sort_col = "overall_rank" if "overall_rank" in available else "tdd_value_score"
+    sort_col = "overall_rank" if "overall_rank" in available else "_diamond_rating"
     ascending = sort_col == "overall_rank"
     display_df = display_df.sort_values(sort_col, ascending=ascending)
     display_df.columns = [display_map[c] for c in available]
 
     fmt: dict[str, str] = {}
     for col, f in [
-        ("TDD Score", "{:.3f}"), ("Stuff", "{:.3f}"), ("Command", "{:.3f}"),
+        ("Rating", "{:.1f}"), ("Stuff", "{:.3f}"), ("Command", "{:.3f}"),
         ("Workload", "{:.3f}"), ("Trajectory", "{:.3f}"),
         ("K%", "{:.1%}"), ("BB%", "{:.1%}"), ("SwStr%", "{:.1%}"), ("CSW%", "{:.1%}"),
         ("Proj K%", "{:.1%}"), ("Proj BB%", "{:.1%}"),
@@ -147,16 +155,16 @@ def _render_pitcher_rankings(df: pd.DataFrame) -> None:
             fmt[col] = f
 
     styler = display_df.style.format(fmt, na_rep="—")
-    if "TDD Score" in display_df.columns:
-        styler = styler.map(_score_color, subset=["TDD Score"])
+    if "Rating" in display_df.columns:
+        styler = styler.map(_score_color, subset=["Rating"])
     if "Health" in display_df.columns:
         styler = styler.map(_style_health, subset=["Health"])
 
     st.dataframe(styler, use_container_width=True, hide_index=True, height=600)
 
     st.caption(
-        "**TDD Score** = weighted composite of Stuff (50%), Command (20%), "
-        "Workload (15%), Trajectory (15%). Sub-scores are percentile-ranked (0-1). "
+        "**Rating** = Diamond Rating (0-5) from weighted composite of "
+        "Stuff (50%), Command (20%), Workload (15%), Trajectory (15%). "
         "**Health** = injury risk tier blended into Workload score. "
         "**K%/BB%** are 2025 observed; **Proj** columns are 2026 Bayesian projections."
     )
@@ -195,10 +203,16 @@ def _render_batter_rankings(df: pd.DataFrame) -> None:
         st.markdown(metric_card("Positions", f"{n_pos}"), unsafe_allow_html=True)
     with cols[2]:
         avg_score = filtered["tdd_value_score"].mean() if len(filtered) > 0 else 0
-        st.markdown(metric_card("Avg TDD Score", f"{avg_score:.3f}"), unsafe_allow_html=True)
+        avg_diamonds = score_to_diamonds(avg_score)
+        st.markdown(metric_card("Avg Rating", f"{avg_diamonds:.1f} / 5"), unsafe_allow_html=True)
     with cols[3]:
         top_woba = filtered["woba"].median() if "woba" in filtered.columns and len(filtered) > 0 else 0
         st.markdown(metric_card("Median wOBA", f"{top_woba:.3f}"), unsafe_allow_html=True)
+
+    # Compute diamond rating column
+    filtered = filtered.copy()
+    if "tdd_value_score" in filtered.columns:
+        filtered["_diamond_rating"] = filtered["tdd_value_score"].apply(score_to_diamonds)
 
     display_map = {
         "overall_rank": "#",
@@ -207,7 +221,7 @@ def _render_batter_rankings(df: pd.DataFrame) -> None:
         "position": "Pos",
         "age": "Age",
         "batter_stand": "Bats",
-        "tdd_value_score": "TDD Score",
+        "_diamond_rating": "Rating",
         "health_label": "Health",
         "offense_score": "Offense",
         "fielding_combined": "Fielding",
@@ -225,14 +239,14 @@ def _render_batter_rankings(df: pd.DataFrame) -> None:
 
     available = [c for c in display_map if c in filtered.columns]
     display_df = filtered[available].copy()
-    sort_col = "overall_rank" if "overall_rank" in available else "tdd_value_score"
+    sort_col = "overall_rank" if "overall_rank" in available else "_diamond_rating"
     ascending = sort_col == "overall_rank"
     display_df = display_df.sort_values(sort_col, ascending=ascending)
     display_df.columns = [display_map[c] for c in available]
 
     fmt: dict[str, str] = {}
     for col, f in [
-        ("TDD Score", "{:.3f}"), ("Offense", "{:.3f}"), ("Fielding", "{:.3f}"),
+        ("Rating", "{:.1f}"), ("Offense", "{:.3f}"), ("Fielding", "{:.3f}"),
         ("Play Time", "{:.3f}"), ("Trajectory", "{:.3f}"),
         ("wOBA", "{:.3f}"), ("xwOBA", "{:.3f}"),
         ("wRC+", "{:.0f}"), ("PA", "{:,.0f}"),
@@ -244,16 +258,16 @@ def _render_batter_rankings(df: pd.DataFrame) -> None:
             fmt[col] = f
 
     styler = display_df.style.format(fmt, na_rep="—")
-    if "TDD Score" in display_df.columns:
-        styler = styler.map(_score_color, subset=["TDD Score"])
+    if "Rating" in display_df.columns:
+        styler = styler.map(_score_color, subset=["Rating"])
     if "Health" in display_df.columns:
         styler = styler.map(_style_health, subset=["Health"])
 
     st.dataframe(styler, use_container_width=True, hide_index=True, height=600)
 
     st.caption(
-        "**TDD Score** = weighted composite of Offense (55%), Fielding (20%), "
-        "Playing Time (15%), Trajectory (10%). Sub-scores are percentile-ranked (0-1). "
+        "**Rating** = Diamond Rating (0-5) from weighted composite of "
+        "Offense (55%), Fielding (20%), Playing Time (15%), Trajectory (10%). "
         "**Health** = injury risk tier blended into Playing Time score. "
         "**wOBA/xwOBA/Barrel%** are 2025 observed; **Proj** columns are 2026 Bayesian projections."
     )
@@ -302,7 +316,13 @@ def _render_prospect_rankings(df: pd.DataFrame) -> None:
         st.markdown(metric_card("FG Ranked", f"{int(n_fg)}"), unsafe_allow_html=True)
     with cols[3]:
         avg_score = filtered["tdd_prospect_score"].mean() if "tdd_prospect_score" in filtered.columns and len(filtered) > 0 else 0
-        st.markdown(metric_card("Avg TDD Score", f"{avg_score:.3f}"), unsafe_allow_html=True)
+        avg_diamonds = score_to_diamonds(avg_score)
+        st.markdown(metric_card("Avg Rating", f"{avg_diamonds:.1f} / 5"), unsafe_allow_html=True)
+
+    # Compute diamond rating column
+    filtered = filtered.copy()
+    if "tdd_prospect_score" in filtered.columns:
+        filtered["_diamond_rating"] = filtered["tdd_prospect_score"].apply(score_to_diamonds)
 
     display_map = {
         "tdd_rank": "#",
@@ -310,7 +330,7 @@ def _render_prospect_rankings(df: pd.DataFrame) -> None:
         "primary_position": "Pos",
         "max_level": "Level",
         "min_age": "Age",
-        "tdd_prospect_score": "TDD Score",
+        "_diamond_rating": "Rating",
         "tdd_tier": "Tier",
         "comp_readiness": "Readiness",
         "comp_rate_quality": "Rate Qual",
@@ -328,14 +348,14 @@ def _render_prospect_rankings(df: pd.DataFrame) -> None:
 
     available = [c for c in display_map if c in filtered.columns]
     display_df = filtered[available].copy()
-    sort_col = "tdd_rank" if "tdd_rank" in available else "tdd_prospect_score"
+    sort_col = "tdd_rank" if "tdd_rank" in available else "_diamond_rating"
     ascending = sort_col == "tdd_rank"
     display_df = display_df.sort_values(sort_col, ascending=ascending)
     display_df.columns = [display_map[c] for c in available]
 
     fmt: dict[str, str] = {}
     for col, f in [
-        ("TDD Score", "{:.3f}"), ("Readiness", "{:.3f}"), ("Rate Qual", "{:.3f}"),
+        ("Rating", "{:.1f}"), ("Readiness", "{:.3f}"), ("Rate Qual", "{:.3f}"),
         ("Age Score", "{:.3f}"), ("Trajectory", "{:.3f}"), ("Pos Scarcity", "{:.3f}"),
         ("K%", "{:.1%}"), ("BB%", "{:.1%}"), ("ISO", "{:.3f}"),
         ("Age vs Lvl", "{:+.1f}"), ("MiLB PA", "{:,.0f}"),
@@ -346,16 +366,17 @@ def _render_prospect_rankings(df: pd.DataFrame) -> None:
             fmt[col] = f
 
     styler = display_df.style.format(fmt, na_rep="—")
-    if "TDD Score" in display_df.columns:
-        styler = styler.map(_score_color, subset=["TDD Score"])
+    if "Rating" in display_df.columns:
+        styler = styler.map(_score_color, subset=["Rating"])
     if "Tier" in display_df.columns:
         styler = styler.map(_style_tier, subset=["Tier"])
 
     st.dataframe(styler, use_container_width=True, hide_index=True, height=600)
 
     st.caption(
-        "**TDD Score** = weighted composite of Rate Quality (30%), Readiness (25%), "
-        "Age-Relative (15%), Trajectory (15%), Positional Scarcity (15%). "
+        "**Rating** = Diamond Rating (0-5) from weighted composite of "
+        "Rate Quality (30%), Readiness (25%), Age-Relative (15%), "
+        "Trajectory (15%), Positional Scarcity (15%). "
         "**K%/BB%/ISO** are MLB-translated MiLB stats. "
         "**FG FV/Rank** are FanGraphs reference values (not used in TDD scoring)."
     )
@@ -404,7 +425,13 @@ def _render_pitching_prospect_rankings(df: pd.DataFrame) -> None:
         st.markdown(metric_card("FG Ranked", f"{int(n_fg)}"), unsafe_allow_html=True)
     with cols[3]:
         avg_score = filtered["tdd_prospect_score"].mean() if "tdd_prospect_score" in filtered.columns and len(filtered) > 0 else 0
-        st.markdown(metric_card("Avg TDD Score", f"{avg_score:.3f}"), unsafe_allow_html=True)
+        avg_diamonds = score_to_diamonds(avg_score)
+        st.markdown(metric_card("Avg Rating", f"{avg_diamonds:.1f} / 5"), unsafe_allow_html=True)
+
+    # Compute diamond rating column
+    filtered = filtered.copy()
+    if "tdd_prospect_score" in filtered.columns:
+        filtered["_diamond_rating"] = filtered["tdd_prospect_score"].apply(score_to_diamonds)
 
     display_map = {
         "tdd_rank": "#",
@@ -412,7 +439,7 @@ def _render_pitching_prospect_rankings(df: pd.DataFrame) -> None:
         "pitcher_role": "Role",
         "max_level": "Level",
         "min_age": "Age",
-        "tdd_prospect_score": "TDD Score",
+        "_diamond_rating": "Rating",
         "tdd_tier": "Tier",
         "comp_readiness": "Readiness",
         "comp_rate_quality": "Rate Qual",
@@ -431,14 +458,14 @@ def _render_pitching_prospect_rankings(df: pd.DataFrame) -> None:
 
     available = [c for c in display_map if c in filtered.columns]
     display_df = filtered[available].copy()
-    sort_col = "tdd_rank" if "tdd_rank" in available else "tdd_prospect_score"
+    sort_col = "tdd_rank" if "tdd_rank" in available else "_diamond_rating"
     ascending = sort_col == "tdd_rank"
     display_df = display_df.sort_values(sort_col, ascending=ascending)
     display_df.columns = [display_map[c] for c in available]
 
     fmt: dict[str, str] = {}
     for col, f in [
-        ("TDD Score", "{:.3f}"), ("Readiness", "{:.3f}"), ("Rate Qual", "{:.3f}"),
+        ("Rating", "{:.1f}"), ("Readiness", "{:.3f}"), ("Rate Qual", "{:.3f}"),
         ("Age Score", "{:.3f}"), ("Trajectory", "{:.3f}"), ("Pos Scarcity", "{:.3f}"),
         ("K%", "{:.1%}"), ("BB%", "{:.1%}"), ("HR/BF", "{:.4f}"),
         ("Age vs Lvl", "{:+.1f}"), ("MiLB BF", "{:,.0f}"), ("SP%", "{:.0%}"),
@@ -449,16 +476,17 @@ def _render_pitching_prospect_rankings(df: pd.DataFrame) -> None:
             fmt[col] = f
 
     styler = display_df.style.format(fmt, na_rep="—")
-    if "TDD Score" in display_df.columns:
-        styler = styler.map(_score_color, subset=["TDD Score"])
+    if "Rating" in display_df.columns:
+        styler = styler.map(_score_color, subset=["Rating"])
     if "Tier" in display_df.columns:
         styler = styler.map(_style_tier, subset=["Tier"])
 
     st.dataframe(styler, use_container_width=True, hide_index=True, height=600)
 
     st.caption(
-        "**TDD Score** = weighted composite of Rate Quality (30%), Readiness (25%), "
-        "Age-Relative (15%), Trajectory (15%), Positional Scarcity (15%). "
+        "**Rating** = Diamond Rating (0-5) from weighted composite of "
+        "Rate Quality (30%), Readiness (25%), Age-Relative (15%), "
+        "Trajectory (15%), Positional Scarcity (15%). "
         "**K%/BB%/HR/BF** are MLB-translated MiLB stats. "
         "**SP%** = share of appearances as a starter. "
         "**FG FV/Rank** are FanGraphs reference values (not used in TDD scoring)."

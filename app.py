@@ -39,6 +39,7 @@ from views.matchup_explorer import page_matchup_explorer  # noqa: E402
 from views.data_health import page_data_health  # noqa: E402
 from views.model_performance import page_model_performance  # noqa: E402
 from views.player_rankings import page_player_rankings  # noqa: E402
+from views.compare import page_compare  # noqa: E402
 
 # Apply dark matplotlib theme at import time
 apply_dark_mpl()
@@ -87,9 +88,12 @@ PAGES = {
     "Team Overview": page_team_overview,
     "Matchup Explorer": page_matchup_explorer,
     "Player Rankings": page_player_rankings,
+    "Compare Players": page_compare,
     "Model Performance": page_model_performance,
     "Data Health": page_data_health,
 }
+
+PAGE_URL_MAP = {name.lower().replace(" ", "_"): name for name in PAGES}
 
 
 # ---------------------------------------------------------------------------
@@ -110,9 +114,12 @@ def main() -> None:
         </div>
         """, unsafe_allow_html=True)
         st.markdown("---")
-        # Initialize active page in session state
         if "active_page" not in st.session_state:
-            st.session_state.active_page = list(PAGES.keys())[0]
+            page_param = st.query_params.get("page", "")
+            if page_param in PAGE_URL_MAP:
+                st.session_state.active_page = PAGE_URL_MAP[page_param]
+            else:
+                st.session_state.active_page = list(PAGES.keys())[0]
 
         with st.container():
             st.markdown('<div class="nav-container">', unsafe_allow_html=True)
@@ -122,6 +129,7 @@ def main() -> None:
                 if st.button(page_name, key=f"nav_{page_name}", type=btn_type,
                              use_container_width=True):
                     st.session_state.active_page = page_name
+                    st.query_params["page"] = page_name.lower().replace(" ", "_")
                     st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -154,6 +162,7 @@ def main() -> None:
         return
 
     # Dispatch to selected page
+    st.query_params["page"] = page.lower().replace(" ", "_")
     PAGES[page]()
 
 

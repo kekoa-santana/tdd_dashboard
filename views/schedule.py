@@ -26,6 +26,7 @@ from services.data_loader import (
 from utils.helpers import get_team_lookup
 from components.metric_cards import metric_card
 from components.charts import create_game_stat_fig
+from components.diamond_rating import diamond_rating_html_composite
 
 
 def _is_game_window() -> bool:
@@ -168,21 +169,31 @@ def _render_schedule_cards(
         for _, _r in _p_arch.iterrows():
             _p_arch_lookup[int(_r["pitcher_id"])] = _r["archetype_name"]
 
-    # Hitter projection lookup: batter_id → {k_rate, bb_rate, hr}
+    # Hitter projection lookup: batter_id → {k_rate, bb_rate, hr, composite_score, ...}
     _h_stat_lookup: dict[int, dict] = {}
     if not _h_proj.empty:
         for _, _r in _h_proj.iterrows():
             _h_stat_lookup[int(_r["batter_id"])] = {
                 "k_rate": _r.get("projected_k_rate"),
                 "bb_rate": _r.get("projected_bb_rate"),
+                "composite_score": _r.get("composite_score"),
             }
     if not _h_count.empty and "batter_id" in _h_count.columns:
         for _, _r in _h_count.iterrows():
             bid = int(_r["batter_id"])
+            counting = {
+                "hr": _r.get("total_hr_mean"),
+                "total_k": _r.get("total_k_mean"),
+                "total_bb": _r.get("total_bb_mean"),
+                "total_hr": _r.get("total_hr_mean"),
+            }
             if bid in _h_stat_lookup:
-                _h_stat_lookup[bid]["hr"] = _r.get("total_hr_mean")
+                _h_stat_lookup[bid].update(counting)
             else:
-                _h_stat_lookup[bid] = {"k_rate": None, "bb_rate": None, "hr": _r.get("total_hr_mean")}
+                _h_stat_lookup[bid] = {
+                    "k_rate": None, "bb_rate": None,
+                    "composite_score": None, **counting,
+                }
 
     # Game simulator + matchup scoring data
     _k_samples_dict = load_k_samples()
@@ -202,7 +213,7 @@ def _render_schedule_cards(
         game_date = meta.get("game_date", "")
         st.info(
             f"No games loaded{f' for {game_date}' if game_date else ''}. "
-            "Run `python scripts/update_in_season.py` to fetch today's schedule."
+            "Projections update daily during the season."
         )
         return
 
@@ -219,8 +230,7 @@ def _render_schedule_cards(
     if sims_stale:
         st.markdown(
             f'<div style="color:{EMBER}; font-size:0.85rem; margin-bottom:0.5rem;">'
-            f'Simulations are from a previous date — showing base projections. '
-            f'Run <code>python scripts/update_in_season.py</code> to update.'
+            f'Simulations are from a previous date — showing base projections only.'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -366,7 +376,8 @@ def _render_schedule_cards(
                         st.markdown(
                             f'<div style="font-size:0.95rem; font-weight:600; color:{CREAM};">'
                             f'{side_label}: {pp_name}{_pp_arch_tag}</div>'
-                            f'<div style="font-size:0.8rem; color:{SLATE};">No projection available</div>',
+                            f'<div style="font-size:0.8rem; color:{SLATE}; margin-top:2px;">'
+                            f'K%: 22.0% | BB%: 8.0% (lg avg)</div>',
                             unsafe_allow_html=True,
                         )
 
@@ -426,12 +437,17 @@ def _render_game_drilldown(
         pitcher_name = game.get(f"{side}_pitcher_name") or "TBD"
         pitcher_id_raw = game.get(f"{side}_pitcher_id")
         pid = int(pitcher_id_raw) if pd.notna(pitcher_id_raw) else None
+        side_team_id = game.get(f"{side}_team_id")
         opp_team_id = game.get(f"{opp_side}_team_id")
         opp_abbr = game.get(f"{opp_side}_abbr", "?")
         side_abbr = game.get(f"{side}_abbr", "?")
         opp_lu = (
             game_lu[game_lu["team_id"] == opp_team_id].sort_values("batting_order")
             if not game_lu.empty and pd.notna(opp_team_id) else pd.DataFrame()
+        )
+        own_lu = (
+            game_lu[game_lu["team_id"] == side_team_id].sort_values("batting_order")
+            if not game_lu.empty and pd.notna(side_team_id) else pd.DataFrame()
         )
         sides.append({
             "side": side,
@@ -442,18 +458,22 @@ def _render_game_drilldown(
             "pitcher_arch": p_arch_lookup.get(pid) if pid else None,
             "pitcher_proj": proj_lookup.get(pid, {}) if pid else {},
             "opp_lineup": opp_lu,
+            "own_lineup": own_lu,
         })
 
     # Resolve umpire + weather context for this game
     game_context = _resolve_game_context(game)
 
-    tab_matchups, tab_arch, tab_sim = st.tabs(
-        ["Lineup Matchups", "Archetype Analysis", "Game Simulator"]
+    tab_matchups, tab_hitters, tab_arch, tab_sim = st.tabs(
+        ["Lineup Matchups", "Hitter Projections", "Archetype Analysis", "Game Simulator"]
     )
 
     with tab_matchups:
         _render_matchup_tab(sides, h_arch_lookup, h_stat_lookup,
                             arsenal_df, vuln_df, gpk)
+
+    with tab_hitters:
+        _render_hitter_projections_tab(sides, h_arch_lookup, h_stat_lookup, gpk)
 
     with tab_arch:
         _render_archetype_tab(
@@ -472,6 +492,108 @@ def _render_game_drilldown(
             bb_samples_dict=bb_samples_dict or {},
             hr_samples_dict=hr_samples_dict or {},
         )
+
+
+def _render_hitter_projections_tab(
+    sides: list[dict],
+    h_arch_lookup: dict[int, str],
+    h_stat_lookup: dict[int, dict],
+    gpk: int,
+) -> None:
+    """Hitter projection cards for each team's lineup."""
+    for side_info in sides:
+        side_abbr = side_info["abbr"]
+        own_lu = side_info["own_lineup"]
+
+        st.markdown(
+            f'<div style="color:{GOLD}; font-size:1rem; font-weight:600; '
+            f'margin:0.5rem 0 0.3rem;">'
+            f'{side_abbr} Lineup</div>',
+            unsafe_allow_html=True,
+        )
+
+        if own_lu.empty:
+            st.markdown(
+                f'<div style="color:{SLATE}; font-size:0.85rem; '
+                f'padding:0.5rem 0;">Lineup not yet available</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown("---")
+            continue
+
+        name_col = "batter_name" if "batter_name" in own_lu.columns else "player_name"
+        id_col = "batter_id" if "batter_id" in own_lu.columns else "player_id"
+
+        cards_html: list[str] = []
+        for _, brow in own_lu.head(9).iterrows():
+            bid = int(brow[id_col]) if pd.notna(brow.get(id_col)) else None
+            bname = brow.get(name_col, "Unknown")
+            order = int(brow["batting_order"])
+
+            # Look up projection data
+            stats = h_stat_lookup.get(bid, {}) if bid else {}
+            arch = h_arch_lookup.get(bid, "") if bid else ""
+
+            composite = stats.get("composite_score")
+            diamond_html = ""
+            if pd.notna(composite):
+                diamond_html = diamond_rating_html_composite(composite, size="sm")
+
+            # Counting projections
+            proj_k = stats.get("total_k")
+            proj_bb = stats.get("total_bb")
+            proj_hr = stats.get("total_hr")
+
+            stat_parts: list[str] = []
+            if pd.notna(proj_k):
+                stat_parts.append(
+                    f'<span style="color:{CREAM};">K: '
+                    f'<strong>{proj_k:.0f}</strong></span>'
+                )
+            if pd.notna(proj_bb):
+                stat_parts.append(
+                    f'<span style="color:{CREAM};">BB: '
+                    f'<strong>{proj_bb:.0f}</strong></span>'
+                )
+            if pd.notna(proj_hr):
+                stat_parts.append(
+                    f'<span style="color:{CREAM};">HR: '
+                    f'<strong>{proj_hr:.0f}</strong></span>'
+                )
+            stat_line = (
+                f' <span style="font-size:0.8rem;">{" | ".join(stat_parts)}</span>'
+                if stat_parts
+                else f' <span style="color:{SLATE}; font-size:0.8rem;">No projection</span>'
+            )
+
+            arch_tag = (
+                f' <span style="color:{SLATE}; font-size:0.75rem;">({arch})</span>'
+                if arch else ""
+            )
+
+            cards_html.append(
+                f'<div style="display:flex; align-items:center; gap:0.6rem; '
+                f'padding:0.35rem 0.8rem; '
+                f'border-bottom:1px solid {DARK_BORDER};">'
+                f'<span style="color:{SLATE}; font-size:0.8rem; '
+                f'min-width:1.2rem; text-align:right;">{order}</span>'
+                f'<span style="color:{CREAM}; font-size:0.9rem; font-weight:500; '
+                f'min-width:9rem;">{bname}{arch_tag}</span>'
+                f'{diamond_html}'
+                f'{stat_line}'
+                f'</div>'
+            )
+
+        if cards_html:
+            st.markdown(
+                f'<div style="background:{DARK_CARD}; border:1px solid {DARK_BORDER}; '
+                f'border-radius:6px; margin-bottom:1rem; overflow:hidden;">'
+                + "".join(cards_html)
+                + '</div>',
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("---")
 
 
 def _render_matchup_tab(
@@ -526,16 +648,19 @@ def _render_matchup_tab(
             stats_parts.append(f"K%: {k_pct * 100:.1f}%")
         if pd.notna(bb_pct):
             stats_parts.append(f"BB%: {bb_pct * 100:.1f}%")
+        diamond_span = ""
         if pd.notna(score):
-            stats_parts.append(f"Score: {score:.1f}")
+            diamond_span = diamond_rating_html_composite(score, size="sm")
 
         st.markdown(
             f'<div style="background:{DARK_CARD}; border:1px solid {DARK_BORDER}; '
             f'border-radius:6px; padding:0.8rem 1rem; margin-bottom:0.5rem;">'
+            f'<div style="display:flex; justify-content:space-between; align-items:center;">'
             f'<div style="color:{GOLD}; font-size:1rem; font-weight:600;">'
             f'{side_abbr} SP: {pitcher_name}{arch_tag}</div>'
+            f'<div>{diamond_span}</div></div>'
             f'<div style="color:{SLATE}; font-size:0.85rem; margin-top:2px;">'
-            f'{" | ".join(stats_parts) if stats_parts else "No projection"}</div>'
+            f'{" | ".join(stats_parts) if stats_parts else "K%: 22.0% | BB%: 8.0% (lg avg)"}</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -657,7 +782,7 @@ def _render_archetype_tab(
 ) -> None:
     """Pitcher archetype vs lineup archetype analysis."""
     if matchup_matrix_df.empty:
-        st.info("Archetype matchup data not available. Run precompute first.")
+        st.info("Archetype matchup data is not yet available.")
         return
 
     for side_info in sides:
@@ -960,7 +1085,7 @@ def _render_sim_tab(
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
 
     if not k_samples_dict:
-        st.info("K% posterior samples not available. Run precompute first.")
+        st.info("K% posterior samples are not yet available.")
         return
 
     bb_samples_dict = bb_samples_dict or {}
@@ -1274,10 +1399,7 @@ def _render_game_browser() -> None:
     batter_ks_path = DASHBOARD_DIR / "game_batter_ks.parquet"
 
     if not all(p.exists() for p in [game_logs_path, lineups_path, batter_ks_path]):
-        st.warning(
-            "Game browser data not found. Re-run "
-            "`python scripts/precompute_dashboard_data.py` to generate it."
-        )
+        st.warning("Game browser data is not yet available.")
         return
 
     game_logs = pd.read_parquet(game_logs_path)
@@ -1300,7 +1422,7 @@ def _render_game_browser() -> None:
     game_logs = _enrich_game_logs(game_logs)
 
     if "game_date" not in game_logs.columns:
-        st.warning("Game info not available. Re-run precompute.")
+        st.warning("Game info is not yet available.")
         return
 
     team_lookup = get_team_lookup()
@@ -1518,7 +1640,8 @@ def _render_game_browser() -> None:
         </div>
         <div class="insight-bullet">
             <span class="dot" style="background:{SLATE};"></span>
-            Positive K Lift = hitter is more vulnerable to this pitcher's arsenal.
+            K Lift = matchup-driven K% advantage above baseline (logit scale).
+            Positive = hitter is more vulnerable to this pitcher's arsenal.
             Negative = hitter handles it better than average.
         </div>
     </div>

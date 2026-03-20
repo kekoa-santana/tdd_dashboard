@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from config import DASHBOARD_DIR, AVAILABLE_SEASONS, PROJECTION_LABEL
+from utils.archetype_names import get_pitch_archetype_name
 
 
 @st.cache_data
@@ -285,7 +286,10 @@ def load_cluster_metadata() -> pd.DataFrame:
     path = DASHBOARD_DIR / "pitcher_cluster_metadata.parquet"
     if not path.exists():
         return pd.DataFrame()
-    return pd.read_parquet(path)
+    df = pd.read_parquet(path)
+    if "pitch_archetype" in df.columns:
+        df["archetype_name"] = df["pitch_archetype"].apply(get_pitch_archetype_name)
+    return df
 
 
 @st.cache_data

@@ -28,6 +28,7 @@ from services.data_loader import (
 from utils.formatters import fmt_stat, delta_html
 from utils.helpers import strip_accents
 from lib.theme import add_watermark
+from components.diamond_rating import diamond_rating_text_composite
 
 
 # ---------------------------------------------------------------------------
@@ -81,9 +82,10 @@ def page_model_performance() -> None:
         unsafe_allow_html=True,
     )
 
-    tab_backtest, tab_game_k, tab_hits_misses, tab_movers, tab_preseason = st.tabs([
+    (tab_backtest, tab_game_k, tab_hits_misses, tab_movers,
+     tab_preseason, tab_season_tracker) = st.tabs([
         "Backtest Results", "Game K Model", "Biggest Hits & Misses",
-        "Projection Movers", "Preseason Comparison",
+        "Projection Movers", "Preseason Comparison", "Season Tracker",
     ])
 
     # ===================================================================
@@ -131,6 +133,12 @@ def page_model_performance() -> None:
     # ===================================================================
     with tab_preseason:
         _render_preseason_comparison_tab()
+
+    # ===================================================================
+    # Tab 6: Season Tracker
+    # ===================================================================
+    with tab_season_tracker:
+        _render_season_tracker_tab()
 
 
 # ---------------------------------------------------------------------------
@@ -739,7 +747,7 @@ def _render_preseason_comparison_tab() -> None:
         for _, row in merged.iterrows():
             r: dict[str, object] = {"Name": row[name_col]}
             if "composite_score" in row.index and pd.notna(row.get("composite_score")):
-                r["Score"] = round(row["composite_score"], 1)
+                r["Rating"] = diamond_rating_text_composite(row["composite_score"])
             for label, key, higher_better, _ in stat_configs:
                 proj_col = f"projected_{key}"
                 pre_col = f"{proj_col}_pre"
@@ -973,7 +981,7 @@ def _render_preseason_only_table(
             "Rank": len(display_rows) + 1,
             "Name": row[name_col],
             "Age": int(row["age"]) if pd.notna(row.get("age")) else "",
-            "Score": round(row["composite_score"], 2),
+            "Rating": diamond_rating_text_composite(row["composite_score"]),
         }
         for label, key, higher_better, _ in stat_configs:
             proj_col = f"projected_{key}"
@@ -994,4 +1002,45 @@ def _render_preseason_only_table(
     st.caption(
         f"Showing {len(display_df)} players from preseason projection. "
         "These are locked in and won't change — use for end-of-season accuracy review."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tab 6: Season Tracker
+# ---------------------------------------------------------------------------
+
+def _render_season_tracker_tab() -> None:
+    """In-season accuracy tracker — stub until games begin."""
+    st.markdown(
+        f'<div class="section-header">In-Season Accuracy Tracker</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.info(
+        "Tracking begins Opening Day. Once the season starts, this tab will "
+        "show how well the Bayesian projections track real performance as "
+        "observed data accumulates."
+    )
+
+    st.markdown(
+        f'<div style="color:{CREAM}; font-weight:600; margin-top:16px; '
+        f'margin-bottom:8px;">What will be tracked:</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(f"""
+- **Running MAE** for K% and BB% projections — updated weekly as new data arrives
+- **Projected vs Actual scatter plots** — one point per player, diagonal = perfect accuracy
+- **Calibration curve** — predicted probability vs actual frequency across deciles
+- **Weekly accuracy snapshots** — trend line showing whether the model improves as the season progresses
+    """)
+
+    st.markdown(
+        f'<div style="margin-top:16px; padding:12px 16px; '
+        f'border-left:3px solid {GOLD}; background:{GOLD}08;">'
+        f'<span style="color:{SLATE}; font-size:0.85rem;">'
+        f'Data will auto-populate from weekly projection snapshots and '
+        f'the daily update pipeline. No manual setup required.</span>'
+        f'</div>',
+        unsafe_allow_html=True,
     )

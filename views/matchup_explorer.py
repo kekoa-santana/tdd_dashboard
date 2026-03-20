@@ -30,6 +30,7 @@ from components.tables import (
     build_matchup_table,
     build_pitcher_profile_table,
 )
+from components.headshot import headshot_html
 from components.scouting import build_matchup_scouting_bullets
 
 
@@ -65,8 +66,10 @@ def page_matchup_explorer() -> None:
         )
         return
 
-    # --- Selectors (with team abbreviations) ---
     team_lookup = get_team_lookup()
+    qp_pitcher_id = st.query_params.get("pitcher_id", "")
+    qp_hitter_id = st.query_params.get("hitter_id", "")
+
     col1, col2 = st.columns(2)
     with col1:
         if pitcher_proj.empty:
@@ -79,7 +82,19 @@ def page_matchup_explorer() -> None:
             team = team_lookup.get(pid, "")
             dname = f"{pname} ({team})" if team else pname
             p_display[dname] = pname
-        selected_pitcher_display = st.selectbox("Select Pitcher", sorted(p_display.keys()), key="mu_pitcher")
+        sorted_p_display = sorted(p_display.keys())
+        default_p_idx = 0
+        if qp_pitcher_id.isdigit():
+            target_pid = int(qp_pitcher_id)
+            for i, dname in enumerate(sorted_p_display):
+                matched = pitcher_proj[pitcher_proj["pitcher_name"] == p_display[dname]]
+                if not matched.empty and int(matched.iloc[0]["pitcher_id"]) == target_pid:
+                    default_p_idx = i
+                    break
+        selected_pitcher_display = st.selectbox(
+            "Select Pitcher", sorted_p_display, index=default_p_idx,
+            key="mu_pitcher",
+        )
         selected_pitcher = p_display[selected_pitcher_display]
     with col2:
         if hitter_proj.empty:
@@ -92,13 +107,27 @@ def page_matchup_explorer() -> None:
             team = team_lookup.get(hid, "")
             dname = f"{hname} ({team})" if team else hname
             h_display[dname] = hname
-        selected_hitter_display = st.selectbox("Select Hitter", sorted(h_display.keys()), key="mu_hitter")
+        sorted_h_display = sorted(h_display.keys())
+        default_h_idx = 0
+        if qp_hitter_id.isdigit():
+            target_hid = int(qp_hitter_id)
+            for i, dname in enumerate(sorted_h_display):
+                matched = hitter_proj[hitter_proj["batter_name"] == h_display[dname]]
+                if not matched.empty and int(matched.iloc[0]["batter_id"]) == target_hid:
+                    default_h_idx = i
+                    break
+        selected_hitter_display = st.selectbox(
+            "Select Hitter", sorted_h_display, index=default_h_idx,
+            key="mu_hitter",
+        )
         selected_hitter = h_display[selected_hitter_display]
 
     pitcher_row = pitcher_proj[pitcher_proj["pitcher_name"] == selected_pitcher].iloc[0]
     hitter_row = hitter_proj[hitter_proj["batter_name"] == selected_hitter].iloc[0]
     pitcher_id = int(pitcher_row["pitcher_id"])
     batter_id = int(hitter_row["batter_id"])
+    st.query_params["pitcher_id"] = str(pitcher_id)
+    st.query_params["hitter_id"] = str(batter_id)
     pitcher_hand = pitcher_row.get("pitch_hand", "R")
 
     # --- Platoon-aware filtering for switch hitters ---
@@ -208,15 +237,22 @@ def page_matchup_explorer() -> None:
     switch_tag = " (switch)" if is_switch else ""
     hand_str = f"{pitcher_label} vs {hitter_label}{switch_tag}"
 
+    p_headshot = headshot_html(pitcher_id, size=50)
+    h_headshot = headshot_html(batter_id, size=50)
     matchup_header_html = (
         f'<div class="brand-header">'
+        f'<div style="display:flex; align-items:center; gap:12px;">'
+        f'{p_headshot}'
         f'<div>'
         f'<div class="brand-title">{selected_pitcher} vs {selected_hitter}</div>'
         f'<div class="brand-subtitle">{hand_str} | {"Archetype" if using_archetype else "Pitch-type"} profiles</div>'
         f'</div>'
+        f'{h_headshot}'
+        f'</div>'
         f'<div style="text-align:right;">'
         f'<div style="color:{edge_color}; font-size:1.1rem; font-weight:600;">{edge_label}</div>'
-        f'<div style="color:{SLATE}; font-size:0.85rem;">K Lift: {lift:+.3f} logit</div>'
+        f'<div style="color:{SLATE}; font-size:0.85rem;">'
+        f'<span class="tdd-tip" title="Matchup-driven K% advantage above baseline (logit scale)">K Lift</span>: {lift:+.3f}</div>'
         f'</div>'
         f'</div>'
     )
@@ -277,7 +313,7 @@ def page_matchup_explorer() -> None:
             if not cluster_meta_df.empty:
                 for _, cmrow in cluster_meta_df.iterrows():
                     aid = int(cmrow["pitch_archetype"])
-                    label = cmrow.get("label", cmrow.get("archetype_label", f"Archetype {aid}"))
+                    label = cmrow.get("archetype_name", f"Cluster {aid}")
                     arch_label_map[aid] = str(label)
 
             # Aggregate offerings by archetype
@@ -311,7 +347,7 @@ def page_matchup_explorer() -> None:
             rows_html = ""
             for _, arow in arch_agg.iterrows():
                 aid = int(arow["pitch_archetype"])
-                label = arch_label_map.get(aid, f"Archetype {aid}")
+                label = arch_label_map.get(aid, f"Cluster {aid}")
                 usage = arow["usage_pct"]
                 p_whiff = arow["whiff_rate"]
 
@@ -400,12 +436,14 @@ def page_matchup_explorer() -> None:
 
             st.markdown('<div class="section-header">Location Matchup</div>',
                         unsafe_allow_html=True)
-            st.caption(
+            st.markdown(
+                f'<div style="font-size:0.8rem; color:{SLATE};">'
                 f"Gold dots = where the pitcher throws each pitch. "
                 f'Background = hitter whiff vulnerability '
                 f'(<span style="color:{EMBER};">orange</span> = exploitable, '
                 f'<span style="color:{SAGE};">green</span> = strong). '
-                f"Catcher's perspective.",
+                f"Catcher's perspective."
+                f'</div>',
                 unsafe_allow_html=True,
             )
 

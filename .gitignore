@@ -32,3 +32,6 @@ ideas.md
 SYNC_GUIDE.md
 
 *.log
+
+# Generated reports
+reports/

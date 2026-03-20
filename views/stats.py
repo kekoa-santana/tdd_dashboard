@@ -75,23 +75,22 @@ def _render_stats_table(
     else:
         df["team_abbr"] = ""
 
-    filter_cols = st.columns([2, 1, 1, 1, 1])
+    search = st.text_input("Search", "", placeholder="Type a name...", key=f"{key_prefix}_search")
+    filter_cols = st.columns(4)
     with filter_cols[0]:
-        search = st.text_input("Search", "", placeholder="Type a name...", key=f"{key_prefix}_search")
-    with filter_cols[1]:
         team_options = ["All"] + sorted(df["team_abbr"].replace("", pd.NA).dropna().unique().tolist())
         team_filter = st.selectbox("Team", team_options, key=f"{key_prefix}_team")
-    with filter_cols[2]:
+    with filter_cols[1]:
         if player_type == "Pitcher":
             role = st.selectbox("Role", ["All", "Starters", "Relievers"], key=f"{key_prefix}_role")
         else:
             role = "All"
-    with filter_cols[3]:
+    with filter_cols[2]:
         if player_type == "Hitter":
             min_pa = st.selectbox("Min PA", [0, 50, 100, 200, 400, 502], index=4, key=f"{key_prefix}_min")
         else:
             min_ip = st.selectbox("Min IP", [0, 10, 30, 50, 100, 162], index=3, key=f"{key_prefix}_min")
-    with filter_cols[4]:
+    with filter_cols[3]:
         sort_options = [s[0] for s in rate_configs] + [s[0] for s in counting_configs]
         sort_by = st.selectbox("Sort by", sort_options, index=sort_options.index(default_sort), key=f"{key_prefix}_sort")
 

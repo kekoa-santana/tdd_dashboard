@@ -21,6 +21,7 @@ from services.data_loader import (
 )
 from utils.helpers import get_team_lookup, get_injury_lookup
 from utils.formatters import fmt_stat
+from components.diamond_rating import diamond_rating_text_composite
 
 # ── Constants ─────────────────────────────────────────────────────────
 _HITTER_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"]
@@ -1313,6 +1314,66 @@ def _render_overview_tab(
             use_container_width=True, hide_index=True,
         )
 
+        # ── Injury impact notes ──────────────────────────────────────
+        impact_lines: list[str] = []
+        for _, row in team_inj.iterrows():
+            pid = int(row["player_id"]) if pd.notna(row.get("player_id")) else None
+            if pid is None:
+                continue
+            # Find this player in hitter or pitcher projections
+            p_match = team_pitchers[team_pitchers["pitcher_id"] == pid] if not team_pitchers.empty else pd.DataFrame()
+            h_match = team_hitters[team_hitters["batter_id"] == pid] if not team_hitters.empty else pd.DataFrame()
+
+            if not p_match.empty:
+                pr = p_match.iloc[0]
+                score = pr.get("composite_score")
+                k_rate = pr.get("projected_k_rate")
+                bb_rate = pr.get("projected_bb_rate")
+            elif not h_match.empty:
+                hr = h_match.iloc[0]
+                score = hr.get("composite_score")
+                k_rate = hr.get("projected_k_rate")
+                bb_rate = hr.get("projected_bb_rate")
+            else:
+                continue
+
+            if pd.isna(score):
+                continue
+
+            # Build diamond string (0-5 scale from composite 0-1)
+            diamond_val = score * 5
+            filled = int(diamond_val)
+            diamonds = "\u25c6" * filled + "\u25c7" * (5 - filled)
+
+            parts = [f"{diamond_val:.1f}"]
+            if pd.notna(k_rate):
+                parts.append(f"{k_rate * 100:.1f}% K%")
+            if pd.notna(bb_rate):
+                parts.append(f"{bb_rate * 100:.1f}% BB%")
+
+            player_name = row["player_name"]
+            sep = " \u2014 "
+            parts_str = sep.join(parts)
+
+            impact_lines.append(
+                f'<div style="padding:3px 0; font-size:0.85rem;">'
+                f'<span style="color:{CREAM};">{player_name}</span> '
+                f'<span style="color:{SLATE};">\u2014 Loses </span>'
+                f'<span style="color:{GOLD};">{diamonds} {parts_str}</span>'
+                f'</div>'
+            )
+
+        if impact_lines:
+            joined_lines = "".join(impact_lines)
+            st.markdown(
+                f'<div style="margin-top:8px; padding:10px 14px; '
+                f'border-left:3px solid {EMBER}; background:{EMBER}08;">'
+                f'<div style="color:{EMBER}; font-weight:600; font-size:0.85rem; '
+                f'margin-bottom:6px;">Projected Impact</div>'
+                f'{joined_lines}</div>',
+                unsafe_allow_html=True,
+            )
+
     # ── Pitchers table ──────────────────────────────────────────────
     st.markdown("### Pitchers")
 
@@ -1340,7 +1401,7 @@ def _render_overview_tab(
                 "Role": role_str,
                 "Age": int(row["age"]) if pd.notna(row.get("age")) else "",
                 "Hand": row.get("pitch_hand", ""),
-                "Score": round(row["composite_score"], 2),
+                "Rating": diamond_rating_text_composite(row["composite_score"]),
             }
             if use_priors:
                 for label, key, _, _ in PITCHER_STATS:
@@ -1409,7 +1470,7 @@ def _render_overview_tab(
                 "Name": name,
                 "Age": int(row["age"]) if pd.notna(row.get("age")) else "",
                 "Bats": row.get("batter_stand", ""),
-                "Score": round(row["composite_score"], 2),
+                "Rating": diamond_rating_text_composite(row["composite_score"]),
             }
             if use_priors:
                 for label, key, _, _ in HITTER_STATS:
@@ -1489,11 +1550,17 @@ def page_team_overview() -> None:
     team_lookup = get_team_lookup()
     injury_lookup = get_injury_lookup()
 
-    # Team selector
     all_teams = sorted(
         teams_df["team_abbr"].replace("", pd.NA).dropna().unique().tolist()
     )
-    selected_team = st.selectbox("Select team", all_teams, key="team_select")
+    qp_team = st.query_params.get("team", "")
+    default_team_idx = 0
+    if qp_team in all_teams:
+        default_team_idx = all_teams.index(qp_team)
+    selected_team = st.selectbox(
+        "Select team", all_teams, index=default_team_idx, key="team_select",
+    )
+    st.query_params["team"] = selected_team
 
     # Get all player IDs for this team
     team_pids = set(
