@@ -109,35 +109,16 @@ def load_player_teams() -> pd.DataFrame:
     return pd.read_parquet(path)
 
 
-_ORG_TO_ABBR = {
-    108: "LAA", 109: "AZ", 110: "BAL", 111: "BOS", 112: "CHC",
-    113: "CIN", 114: "CLE", 115: "COL", 116: "DET", 117: "HOU",
-    118: "KC", 119: "LAD", 120: "WSH", 121: "NYM", 133: "ATH",
-    134: "PIT", 135: "SD", 136: "SEA", 137: "SF", 138: "STL",
-    139: "TB", 140: "TEX", 141: "TOR", 142: "MIN", 143: "PHI",
-    144: "ATL", 145: "CWS", 146: "MIA", 147: "NYY", 158: "MIL",
-}
-
-
-@st.cache_data(ttl=600)
+@st.cache_data
 def load_roster() -> pd.DataFrame:
-    """Load active MLB roster from dim_roster (source of truth).
+    """Load active MLB roster from pre-computed parquet.
 
-    Falls back to player_teams.parquet if the database is unavailable.
+    Falls back to player_teams.parquet if roster parquet is missing.
     """
-    try:
-        from lib.db import read_sql
-        df = read_sql("""
-            SELECT player_id, player_name, org_id, roster_status,
-                   primary_position, is_starter
-            FROM production.dim_roster
-            WHERE level = 'MLB'
-              AND roster_status NOT IN ('released', 'restricted', 'minors')
-        """)
-        df["team_abbr"] = df["org_id"].map(_ORG_TO_ABBR)
-        return df
-    except Exception:
+    path = DASHBOARD_DIR / "roster.parquet"
+    if not path.exists():
         return load_player_teams()
+    return pd.read_parquet(path)
 
 
 @st.cache_data
@@ -502,3 +483,92 @@ def season_selector(key_prefix: str, include_career: bool = True) -> str:
         + [str(s) for s in AVAILABLE_SEASONS]
     )
     return st.selectbox("Season", options, key=f"{key_prefix}_season")
+
+
+# -----------------------------------------------------------------------
+# Game Simulator Data (Layer 3 v2)
+# -----------------------------------------------------------------------
+
+@st.cache_data
+def load_hitter_k_samples() -> dict[str, np.ndarray]:
+    path = DASHBOARD_DIR / "hitter_k_samples.npz"
+    if not path.exists():
+        return {}
+    data = np.load(path)
+    return {k: data[k] for k in data.files}
+
+
+@st.cache_data
+def load_hitter_bb_samples() -> dict[str, np.ndarray]:
+    path = DASHBOARD_DIR / "hitter_bb_samples.npz"
+    if not path.exists():
+        return {}
+    data = np.load(path)
+    return {k: data[k] for k in data.files}
+
+
+@st.cache_data
+def load_hitter_hr_samples() -> dict[str, np.ndarray]:
+    path = DASHBOARD_DIR / "hitter_hr_samples.npz"
+    if not path.exists():
+        return {}
+    data = np.load(path)
+    return {k: data[k] for k in data.files}
+
+
+@st.cache_data
+def load_exit_model():
+    """Load the trained pitcher exit model.
+
+    Returns
+    -------
+    ExitModel or None
+        Trained model, or None if file doesn't exist.
+    """
+    path = DASHBOARD_DIR / "exit_model.pkl"
+    if not path.exists():
+        return None
+    from lib.game_sim.exit_model import ExitModel
+    model = ExitModel()
+    model.load(path)
+    return model
+
+
+@st.cache_data
+def load_pitcher_pitch_count_features() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "pitcher_pitch_count_features.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
+def load_batter_pitch_count_features() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "batter_pitch_count_features.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
+def load_tto_profiles() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "tto_profiles.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
+def load_team_bullpen_rates() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "team_bullpen_rates.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
+def load_pitcher_exit_tendencies() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "pitcher_exit_tendencies.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)

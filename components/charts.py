@@ -136,6 +136,7 @@ def create_posterior_fig(
 _STAT_CHART_CONFIG = {
     "k":  {"xlabel": "Strikeouts", "title_stat": "K",  "color": SAGE},
     "bb": {"xlabel": "Walks",      "title_stat": "BB", "color": EMBER},
+    "h":  {"xlabel": "Hits Allowed", "title_stat": "H", "color": SLATE},
     "hr": {"xlabel": "Home Runs",  "title_stat": "HR", "color": GOLD},
 }
 
