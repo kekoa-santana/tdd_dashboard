@@ -43,13 +43,14 @@ def fmt_trad(val: float, fmt: str) -> str:
 def delta_html(val: float, higher_is_better: bool = True) -> str:
     """Format a delta as colored HTML span."""
     pct = val * 100
+    _pp = '<span class="tdd-tip" title="percentage points">pp</span>'
     improving = (pct > 0 and higher_is_better) or (pct < 0 and not higher_is_better)
     if abs(pct) < 0.05:
-        return f'<span style="color:{SLATE}; font-weight:600;">0.0pp</span>'
+        return f'<span style="color:{SLATE}; font-weight:600;">0.0{_pp}</span>'
     elif improving:
-        return f'<span style="color:{POSITIVE}; font-weight:600;">{pct:+.1f}pp</span>'
+        return f'<span style="color:{POSITIVE}; font-weight:600;">{pct:+.1f}{_pp}</span>'
     else:
-        return f'<span style="color:{NEGATIVE}; font-weight:600;">{pct:+.1f}pp</span>'
+        return f'<span style="color:{NEGATIVE}; font-weight:600;">{pct:+.1f}{_pp}</span>'
 
 
 def whiff_quality_color(whiff_rate: float) -> str:

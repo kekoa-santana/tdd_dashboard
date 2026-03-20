@@ -58,12 +58,14 @@ from components.metric_cards import (
     metric_card, percentile_rank, pctile_color,
     pctile_bar_html, observed_pctile_bar_html,
 )
-from components.charts import create_posterior_fig
+from components.charts import create_posterior_fig, create_arsenal_donut
 from components.tables import (
     combine_platoon_vuln,
     build_hitter_profile_table, build_pitcher_profile_table,
 )
 from components.scouting import generate_scouting_bullets
+from components.headshot import render_headshot
+from components.diamond_rating import diamond_rating_html_composite
 from lib.theme import add_watermark
 
 
@@ -317,9 +319,14 @@ def render_pitch_profiles(
         if not p_arsenal.empty:
             st.markdown(f'<div class="section-header">Pitch Arsenal ({season_label}{_platoon_suffix})</div>',
                         unsafe_allow_html=True)
-            table_html = build_pitcher_profile_table(p_arsenal)
-            if table_html:
-                st.markdown(f'<div class="insight-card">{table_html}</div>', unsafe_allow_html=True)
+            donut_col, table_col = st.columns([2, 3])
+            with donut_col:
+                donut_fig = create_arsenal_donut(p_arsenal, season_label=f"{season_label}{_platoon_suffix}")
+                st.pyplot(donut_fig, use_container_width=True)
+            with table_col:
+                table_html = build_pitcher_profile_table(p_arsenal)
+                if table_html:
+                    st.markdown(f'<div class="insight-card">{table_html}</div>', unsafe_allow_html=True)
 
         # Arsenal Archetype Map
         offerings_df = load_pitcher_offerings()
@@ -509,7 +516,7 @@ def render_pitch_profiles(
                     if arch_vuln_rows:
                         st.markdown(f'<div class="section-header">Archetype Vulnerability ({season_label})</div>',
                                     unsafe_allow_html=True)
-                        st.caption(f"Min {min_swings} swings. Δ = vs league avg. Green = handles well, orange = vulnerable.")
+                        st.caption(f"Min {min_swings} swings. Δ = vs league avg for that pitch archetype. Green = handles well, orange = vulnerable.")
                         av_df = pd.DataFrame(arch_vuln_rows)
 
                         def _color_delta(val: float) -> str:
@@ -949,9 +956,20 @@ def page_player_profile() -> None:
     st.markdown('<div class="section-header">Player Profile</div>',
                 unsafe_allow_html=True)
 
+    qp_player_type = st.query_params.get("player_type", "")
+    qp_player_id = st.query_params.get("player_id", "")
+
+    type_options = ["Pitcher", "Hitter"]
+    default_type_idx = 0
+    if qp_player_type.lower() == "hitter":
+        default_type_idx = 1
+    elif qp_player_type.lower() == "pitcher":
+        default_type_idx = 0
+
     player_type = st.radio(
         "Player type",
-        ["Pitcher", "Hitter"],
+        type_options,
+        index=default_type_idx,
         horizontal=True,
         key="profile_type",
     )
@@ -971,16 +989,25 @@ def page_player_profile() -> None:
         name_col, id_col, hand_col = "batter_name", "batter_id", "batter_stand"
         stat_configs = HITTER_STATS
 
-    # Player selector (with team filter and team abbreviations)
     team_lookup = get_team_lookup()
 
-    # Add team_abbr to df for filtering
     df["_team"] = df[id_col].apply(lambda x: team_lookup.get(int(x), ""))
+
+    deep_link_player_id: int | None = None
+    if qp_player_id.isdigit():
+        deep_link_player_id = int(qp_player_id)
 
     sel_cols = st.columns([1, 3])
     with sel_cols[0]:
         profile_team_opts = ["All"] + sorted(df["_team"].replace("", pd.NA).dropna().unique().tolist())
-        profile_team_filter = st.selectbox("Team", profile_team_opts, key="profile_team")
+        default_team_idx = 0
+        if deep_link_player_id is not None:
+            linked_team = team_lookup.get(deep_link_player_id, "")
+            if linked_team in profile_team_opts:
+                default_team_idx = profile_team_opts.index(linked_team)
+        profile_team_filter = st.selectbox(
+            "Team", profile_team_opts, index=default_team_idx, key="profile_team",
+        )
     with sel_cols[1]:
         filtered_df = df if profile_team_filter == "All" else df[df["_team"] == profile_team_filter]
         profile_display = {}
@@ -990,11 +1017,25 @@ def page_player_profile() -> None:
             team = team_lookup.get(pid, "")
             dname = f"{pname} ({team})" if team else pname
             profile_display[dname] = pname
-        selected_display = st.selectbox("Select player", sorted(profile_display.keys()), key="profile_player")
+        sorted_display = sorted(profile_display.keys())
+        default_player_idx = 0
+        if deep_link_player_id is not None:
+            for i, dname in enumerate(sorted_display):
+                matched_row = df[df[name_col] == profile_display[dname]]
+                if not matched_row.empty and int(matched_row.iloc[0][id_col]) == deep_link_player_id:
+                    default_player_idx = i
+                    break
+        selected_display = st.selectbox(
+            "Select player", sorted_display, index=default_player_idx,
+            key="profile_player",
+        )
     selected_name = profile_display[selected_display]
 
     player_row = df[df[name_col] == selected_name].iloc[0]
     player_id = int(player_row[id_col])
+
+    st.query_params["player_id"] = str(player_id)
+    st.query_params["player_type"] = player_type.lower()
 
     # --- Season selector ---
     season_choice = season_selector("profile", include_career=True)
@@ -1080,7 +1121,7 @@ def page_player_profile() -> None:
                     header_parts.append(pf_label)
 
     composite = player_row["composite_score"]
-    comp_color = POSITIVE if composite > 0 else NEGATIVE if composite < 0 else SLATE
+    diamond_html = diamond_rating_html_composite(composite, size="lg")
 
     # Injury status
     injury_lookup = get_injury_lookup()
@@ -1103,12 +1144,16 @@ def page_player_profile() -> None:
         f'{PROJECTION_LABEL if is_projection else "Career" if is_career else f"{selected_season} Season"}</div>'
         f'{injury_html}'
         f'</div>'
-        f'<div style="color:{comp_color}; font-size:1.2rem; font-weight:600;">'
-        f'Composite: {composite:+.2f}'
+        f'<div style="text-align:right;">'
+        f'{diamond_html}'
         f'</div>'
         f'</div>'
     )
-    st.markdown(header_html, unsafe_allow_html=True)
+    hdr_left, hdr_right = st.columns([1, 11])
+    with hdr_left:
+        render_headshot(player_id, size=80)
+    with hdr_right:
+        st.markdown(header_html, unsafe_allow_html=True)
 
     # --- Historical / Career stats view (non-projection) ---
     if show_trad:
@@ -1307,6 +1352,17 @@ def page_player_profile() -> None:
                     val = int(round(c_data[mean_col]))
                     lo = int(round(c_data.get(p10_col, val)))
                     hi = int(round(c_data.get(p90_col, val)))
+
+                    def _colored_count_delta(d: int, higher_better: bool) -> str:
+                        improving = (d > 0 and higher_better) or (d < 0 and not higher_better)
+                        if d == 0:
+                            clr = SLATE
+                        elif improving:
+                            clr = POSITIVE
+                        else:
+                            clr = NEGATIVE
+                        return f'<span style="color:{clr};">{d:+d}</span>'
+
                     # Baseline: Career Avg uses rate x projected PA, prior season uses actual
                     actual_val = c_data.get(c_actual)
                     if compare_to == "Career Avg":
@@ -1321,17 +1377,17 @@ def page_player_profile() -> None:
                                 and pd.notna(proj_pa)):
                             career_count = int(round(player_row[career_rate_col] * proj_pa))
                             delta = val - career_count
-                            delta_str = f"Career pace: {career_count} ({delta:+d}) | 80%: {lo} – {hi}"
+                            delta_str = f"Career pace: {career_count} ({_colored_count_delta(delta, c_hb)}) | 80%: {lo} – {hi}"
                         elif pd.notna(actual_val):
                             actual_int = int(actual_val)
                             delta = val - actual_int
-                            delta_str = f"{PRIOR_SEASON}: {actual_int} ({delta:+d}) | 80%: {lo} – {hi}"
+                            delta_str = f"{PRIOR_SEASON}: {actual_int} ({_colored_count_delta(delta, c_hb)}) | 80%: {lo} – {hi}"
                         else:
                             delta_str = f"80% range: {lo} – {hi}"
                     elif pd.notna(actual_val):
                         actual_int = int(actual_val)
                         delta = val - actual_int
-                        delta_str = f"{PRIOR_SEASON}: {actual_int} ({delta:+d}) | 80%: {lo} – {hi}"
+                        delta_str = f"{PRIOR_SEASON}: {actual_int} ({_colored_count_delta(delta, c_hb)}) | 80%: {lo} – {hi}"
                     else:
                         delta_str = f"80% range: {lo} – {hi}"
                     _pct = None
@@ -1502,7 +1558,7 @@ def page_player_profile() -> None:
             f"Dashed line = {PRIOR_SEASON} observed percentile. "
             "Green = elite (80+), gold = above-avg (60-79), "
             "gray = mid-tier (40-59), orange = below-avg (<40). "
-            "Range = 95% credible interval."
+            "Range = 95% credible interval (the range we expect the true value to fall within)."
         )
 
     # --- Season Trends (also on projection view) ---
@@ -1555,7 +1611,7 @@ def page_player_profile() -> None:
                 f"{PRIOR_SEASON} Observed": fmt_stat(player_row[obs_col], key),
                 f"{CURRENT_SEASON} Projected": fmt_stat(player_row[proj_col], key),
                 "Delta": f"{player_row[f'delta_{key}'] * 100:+.1f}pp",
-                "95% CI": (
+                "95% Cred. Int.": (
                     f"[{fmt_stat(player_row[lo_col], key)}, "
                     f"{fmt_stat(player_row[hi_col], key)}]"
                     if lo_col in player_row.index and pd.notna(player_row.get(lo_col))
@@ -1591,7 +1647,7 @@ def page_player_profile() -> None:
                         f"{PRIOR_SEASON} Observed": obs_str,
                         f"{CURRENT_SEASON} Projected": str(proj_val),
                         "Delta": delta_str,
-                        "95% CI": f"[{ci_lo}, {ci_hi}]",
+                        "95% Cred. Int.": f"[{ci_lo}, {ci_hi}]",
                         "Description": "Season total (Bayesian rate x playing time)",
                     })
 

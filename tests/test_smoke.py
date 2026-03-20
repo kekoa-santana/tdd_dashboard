@@ -100,6 +100,9 @@ class TestImports:
         """prospects merged into player_rankings."""
         from views.player_rankings import page_player_rankings  # noqa: F401
 
+    def test_import_compare(self):
+        from views.compare import page_compare  # noqa: F401
+
     def test_import_backtest_charts(self):
         from components.backtest_charts import create_accuracy_bars  # noqa: F401
 

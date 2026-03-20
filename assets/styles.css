@@ -44,6 +44,9 @@
     text-transform: uppercase;
     letter-spacing: 1px;
     margin-top: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .metric-delta {
     font-size: 0.85rem;
@@ -126,6 +129,26 @@
 
 /* Table styling */
 .stDataFrame { font-size: 0.85rem; }
+
+/* Sticky first column on data tables */
+[data-testid="stDataFrame"] table th:first-child,
+[data-testid="stDataFrame"] table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--tdd-dark-card);
+}
+[data-testid="stDataFrame"] table th:first-child {
+    z-index: 2;
+}
+
+/* Tooltip styling for stat abbreviations */
+.tdd-tip {
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+    cursor: help;
+}
 
 /* Global spacing: breathing room between content blocks.
    Streamlit wraps each st.columns() in stHorizontalBlock and each

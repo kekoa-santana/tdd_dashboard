@@ -59,6 +59,25 @@ PITCH_FAMILY_COLORS: dict[str, str] = {
     "breaking": "#5B9BD5",
     "offspeed": "#70AD47",
 }
+PITCH_TYPE_COLORS: dict[str, str] = {
+    # Fastballs — warm tones, distinct from each other
+    "FF": "#E8575A",   # 4-Seam: bright red
+    "SI": "#D4862A",   # Sinker: burnt orange
+    "FC": "#D98880",   # Cutter: salmon
+    # Breaking — cool tones, distinct from each other
+    "SL": "#5B9BD5",   # Slider: medium blue
+    "ST": "#4EC6C1",   # Sweeper: teal
+    "CU": "#8E7CC3",   # Curveball: purple
+    "KC": "#A78BDA",   # Knuckle-Curve: lavender
+    "SV": "#3A6FB0",   # Slurve: deep blue
+    "CS": "#7B68AE",   # Slow Curve: dark violet
+    # Offspeed — green/yellow tones
+    "CH": "#70AD47",   # Changeup: green
+    "FS": "#A8C256",   # Splitter: yellow-green
+    "FO": "#8B9A46",   # Forkball: olive
+    "EP": "#D4C75A",   # Eephus: gold-yellow
+    "KN": "#5BA886",   # Knuckleball: teal-green
+}
 PITCH_TYPE_TO_FAMILY: dict[str, str] = {
     "FF": "fastball", "SI": "fastball", "FC": "fastball",
     "SL": "breaking", "CU": "breaking", "ST": "breaking",

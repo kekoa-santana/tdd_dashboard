@@ -10,7 +10,7 @@ from scipy.stats import gaussian_kde
 
 from config import (
     GOLD, EMBER, SAGE, SLATE, CREAM, DARK,
-    PITCH_DISPLAY, PITCH_TYPE_TO_FAMILY, PITCH_FAMILY_COLORS,
+    PITCH_DISPLAY, PITCH_TYPE_TO_FAMILY, PITCH_FAMILY_COLORS, PITCH_TYPE_COLORS,
     PRIOR_SEASON, CURRENT_SEASON,
 )
 from lib.theme import add_watermark as _theme_watermark
@@ -279,6 +279,81 @@ def create_arsenal_fig(
     add_watermark(fig)
     fig.tight_layout()
     fig.subplots_adjust(right=0.60)
+    return fig
+
+
+def create_arsenal_donut(
+    arsenal_df: pd.DataFrame,
+    season_label: str = "",
+) -> Figure:
+    """Pitch usage donut chart — colored by pitch family."""
+    from config import PITCH_ORDER
+
+    df = arsenal_df.copy()
+    df = df[df["pitches"] >= 20]
+    if df.empty:
+        fig = Figure(figsize=(3.5, 3.5))
+        fig.patch.set_facecolor(DARK)
+        return fig
+
+    df["_order"] = df["pitch_type"].map(
+        {pt: i for i, pt in enumerate(PITCH_ORDER)}
+    ).fillna(99)
+    df = df.sort_values("_order")
+
+    labels = df["pitch_type"].map(PITCH_DISPLAY).fillna(df["pitch_type"]).tolist()
+    sizes = df["usage_pct"].tolist()
+    colors = [
+        PITCH_TYPE_COLORS.get(pt, SLATE)
+        for pt in df["pitch_type"]
+    ]
+
+    fig = Figure(figsize=(3.5, 3.5))
+    ax = fig.subplots()
+    fig.patch.set_facecolor(DARK)
+    ax.set_facecolor(DARK)
+
+    wedges, _ = ax.pie(
+        sizes,
+        colors=colors,
+        startangle=90,
+        wedgeprops=dict(width=0.38, edgecolor=DARK, linewidth=1.5),
+    )
+
+    # Annotate each wedge outside the donut
+    for i, (wedge, label, size) in enumerate(zip(wedges, labels, sizes)):
+        ang = (wedge.theta2 + wedge.theta1) / 2
+        x = np.cos(np.deg2rad(ang))
+        y = np.sin(np.deg2rad(ang))
+        ha = "left" if x >= 0 else "right"
+        ax.annotate(
+            f"{label} {size * 100:.0f}%",
+            xy=(0.7 * x, 0.7 * y),
+            xytext=(1.15 * x, 1.15 * y),
+            fontsize=8,
+            color=CREAM,
+            fontweight="600",
+            ha=ha, va="center",
+            arrowprops=dict(arrowstyle="-", color=SLATE, lw=0.6),
+        )
+
+    # Center label
+    total = int(df["pitches"].sum())
+    ax.text(
+        0, 0.06, f"{total:,}",
+        ha="center", va="center", fontsize=14, fontweight="bold", color=GOLD,
+    )
+    ax.text(
+        0, -0.12, "pitches",
+        ha="center", va="center", fontsize=8, color=SLATE,
+    )
+
+    ax.set_title(
+        f"Pitch Mix{f' ({season_label})' if season_label else ''}",
+        color=CREAM, fontsize=10, fontweight="bold", pad=8,
+    )
+
+    fig.tight_layout()
     return fig
 
 
