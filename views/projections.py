@@ -320,23 +320,9 @@ def page_projections() -> None:
             zip(teams_df["player_id"].astype(int), teams_df["team_abbr"])
         )
 
-    # Get career PA/BF for confidence filtering
-    try:
-        from lib.db import read_sql
-        role = "batter" if player_type == "Hitter" else "pitcher"
-        pa_col = "bat_pa" if player_type == "Hitter" else "pit_bf"
-        career = read_sql(f"""
-            SELECT player_id as {id_col},
-                   SUM({pa_col}) as career_pa
-            FROM production.fact_player_game_mlb
-            WHERE player_role = :role AND season BETWEEN 2020 AND 2025
-            GROUP BY player_id
-        """, {"role": role})
-        if not career.empty:
-            df = df.merge(career, on=id_col, how="left")
-            df["career_pa"] = df["career_pa"].fillna(0)
-    except Exception:
-        df["career_pa"] = 999  # assume established if query fails
+    # career_pa is baked into the sim parquet (no runtime DB query needed)
+    if "career_pa" not in df.columns:
+        df["career_pa"] = 999  # assume established if column missing
 
     # Controls
     ctrl_cols = st.columns(3)
