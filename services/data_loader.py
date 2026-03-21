@@ -99,6 +99,66 @@ def load_counting(player_type: str) -> pd.DataFrame:
 
 
 @st.cache_data
+def load_counting_sim(player_type: str) -> pd.DataFrame:
+    """Load sim-based counting stat projections with confidence tiers.
+
+    Parameters
+    ----------
+    player_type : str
+        ``"pitcher"`` or ``"hitter"``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Sim projections including ``confidence_tier`` and
+        ``confidence_score`` columns (if available).
+    """
+    path = DASHBOARD_DIR / f"{player_type}_counting_sim.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
+def load_confidence_tiers(player_type: str) -> pd.DataFrame:
+    """Extract confidence tier columns from the sim parquet.
+
+    Returns a DataFrame with the player id column, ``confidence_score``,
+    and ``confidence_tier``.  Returns empty if the parquet or columns
+    are missing.
+
+    Parameters
+    ----------
+    player_type : str
+        ``"pitcher"`` or ``"hitter"``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: player id, confidence_score, confidence_tier.
+    """
+    df = load_counting_sim(player_type)
+    if df.empty:
+        return pd.DataFrame()
+
+    id_col = "pitcher_id" if player_type == "pitcher" else "batter_id"
+    name_col = "pitcher_name" if player_type == "pitcher" else "batter_name"
+    keep = [id_col]
+    if name_col in df.columns:
+        keep.append(name_col)
+    if "confidence_score" in df.columns:
+        keep.append("confidence_score")
+    if "confidence_tier" in df.columns:
+        keep.append("confidence_tier")
+
+    # Return empty if no confidence columns present
+    if "confidence_score" not in df.columns and "confidence_tier" not in df.columns:
+        return pd.DataFrame()
+
+    return df[keep].copy()
+
+
+@st.cache_data
 def load_game_info() -> pd.DataFrame:
     path = DASHBOARD_DIR / "game_info.parquet"
     if not path.exists():
