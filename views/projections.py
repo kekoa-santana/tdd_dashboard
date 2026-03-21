@@ -12,7 +12,7 @@ from config import (
     POSITIVE, NEGATIVE,
 )
 from services.data_loader import (
-    load_projections, load_counting, load_player_teams,
+    load_projections, load_counting, load_counting_sim, load_player_teams,
 )
 from utils.helpers import strip_accents, get_injury_lookup
 from utils.formatters import fmt_stat
@@ -242,10 +242,10 @@ def page_projections() -> None:
         counting_cols = [id_col] + [
             c for c in counting_df.columns
             if c.endswith("_mean") or c.endswith("_p10") or c.endswith("_p90")
-            or c.startswith("actual_")
+            or c.startswith("actual_") or c in ("confidence_tier", "confidence_score", "role")
         ]
         available = [c for c in counting_cols if c in counting_df.columns]
-        df = df.merge(counting_df[available], on=id_col, how="left")
+        df = df.merge(counting_df[available], on=id_col, how="left", suffixes=("", "_sim"))
 
     teams_df = load_player_teams()
     if not teams_df.empty:
@@ -291,8 +291,12 @@ def page_projections() -> None:
         hand_options = ["All"] + sorted(df[hand_col].dropna().unique().tolist())
         hand_filter = st.selectbox("Hand", hand_options, key="proj_hand")
     with filter_cols[3]:
-        sort_options = ["Diamond Rating"] + [s[0] for s in stat_configs] + [s[0] for s in obs_configs]
-        sort_by = st.selectbox("Sort by", sort_options, key="proj_sort")
+        conf_options = ["All", "HIGH", "MEDIUM", "LOW"]
+        conf_filter = st.selectbox("Confidence", conf_options, key="proj_conf")
+
+    sort_cols = st.columns(1)
+    sort_options = ["Diamond Rating"] + [s[0] for s in stat_configs] + [s[0] for s in obs_configs]
+    sort_by = st.selectbox("Sort by", sort_options, key="proj_sort")
 
     if search:
         _search_norm = strip_accents(search)
@@ -306,6 +310,8 @@ def page_projections() -> None:
             df = df[df["is_starter"] == 0]
     if hand_filter != "All":
         df = df[df[hand_col] == hand_filter]
+    if conf_filter != "All" and "confidence_tier" in df.columns:
+        df = df[df["confidence_tier"] == conf_filter]
 
     all_sort_configs = stat_configs + obs_configs
     if sort_by == "Diamond Rating":
@@ -339,11 +345,17 @@ def page_projections() -> None:
                 name_display = f"[IL] {name_display}"
             else:
                 name_display = f"[DTD] {name_display}"
+        # Confidence tier badge
+        tier = row.get("confidence_tier", "")
+        if pd.isna(tier):
+            tier = ""
+
         r: dict[str, object] = {
             "Rank": len(display_rows) + 1,
             "Name": name_display,
             "Age": int(row["age"]) if pd.notna(row.get("age")) else "",
             "Hand": row.get(hand_col, ""),
+            "Conf.": tier if tier else "--",
             "Rating": diamond_rating_text_composite(row["composite_score"]),
         }
         for label, key, higher_better, _ in stat_configs:
@@ -361,14 +373,22 @@ def page_projections() -> None:
         for c_label, c_prefix, c_actual, c_hb in counting_display:
             mean_col = f"{c_prefix}_mean"
             has_proj = mean_col in row.index and pd.notna(row.get(mean_col))
-            has_actual = c_actual in row.index and pd.notna(row.get(c_actual))
+            has_actual = c_actual is not None and c_actual in row.index and pd.notna(row.get(c_actual))
             if has_proj:
-                proj_val = int(round(row[mean_col]))
-                if has_actual:
-                    delta = proj_val - int(row[c_actual])
-                    r[c_label] = f"{proj_val} ({delta:+d})"
+                raw_val = row[mean_col]
+                # Format: decimals for rate stats, integers for counting
+                if c_prefix in ("projected_fip_era", "projected_whip", "projected_woba"):
+                    proj_display = f"{raw_val:.2f}"
+                elif c_prefix in ("projected_wrc_plus", "projected_ip"):
+                    proj_display = f"{raw_val:.0f}"
                 else:
-                    r[c_label] = str(proj_val)
+                    proj_display = str(int(round(raw_val)))
+                if has_actual:
+                    actual_val = int(row[c_actual])
+                    delta = int(round(raw_val)) - actual_val
+                    r[c_label] = f"{proj_display} ({delta:+d})"
+                else:
+                    r[c_label] = proj_display
             else:
                 r[c_label] = "--"
         display_rows.append(r)
@@ -383,8 +403,8 @@ def page_projections() -> None:
 
     st.caption(
         f"Showing {len(display_df)} {player_type.lower()}s. "
-        "Rating = Diamond Rating (0-5) derived from weighted stat deltas. "
-        "Positive = projected improvement. "
-        "Deltas shown in parentheses (pp = percentage points). "
-        "Counting stats (K, BB, HR, Outs) are Bayesian rate x playing time projections."
+        "Conf. = projection confidence (HIGH/MEDIUM/LOW) based on track record, "
+        "rate stability, and playing time certainty. "
+        "Counting stats from PA-by-PA game simulator with Bayesian rate posteriors. "
+        "Deltas vs prior season shown in parentheses."
     )
