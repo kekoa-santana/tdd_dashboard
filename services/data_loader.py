@@ -528,7 +528,10 @@ def load_exit_model():
     path = DASHBOARD_DIR / "exit_model.pkl"
     if not path.exists():
         return None
-    from lib.game_sim.exit_model import ExitModel
+    try:
+        from lib.game_sim.exit_model import ExitModel
+    except ImportError:
+        return None
     model = ExitModel()
     model.load(path)
     return model
