@@ -80,7 +80,7 @@ def create_posterior_fig(
     color: str = SAGE,
 ) -> Figure:
     """Create a posterior KDE plot with brand styling."""
-    fig = Figure(figsize=(7, 3.5))
+    fig = Figure(figsize=(5.5, 3.5))
     ax = fig.subplots()
     fig.patch.set_facecolor(DARK)
     ax.set_facecolor(DARK)
@@ -152,7 +152,7 @@ def create_game_stat_fig(
     xlabel = cfg["xlabel"]
     title_stat = cfg["title_stat"]
 
-    fig = Figure(figsize=(7, 3.5))
+    fig = Figure(figsize=(5.5, 3.5))
     ax = fig.subplots()
     fig.patch.set_facecolor(DARK)
     ax.set_facecolor(DARK)
@@ -219,7 +219,7 @@ def create_arsenal_fig(
         (df["usage_pct"] / max_usage) * (max_thickness - min_thickness)
     )
 
-    fig = Figure(figsize=(7, max(2.5, n * 0.6)))
+    fig = Figure(figsize=(5.5, max(2.5, n * 0.6)))
     ax = fig.subplots()
     fig.patch.set_facecolor(DARK)
     ax.set_facecolor(DARK)
@@ -392,7 +392,7 @@ def create_hitter_vuln_fig(
     merged = merged.sort_values("blended_whiff", ascending=True)
 
     n_rows = len(merged)
-    fig = Figure(figsize=(7, max(2.2, n_rows * 0.5)))
+    fig = Figure(figsize=(5.5, max(2.2, n_rows * 0.5)))
     axes = fig.subplots(1, 2)
     fig.patch.set_facecolor(DARK)
 

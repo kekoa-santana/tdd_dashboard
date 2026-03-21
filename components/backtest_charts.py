@@ -30,7 +30,7 @@ def create_accuracy_bars(
     x = np.arange(len(seasons))
     width = 0.35
 
-    fig = Figure(figsize=(7, 3.5))
+    fig = Figure(figsize=(5.5, 3.5))
     ax = fig.subplots()
     fig.patch.set_facecolor(DARK)
     ax.set_facecolor(DARK)
@@ -87,7 +87,7 @@ def create_coverage_chart(
             targets.append(0.95)
 
     y = np.arange(len(labels))
-    fig = Figure(figsize=(7, max(2, len(labels) * 0.8)))
+    fig = Figure(figsize=(5.5, max(2, len(labels) * 0.8)))
     ax = fig.subplots()
     fig.patch.set_facecolor(DARK)
     ax.set_facecolor(DARK)
@@ -137,7 +137,7 @@ def create_game_k_model_comparison(df: pd.DataFrame) -> Figure:
 
     tier_colors = [SLATE, EMBER, GOLD, SAGE]
 
-    fig = Figure(figsize=(7, 3.5))
+    fig = Figure(figsize=(5.5, 3.5))
     ax = fig.subplots()
     fig.patch.set_facecolor(DARK)
     ax.set_facecolor(DARK)
@@ -185,7 +185,7 @@ def create_movers_chart(
     positive_color / negative_color : bar colors.
     """
     n = len(names)
-    fig = Figure(figsize=(7, max(2.5, n * 0.35)))
+    fig = Figure(figsize=(5.5, max(2.5, n * 0.35)))
     ax = fig.subplots()
     fig.patch.set_facecolor(DARK)
     ax.set_facecolor(DARK)
@@ -255,7 +255,7 @@ def create_projection_timeline(
         return None
 
     colors = [SAGE, GOLD, EMBER, SLATE]
-    fig = Figure(figsize=(7, 3.5))
+    fig = Figure(figsize=(5.5, 3.5))
     ax = fig.subplots()
     fig.patch.set_facecolor(DARK)
     ax.set_facecolor(DARK)

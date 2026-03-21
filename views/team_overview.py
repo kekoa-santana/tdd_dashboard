@@ -159,13 +159,13 @@ def _player_row_html(
 
     return (
         f'<div style="padding:6px 12px; border-left:3px solid {border_color}; '
-        f'margin-bottom:2px; display:flex; align-items:center; gap:12px; '
-        f'opacity:{opacity};">'
+        f'margin-bottom:2px; display:flex; align-items:center; gap:8px; '
+        f'flex-wrap:wrap; opacity:{opacity};">'
         f'<span style="color:{CREAM}; font-weight:{"700" if is_first else "400"}; '
-        f'min-width:150px;">{name}</span>'
+        f'min-width:6rem; flex-shrink:1;">{name}</span>'
         f'{hand_html}'
         f'{rank_html}'
-        f'<span style="color:{GOLD}; font-size:0.85rem; min-width:50px;">{score:.2f}</span>'
+        f'<span style="color:{GOLD}; font-size:0.85rem; min-width:2.5rem;">{score:.2f}</span>'
         f'{arch_html}{health_html}'
         f'</div>'
     )

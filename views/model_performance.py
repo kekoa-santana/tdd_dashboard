@@ -902,7 +902,7 @@ def _render_preseason_comparison_tab() -> None:
                 st.caption(f"Pre: {pre_val:.1f}% | Now: {cur_val:.1f}% | {delta_pp:+.1f}pp")
 
             with spark_col:
-                fig, ax = plt.subplots(figsize=(7, 2.5))
+                fig, ax = plt.subplots(figsize=(5.5, 2.5))
                 fig.patch.set_facecolor(DARK)
                 ax.set_facecolor(DARK)
 

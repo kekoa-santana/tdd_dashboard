@@ -88,18 +88,8 @@ def _parse_wind_category(wind_str: object) -> str:
 # Roster export
 # ---------------------------------------------------------------------------
 
-_ORG_TO_ABBR = {
-    108: "LAA", 109: "AZ", 110: "BAL", 111: "BOS", 112: "CHC",
-    113: "CIN", 114: "CLE", 115: "COL", 116: "DET", 117: "HOU",
-    118: "KC", 119: "LAD", 120: "WSH", 121: "NYM", 133: "ATH",
-    134: "PIT", 135: "SD", 136: "SEA", 137: "SF", 138: "STL",
-    139: "TB", 140: "TEX", 141: "TOR", 142: "MIN", 143: "PHI",
-    144: "ATL", 145: "CWS", 146: "MIA", 147: "NYY", 158: "MIL",
-}
-
-
 def export_roster() -> bool:
-    """Export production.dim_roster to a dashboard parquet.
+    """Export production.dim_roster joined with dim_team to a dashboard parquet.
 
     Returns True on success, False on failure.
     """
@@ -108,13 +98,15 @@ def export_roster() -> bool:
         import pandas as pd
 
         df = read_sql("""
-            SELECT player_id, player_name, org_id, roster_status,
-                   primary_position, is_starter
-            FROM production.dim_roster
-            WHERE level = 'MLB'
-              AND roster_status NOT IN ('released', 'restricted', 'minors')
+            SELECT dr.player_id, dr.player_name, dr.org_id, dr.roster_status,
+                   dr.primary_position, dr.is_starter,
+                   dt.abbreviation AS team_abbr,
+                   dt.league, dt.division, dt.team_name
+            FROM production.dim_roster dr
+            JOIN production.dim_team dt ON dr.org_id = dt.team_id
+            WHERE dr.level = 'MLB'
+              AND dr.roster_status NOT IN ('released', 'restricted', 'minors')
         """)
-        df["team_abbr"] = df["org_id"].map(_ORG_TO_ABBR)
         df.to_parquet(DASHBOARD_DIR / "roster.parquet", index=False)
         logger.info("Exported roster: %d players", len(df))
         return True

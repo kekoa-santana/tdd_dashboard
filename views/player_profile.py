@@ -763,7 +763,7 @@ def render_season_trends(
     ) -> Figure:
         n = len(stats)
         n_r = (n + n_cols - 1) // n_cols
-        fig = Figure(figsize=(7, row_height * n_r), facecolor=DARK)
+        fig = Figure(figsize=(5.5, row_height * n_r), facecolor=DARK)
         axs = fig.subplots(n_r, n_cols, squeeze=False)
 
         for idx, (label, key, higher_better, is_pct) in enumerate(stats):
