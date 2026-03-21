@@ -20,7 +20,7 @@ _POSITION_COORDS = {
     "DH": (6, 8),
 }
 
-_HEADSHOT_SIZE = 45
+_HEADSHOT_SIZE = 80
 
 
 def _headshot_url(player_id: int, size: int = 60) -> str:
@@ -152,6 +152,8 @@ def render_diamond_chart(
     ))
 
     # ── Add headshot images ───────────────────────────────────────
+    # Use data coordinates so images align with markers regardless of
+    # aspect-ratio adjustments from scaleanchor="x".
     for pos, (px, py) in _POSITION_COORDS.items():
         if pos not in starter_lookup:
             continue
@@ -159,25 +161,17 @@ def render_diamond_chart(
         pid = int(row["player_id"])
         url = _headshot_url(pid, _HEADSHOT_SIZE)
 
-        # Convert data coords to fraction of plot area
-        # x: data range ~0-100, y: data range ~0-100
-        x_frac = (px - (-5)) / 110  # account for axis range
-        y_frac = (py - (-5)) / 105
-
-        # Image size as fraction of plot
-        img_size = 0.08
-
         fig.add_layout_image(
             dict(
                 source=url,
-                x=x_frac,
-                y=y_frac,
-                xref="paper",
-                yref="paper",
+                x=px,
+                y=py,
+                xref="x",
+                yref="y",
                 xanchor="center",
                 yanchor="middle",
-                sizex=img_size,
-                sizey=img_size,
+                sizex=6,
+                sizey=8,
                 layer="above",
             )
         )
