@@ -620,13 +620,13 @@ def _render_hitter_projections_tab(
             )
 
             cards_html.append(
-                f'<div style="display:flex; align-items:center; gap:0.6rem; '
-                f'padding:0.35rem 0.8rem; '
+                f'<div style="display:flex; align-items:center; gap:0.4rem; '
+                f'padding:0.35rem 0.6rem; flex-wrap:wrap; '
                 f'border-bottom:1px solid {DARK_BORDER};">'
                 f'<span style="color:{SLATE}; font-size:0.8rem; '
                 f'min-width:1.2rem; text-align:right;">{order}</span>'
                 f'<span style="color:{CREAM}; font-size:0.9rem; font-weight:500; '
-                f'min-width:9rem;">{bname}{arch_tag}</span>'
+                f'min-width:5rem; flex-shrink:1;">{bname}{arch_tag}</span>'
                 f'{diamond_html}'
                 f'{stat_line}'
                 f'</div>'
@@ -868,7 +868,7 @@ def _render_archetype_tab(
                 )
 
                 fig, ax = plt.subplots(
-                    figsize=(7, max(1.5, len(p_offers) * 0.4))
+                    figsize=(5.5, max(1.5, len(p_offers) * 0.4))
                 )
                 fig.patch.set_facecolor(DARK)
                 ax.set_facecolor(DARK)

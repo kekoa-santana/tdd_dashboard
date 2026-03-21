@@ -453,15 +453,15 @@ def page_compare() -> None:
                 bar_parts.append(
                     f'<div style="margin-bottom:4px;">'
                     f'<div style="display:flex; align-items:center; gap:8px;">'
-                    f'<span style="color:{CREAM}; font-size:0.8rem; min-width:100px; '
-                    f'text-align:right;">{pname}</span>'
+                    f'<span style="color:{CREAM}; font-size:0.8rem; min-width:4rem; '
+                    f'text-align:right; flex-shrink:1;">{pname}</span>'
                     f'<div style="flex:1; height:10px; background:{DARK_BORDER}; '
                     f'border-radius:5px; overflow:hidden;">'
                     f'<div style="width:{fill_w:.0f}%; height:100%; background:{color}; '
                     f'border-radius:5px;"></div>'
                     f'</div>'
                     f'<span style="color:{color}; font-size:0.8rem; font-weight:600; '
-                    f'min-width:50px;">{pct:.0f}th</span>'
+                    f'min-width:2.5rem;">{pct:.0f}th</span>'
                     f'</div>'
                     f'</div>'
                 )

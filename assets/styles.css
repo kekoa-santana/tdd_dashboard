@@ -115,7 +115,8 @@
     transition: width 0.3s ease;
 }
 .pctile-info {
-    width: 220px;
+    max-width: 220px;
+    width: auto;
     text-align: right;
     color: var(--tdd-slate);
     font-size: 0.8rem;
@@ -325,7 +326,7 @@ div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
     padding: 0 0.5rem;
 }
 .table-scroll table {
-    min-width: 480px;
+    min-width: 320px;
 }
 
 /* Percentile bar — inline layout converted to CSS classes for responsiveness */
@@ -370,7 +371,7 @@ div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
 .hide-desktop { display: none; }
 
 /* =========================================================================
-   Mobile breakpoint (≤768px)
+   Tablet breakpoint (≤768px)
    ========================================================================= */
 @media screen and (max-width: 768px) {
     /* Metric cards — more breathing room */
@@ -411,6 +412,11 @@ div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
     .pctile-bar-detail {
         font-size: 0.72rem;
         text-align: left;
+    }
+    .pctile-info {
+        max-width: 160px;
+        font-size: 0.72rem;
+        padding-left: 6px;
     }
 
     /* Tables — smaller text and padding */
@@ -460,17 +466,21 @@ div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
     .hide-mobile { display: none !important; }
     .hide-desktop { display: block !important; }
 
-    /* Force Streamlit columns to add gap on mobile */
+    /* ── Streamlit column wrapping ──
+       Force flex-wrap so 4-5 column layouts reflow to 2-per-row on tablets.
+       2-column layouts stay side-by-side (each ≥45% fits two). */
     [data-testid="stHorizontalBlock"] {
-        gap: 0.4rem !important;
+        flex-wrap: wrap !important;
+        gap: 0.5rem !important;
     }
     [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
         min-width: 0 !important;
+        flex: 1 1 45% !important;
     }
 
-    /* Mobile chart improvements */
-    .hide-desktop img,
-    .hide-desktop svg {
+    /* Charts — constrain to container */
+    [data-testid="stImage"] img,
+    [data-testid="stPyplotFigure"] img {
         max-width: 100% !important;
         height: auto !important;
     }
@@ -478,5 +488,65 @@ div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
     /* Better spacing for mobile stacked charts */
     .hide-desktop [data-testid="stVerticalBlock"] > div {
         margin-bottom: 1rem !important;
+    }
+}
+
+/* =========================================================================
+   Phone breakpoint (≤480px)
+   ========================================================================= */
+@media screen and (max-width: 480px) {
+    /* Stack ALL Streamlit columns vertically on phones */
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        flex: 1 1 100% !important;
+    }
+
+    /* Even tighter metric cards */
+    .metric-card {
+        padding: 0.6rem 0.5rem;
+    }
+    .metric-value {
+        font-size: 1.15rem;
+    }
+    .metric-label {
+        font-size: 0.62rem;
+    }
+
+    /* Brand header — smaller */
+    .brand-title {
+        font-size: 1.1rem;
+    }
+    .brand-subtitle {
+        font-size: 0.75rem;
+    }
+
+    /* Percentile bars — hide detail text, show only bar */
+    .pctile-info {
+        display: none;
+    }
+    .pctile-bar-detail {
+        font-size: 0.65rem;
+    }
+
+    /* Tables — tighter */
+    .pitch-table th,
+    .matchup-table th {
+        padding: 3px 4px;
+        font-size: 0.6rem;
+    }
+    .pitch-table td,
+    .matchup-table td {
+        padding: 4px 4px;
+        font-size: 0.72rem;
+    }
+
+    /* Section headers */
+    .section-header {
+        font-size: 0.92rem;
+        margin: 0.8rem 0 0.4rem 0;
+    }
+
+    /* Dataframes — even smaller text */
+    .stDataFrame {
+        font-size: 0.72rem;
     }
 }
