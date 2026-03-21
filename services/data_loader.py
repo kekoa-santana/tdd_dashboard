@@ -122,6 +122,14 @@ def load_roster() -> pd.DataFrame:
 
 
 @st.cache_data
+def load_probable_starters() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "probable_starters.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
 def load_pitcher_location_grid() -> pd.DataFrame:
     path = DASHBOARD_DIR / "pitcher_location_grid.parquet"
     if not path.exists():
