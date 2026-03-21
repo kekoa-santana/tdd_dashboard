@@ -322,7 +322,7 @@ def render_pitch_profiles(
             donut_col, table_col = st.columns([2, 3])
             with donut_col:
                 donut_fig = create_arsenal_donut(p_arsenal, season_label=f"{season_label}{_platoon_suffix}")
-                st.pyplot(donut_fig, use_container_width=True)
+                st.pyplot(donut_fig, width='stretch')
             with table_col:
                 table_html = build_pitcher_profile_table(p_arsenal)
                 if table_html:
@@ -344,9 +344,7 @@ def render_pitch_profiles(
                     pt_name = PITCH_DISPLAY.get(row.get("pitch_type", ""), row.get("pitch_name", ""))
                     velo = f'{row["release_speed"]:.1f} mph' if pd.notna(row.get("release_speed")) else "--"
                     ivb = f'{row["pfx_z"]:.1f}"' if pd.notna(row.get("pfx_z")) else "--"
-                    hb = f'{row["pfx_x_flipped"]:.1f}"' if pd.notna(row.get("pfx_x_flipped")) else (
-                        f'{row["pfx_x"]:.1f}"' if pd.notna(row.get("pfx_x")) else "--"
-                    )
+                    hb = f'{row["pfx_x"]:.1f}"' if pd.notna(row.get("pfx_x")) else "--"
                     arch_rows.append({
                         "Pitch": pt_name,
                         "Archetype": row.get("archetype_name", f'Cluster {row["pitch_archetype"]}'),
@@ -357,7 +355,7 @@ def render_pitch_profiles(
                 if arch_rows:
                     st.markdown(f'<div class="section-header">Arsenal Archetype Map</div>',
                                 unsafe_allow_html=True)
-                    st.dataframe(pd.DataFrame(arch_rows), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(arch_rows), width='stretch', hide_index=True)
 
         # Location heatmap
         if is_career:
@@ -411,7 +409,7 @@ def render_pitch_profiles(
                 p_loc, pitch_types=_selected_pts or None,
                 pitcher_name=selected_name, batter_stand=stand_filter,
             )
-            st.pyplot(fig_loc, use_container_width=True)
+            st.pyplot(fig_loc, width='stretch')
             plt.close(fig_loc)
 
     else:
@@ -535,7 +533,7 @@ def render_pitch_profiles(
                             })
                             .map(_color_delta, subset=["Whiff Δ", "Chase Δ"])
                         )
-                        st.dataframe(styled, use_container_width=True, hide_index=True)
+                        st.dataframe(styled, width='stretch', hide_index=True)
 
         # Hitter zone grid
         if is_career:
@@ -940,7 +938,7 @@ def render_arsenal_evolution(
             unsafe_allow_html=True,
         )
         delta_df = pd.DataFrame(rows)
-        st.dataframe(delta_df, use_container_width=True, hide_index=True)
+        st.dataframe(delta_df, width='stretch', hide_index=True)
         st.caption(
             f"Year-over-year arsenal evolution. "
             f"NEW = pitch added in {selected_season}. "
@@ -1586,7 +1584,7 @@ def page_player_profile() -> None:
         )
         _, chart_col, _ = st.columns([1, 3, 1])
         with chart_col:
-            st.pyplot(fig, use_container_width=True)
+            st.pyplot(fig, width='stretch')
         plt.close(fig)
 
         ci_lo, ci_hi = np.percentile(samples * 100, [2.5, 97.5])
@@ -1654,6 +1652,6 @@ def page_player_profile() -> None:
     if detail_rows:
         st.dataframe(
             pd.DataFrame(detail_rows),
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
         )

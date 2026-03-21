@@ -134,7 +134,7 @@ def _render_stats_table(
         display_rows.append(r)
 
     display_df = pd.DataFrame(display_rows)
-    st.dataframe(display_df, use_container_width=True, hide_index=True, height=600)
+    st.dataframe(display_df, width='stretch', hide_index=True, height=600)
     _season_note = f" | {season} regular season"
     if season == 2020:
         _season_note += " (60-game shortened season)"

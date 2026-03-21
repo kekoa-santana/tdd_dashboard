@@ -790,7 +790,7 @@ def _render_matchup_tab(
                 unsafe_allow_html=True,
             )
             st.dataframe(
-                pd.DataFrame(rows), use_container_width=True,
+                pd.DataFrame(rows), width='stretch',
                 hide_index=True, height=350,
             )
 
@@ -912,7 +912,7 @@ def _render_archetype_tab(
                         )
 
                 plt.tight_layout()
-                st.pyplot(fig, use_container_width=True)
+                st.pyplot(fig, width='stretch')
                 plt.close(fig)
 
         # --- Section B: Archetype Matchup Matrix (filtered) ---
@@ -972,7 +972,7 @@ def _render_archetype_tab(
 
                 st.dataframe(
                     pd.DataFrame(matrix_rows),
-                    use_container_width=True,
+                    width='stretch',
                     hide_index=True,
                 )
 
@@ -1237,8 +1237,10 @@ def _render_sim_tab(
         k_samp = k_samples_dict[pid_str]
         proj_bb = float(p_proj.get("projected_bb_rate", 0.08) or 0.08)
         proj_hr = float(p_proj.get("projected_hr_per_bf", 0.03) or 0.03)
-        bb_samp = bb_samples_dict.get(pid_str) or _fallback(proj_bb)
-        hr_samp = hr_samples_dict.get(pid_str) or _fallback(proj_hr)
+        _bb = bb_samples_dict.get(pid_str)
+        bb_samp = _bb if _bb is not None else _fallback(proj_bb)
+        _hr = hr_samples_dict.get(pid_str)
+        hr_samp = _hr if _hr is not None else _fallback(proj_hr)
 
         # Compute per-batter matchup lifts
         lineup_matchup_lifts: dict[str, np.ndarray] = {}
@@ -1368,7 +1370,7 @@ def _render_sim_tab(
 
         # Distribution chart
         fig = create_game_stat_fig(stat_samples, pitcher_name, stat=stat_key)
-        st.pyplot(fig, use_container_width=True)
+        st.pyplot(fig, width='stretch')
         plt.close(fig)
 
         # Combined prop table for all stats
@@ -1397,7 +1399,7 @@ def _render_sim_tab(
                 })
 
         st.dataframe(
-            pd.DataFrame(prop_rows), use_container_width=True, hide_index=True,
+            pd.DataFrame(prop_rows), width='stretch', hide_index=True,
         )
 
         # Summary cards for selected stat
@@ -1452,7 +1454,7 @@ def _render_sim_tab(
                         "Reliability": f"{rel:.0%}",
                     })
                 st.dataframe(
-                    pd.DataFrame(bd_rows), use_container_width=True,
+                    pd.DataFrame(bd_rows), width='stretch',
                     hide_index=True,
                 )
 
@@ -1701,7 +1703,7 @@ def _render_game_browser() -> None:
     display_df = pd.DataFrame(display_rows)
     st.dataframe(
         display_df,
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
     )
 

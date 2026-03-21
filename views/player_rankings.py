@@ -160,7 +160,7 @@ def _render_pitcher_rankings(df: pd.DataFrame) -> None:
     if "Health" in display_df.columns:
         styler = styler.map(_style_health, subset=["Health"])
 
-    st.dataframe(styler, use_container_width=True, hide_index=True, height=600)
+    st.dataframe(styler, width='stretch', hide_index=True, height=600)
 
     st.caption(
         "**Rating** = Diamond Rating (0-5) from weighted composite of "
@@ -263,7 +263,7 @@ def _render_batter_rankings(df: pd.DataFrame) -> None:
     if "Health" in display_df.columns:
         styler = styler.map(_style_health, subset=["Health"])
 
-    st.dataframe(styler, use_container_width=True, hide_index=True, height=600)
+    st.dataframe(styler, width='stretch', hide_index=True, height=600)
 
     st.caption(
         "**Rating** = Diamond Rating (0-5) from weighted composite of "
@@ -371,7 +371,7 @@ def _render_prospect_rankings(df: pd.DataFrame) -> None:
     if "Tier" in display_df.columns:
         styler = styler.map(_style_tier, subset=["Tier"])
 
-    st.dataframe(styler, use_container_width=True, hide_index=True, height=600)
+    st.dataframe(styler, width='stretch', hide_index=True, height=600)
 
     st.caption(
         "**Rating** = Diamond Rating (0-5) from weighted composite of "
@@ -481,7 +481,7 @@ def _render_pitching_prospect_rankings(df: pd.DataFrame) -> None:
     if "Tier" in display_df.columns:
         styler = styler.map(_style_tier, subset=["Tier"])
 
-    st.dataframe(styler, use_container_width=True, hide_index=True, height=600)
+    st.dataframe(styler, width='stretch', hide_index=True, height=600)
 
     st.caption(
         "**Rating** = Diamond Rating (0-5) from weighted composite of "
@@ -593,7 +593,7 @@ def _render_prospect_readiness(df: pd.DataFrame) -> None:
     if "Tier" in display_df.columns:
         styler = styler.map(_style_readiness_tier, subset=["Tier"])
 
-    st.dataframe(styler, use_container_width=True, hide_index=True, height=600)
+    st.dataframe(styler, width='stretch', hide_index=True, height=600)
 
     st.caption(
         "**Readiness Score** = probability of sticking in MLB (200+ PA season), "
@@ -633,7 +633,7 @@ def _render_prospect_readiness(df: pd.DataFrame) -> None:
                     "Factor": "{:.3f}", "P25": "{:.3f}", "P75": "{:.3f}",
                     "Sample Size": "{:,.0f}",
                 }, na_rep="—"),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
             )
         else:

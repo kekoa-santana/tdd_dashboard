@@ -1127,7 +1127,7 @@ def _render_overview_tab(
             with st.expander("Pitch type detail"):
                 st.dataframe(
                     pd.DataFrame(pt_rows),
-                    use_container_width=True, hide_index=True,
+                    width='stretch', hide_index=True,
                 )
 
     # ── Staff Archetype Mix ─────────────────────────────────────────
@@ -1423,7 +1423,7 @@ def _render_overview_tab(
             })
         st.dataframe(
             pd.DataFrame(inj_rows),
-            use_container_width=True, hide_index=True,
+            width='stretch', hide_index=True,
         )
 
         # ── Injury impact notes ──────────────────────────────────────
@@ -1501,7 +1501,7 @@ def _render_overview_tab(
             sp_rows = _build_pitcher_rows(team_sp_tbl, injury_lookup, use_priors)
             st.dataframe(
                 pd.DataFrame(sp_rows),
-                use_container_width=True, hide_index=True,
+                width='stretch', hide_index=True,
             )
 
         st.markdown("### Bullpen")
@@ -1511,7 +1511,7 @@ def _render_overview_tab(
             rp_rows = _build_pitcher_rows(team_rp_tbl, injury_lookup, use_priors)
             st.dataframe(
                 pd.DataFrame(rp_rows),
-                use_container_width=True, hide_index=True,
+                width='stretch', hide_index=True,
             )
 
     # ── Hitters table ───────────────────────────────────────────────
@@ -1584,7 +1584,7 @@ def _render_overview_tab(
             h_rows.append(r)
         st.dataframe(
             pd.DataFrame(h_rows),
-            use_container_width=True, hide_index=True,
+            width='stretch', hide_index=True,
         )
 
     st.caption(
