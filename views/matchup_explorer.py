@@ -464,7 +464,7 @@ def page_matchup_explorer() -> None:
                             pitcher_name=selected_pitcher, hitter_name=selected_hitter,
                             batter_stand=stand_for_overlay,
                         )
-                        st.pyplot(fig_ov, use_container_width=True)
+                        st.pyplot(fig_ov, width='stretch')
                         plt.close(fig_ov)
 
     # --- Side-by-side profile tables ---

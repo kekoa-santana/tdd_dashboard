@@ -187,7 +187,7 @@ def page_data_health() -> None:
         )
         display_df = df_main[["filename", "size", "last_modified", "rows"]].copy()
         display_df.columns = ["Filename", "Size", "Last Modified", "Rows"]
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        st.dataframe(display_df, width='stretch', hide_index=True)
 
     if not df_snap.empty:
         st.markdown(
@@ -199,7 +199,7 @@ def page_data_health() -> None:
         )
         display_snap = df_snap[["filename", "size", "last_modified", "rows"]].copy()
         display_snap.columns = ["Filename", "Size", "Last Modified", "Rows"]
-        st.dataframe(display_snap, use_container_width=True, hide_index=True)
+        st.dataframe(display_snap, width='stretch', hide_index=True)
 
     # ------------------------------------------------------------------
     # Section 3: Manifest Validation

@@ -512,7 +512,7 @@ def _render_hitter_table(df: pd.DataFrame) -> None:
     if "Rating" in display_df.columns:
         styler = styler.map(_score_color, subset=["Rating"])
 
-    st.dataframe(styler, use_container_width=True, hide_index=True, height=500)
+    st.dataframe(styler, width='stretch', hide_index=True, height=500)
 
 
 def _render_pitcher_table(df: pd.DataFrame, role_label: str) -> None:
@@ -583,7 +583,7 @@ def _render_pitcher_table(df: pd.DataFrame, role_label: str) -> None:
     if "Rating" in display_df.columns:
         styler = styler.map(_score_color, subset=["Rating"])
 
-    st.dataframe(styler, use_container_width=True, hide_index=True, height=500)
+    st.dataframe(styler, width='stretch', hide_index=True, height=500)
 
 
 # ── Role-specific renderers ──────────────────────────────────────────────

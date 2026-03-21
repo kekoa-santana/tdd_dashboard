@@ -376,7 +376,7 @@ def page_projections() -> None:
     display_df = pd.DataFrame(display_rows)
     st.dataframe(
         display_df,
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         height=600,
     )

@@ -243,7 +243,7 @@ def _render_backtest_summary(
             "coverage_95": "{:.1%}",
             "coverage_80": "{:.1%}",
         }, na_rep="—"),
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
     )
 
@@ -251,7 +251,7 @@ def _render_backtest_summary(
     col1, col2 = st.columns(2)
     with col1:
         fig = create_accuracy_bars(df, "bayes_mae", "marcel_mae", f"{label} MAE by Season")
-        st.pyplot(fig, use_container_width=True)
+        st.pyplot(fig, width='stretch')
     with col2:
         cov_cols, cov_labels = [], []
         if "coverage_95" in df.columns:
@@ -262,7 +262,7 @@ def _render_backtest_summary(
             cov_labels.append("80% CI")
         if cov_cols:
             fig = create_coverage_chart(df, cov_cols, cov_labels)
-            st.pyplot(fig, use_container_width=True)
+            st.pyplot(fig, width='stretch')
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +310,7 @@ def _render_game_k_tab() -> None:
     st.markdown('<div class="section-header">Model Tier Comparison</div>',
                 unsafe_allow_html=True)
     fig = create_game_k_model_comparison(df)
-    st.pyplot(fig, use_container_width=True)
+    st.pyplot(fig, width='stretch')
 
     # Coverage chart
     if existing:
@@ -321,11 +321,11 @@ def _render_game_k_tab() -> None:
             [c for c, _ in existing],
             [l for _, l in existing],
         )
-        st.pyplot(fig, use_container_width=True)
+        st.pyplot(fig, width='stretch')
 
     # Raw data
     with st.expander("Raw Backtest Data"):
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width='stretch', hide_index=True)
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +399,7 @@ def _render_hits_misses_tab() -> None:
                 f"Closest Projections ({stat_label})",
                 positive_color=SAGE, negative_color=SAGE,
             )
-            st.pyplot(fig, use_container_width=True)
+            st.pyplot(fig, width='stretch')
             plt.close(fig)
 
             display = biggest_hits[[name_col, stat_col, observed_col, "error"]].copy()
@@ -411,7 +411,7 @@ def _render_hits_misses_tab() -> None:
                 f"Actual {stat_label}",
                 "Error (pp)",
             ]
-            st.dataframe(display, use_container_width=True, hide_index=True)
+            st.dataframe(display, width='stretch', hide_index=True)
 
     with chart_col2:
         st.markdown(
@@ -425,7 +425,7 @@ def _render_hits_misses_tab() -> None:
                 f"Largest Errors ({stat_label})",
                 positive_color=EMBER, negative_color=EMBER,
             )
-            st.pyplot(fig, use_container_width=True)
+            st.pyplot(fig, width='stretch')
             plt.close(fig)
 
             display = biggest_misses[[name_col, stat_col, observed_col, "error"]].copy()
@@ -437,7 +437,7 @@ def _render_hits_misses_tab() -> None:
                 f"Actual {stat_label}",
                 "Error (pp)",
             ]
-            st.dataframe(display, use_container_width=True, hide_index=True)
+            st.dataframe(display, width='stretch', hide_index=True)
 
     # Summary stats
     cols = st.columns(3)
@@ -542,7 +542,7 @@ def _render_movers_tab() -> None:
                 f"{up_label} ({stat_label})",
                 positive_color=SAGE, negative_color=SAGE,
             )
-            st.pyplot(fig, use_container_width=True)
+            st.pyplot(fig, width='stretch')
             plt.close(fig)
 
     with chart_col2:
@@ -553,7 +553,7 @@ def _render_movers_tab() -> None:
                 f"{down_label} ({stat_label})",
                 positive_color=EMBER, negative_color=EMBER,
             )
-            st.pyplot(fig, use_container_width=True)
+            st.pyplot(fig, width='stretch')
             plt.close(fig)
 
     # Data tables
@@ -571,7 +571,7 @@ def _render_movers_tab() -> None:
             display.columns = [c.replace("projected_", "").replace("_prev", " (prev)")
                                .replace("delta", "Change").replace("_", " ").title()
                                for c in display.columns]
-            st.dataframe(display, use_container_width=True, hide_index=True)
+            st.dataframe(display, width='stretch', hide_index=True)
         else:
             st.caption("No data")
 
@@ -588,7 +588,7 @@ def _render_movers_tab() -> None:
             display.columns = [c.replace("projected_", "").replace("_prev", " (prev)")
                                .replace("delta", "Change").replace("_", " ").title()
                                for c in display.columns]
-            st.dataframe(display, use_container_width=True, hide_index=True)
+            st.dataframe(display, width='stretch', hide_index=True)
         else:
             st.caption("No data")
 
@@ -633,7 +633,7 @@ def _render_movers_tab() -> None:
         [stat_col],
     )
     if fig is not None:
-        st.pyplot(fig, use_container_width=True)
+        st.pyplot(fig, width='stretch')
     else:
         st.caption("Player not found in snapshots.")
 
@@ -768,7 +768,7 @@ def _render_preseason_comparison_tab() -> None:
             display_rows.append(r)
 
         display_df = pd.DataFrame(display_rows)
-        st.dataframe(display_df, use_container_width=True, hide_index=True, height=600)
+        st.dataframe(display_df, width='stretch', hide_index=True, height=600)
 
     # --- Biggest Movers vs Preseason ---
     with sub_movers:
@@ -810,7 +810,7 @@ def _render_preseason_comparison_tab() -> None:
                         positive_color=SAGE,
                         negative_color=SAGE,
                     )
-                    st.pyplot(fig, use_container_width=True)
+                    st.pyplot(fig, width='stretch')
                     plt.close(fig)
 
             with col2:
@@ -822,7 +822,7 @@ def _render_preseason_comparison_tab() -> None:
                         positive_color=EMBER,
                         negative_color=EMBER,
                     )
-                    st.pyplot(fig, use_container_width=True)
+                    st.pyplot(fig, width='stretch')
                     plt.close(fig)
 
     # --- Player Lookup with sparkline timeline ---
@@ -941,7 +941,7 @@ def _render_preseason_comparison_tab() -> None:
 
                 add_watermark(fig)
                 fig.tight_layout()
-                st.pyplot(fig, use_container_width=True)
+                st.pyplot(fig, width='stretch')
                 plt.close(fig)
 
 
@@ -997,7 +997,7 @@ def _render_preseason_only_table(
         display_rows.append(r)
 
     display_df = pd.DataFrame(display_rows)
-    st.dataframe(display_df, use_container_width=True, hide_index=True, height=600)
+    st.dataframe(display_df, width='stretch', hide_index=True, height=600)
 
     st.caption(
         f"Showing {len(display_df)} players from preseason projection. "

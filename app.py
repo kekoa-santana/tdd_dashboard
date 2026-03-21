@@ -129,7 +129,7 @@ def main() -> None:
                 is_active = st.session_state.active_page == page_name
                 btn_type = "primary" if is_active else "secondary"
                 if st.button(page_name, key=f"nav_{page_name}", type=btn_type,
-                             use_container_width=True):
+                             width='stretch'):
                     st.session_state.active_page = page_name
                     st.query_params["page"] = page_name.lower().replace(" ", "_")
                     st.rerun()
