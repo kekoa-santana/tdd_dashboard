@@ -1,410 +1,389 @@
-"""Projections page — Leaderboard & Discovery with editorial highlights."""
+"""Projections page — Leaderboard cards per projected metric."""
 from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
 
-from config import (
-    GOLD, SAGE, SLATE, EMBER, CREAM, DARK_CARD, DARK_BORDER,
-    PITCHER_STATS, HITTER_STATS,
-    PITCHER_OBSERVED_STATS, HITTER_OBSERVED_STATS,
-    PITCHER_COUNTING_DISPLAY, HITTER_COUNTING_DISPLAY,
-    POSITIVE, NEGATIVE,
-)
-from services.data_loader import (
-    load_projections, load_counting, load_counting_sim, load_player_teams,
-)
-from utils.helpers import strip_accents, get_injury_lookup
-from utils.formatters import fmt_stat
-from components.diamond_rating import (
-    diamond_rating_text_composite, diamond_rating_html_composite,
-)
-from lib.diamond_rating import normalize_composite, score_to_diamonds
+from config import GOLD, SAGE, SLATE, CREAM, DARK_CARD, DARK_BORDER
+from services.data_loader import load_counting_sim, load_player_teams
 
 
-# ── Editorial card CSS ────────────────────────────────────────────────────
+# ── Leaderboard definitions ───────────────────────────────────────────
 
-_EDITORIAL_CSS = f"""
+# (title, column_prefix, format, higher_is_better, filter_fn_or_None)
+HITTER_LEADERBOARDS = [
+    ("wRC+", "projected_wrc_plus", "int", True, None),
+    ("Home Runs", "total_hr", "int", True, None),
+    ("Runs", "total_r", "int", True, None),
+    ("RBI", "total_rbi", "int", True, None),
+    ("Stolen Bases", "total_sb", "int", True, None),
+    ("Walks", "total_bb", "int", True, None),
+    ("Strikeouts (fewest)", "total_k", "int", False, None),
+]
+
+PITCHER_LEADERBOARDS = [
+    ("FIP-ERA", "projected_fip_era", "dec2", False, lambda df: df[df["role"] == "SP"]),
+    ("Strikeouts", "total_k", "int", True, lambda df: df[df["role"] == "SP"]),
+    ("Innings Pitched", "projected_ip", "dec0", True, lambda df: df[df["role"] == "SP"]),
+    ("Walks (fewest)", "total_bb", "int", False, lambda df: df[df["role"] == "SP"]),
+    ("Saves", "total_sv", "int", True, lambda df: df[df["role"].isin(["CL", "SU", "MR"])]),
+    ("Holds", "total_hld", "int", True, lambda df: df[df["role"].isin(["CL", "SU", "MR"])]),
+]
+
+# Per-stat CV thresholds for confidence filtering
+_CV_THRESHOLD_HIGH = 0.35   # below = confident enough to show
+_CV_THRESHOLD_MED = 0.50    # below = show with caveat
+_MIN_CAREER_PA = 150        # minimum career PA/BF to appear by default
+
+
+# ── CSS ────────────────────────────────────────────────────────────────
+
+_CSS = f"""
 <style>
-.editorial-section {{
+.lb-card {{
     background: {DARK_CARD};
     border: 1px solid {DARK_BORDER};
-    border-radius: 8px;
+    border-radius: 10px;
     padding: 0.8rem 1rem;
-    margin-bottom: 0.5rem;
-    min-height: 280px;
+    margin-bottom: 0.6rem;
+    min-height: 320px;
 }}
-.editorial-header {{
+.lb-title {{
     color: {GOLD};
-    font-size: 0.95rem;
+    font-size: 1.0rem;
     font-weight: 700;
     letter-spacing: 0.5px;
     margin-bottom: 0.6rem;
     padding-bottom: 0.4rem;
     border-bottom: 1px solid {DARK_BORDER};
 }}
-.editorial-row {{
+.lb-subtitle {{
+    color: {SLATE};
+    font-size: 0.72rem;
+    font-weight: 400;
+    margin-left: 0.4rem;
+}}
+.lb-row {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.35rem 0;
-    border-bottom: 1px solid {DARK_BORDER}22;
+    padding: 0.30rem 0;
+    border-bottom: 1px solid {DARK_BORDER}18;
 }}
-.editorial-row:last-child {{
-    border-bottom: none;
-}}
-.editorial-rank {{
+.lb-row:last-child {{ border-bottom: none; }}
+.lb-rank {{
     color: {SLATE};
-    font-size: 0.8rem;
-    min-width: 1.4rem;
+    font-size: 0.82rem;
+    min-width: 1.6rem;
+    text-align: right;
+    margin-right: 0.5rem;
 }}
-.editorial-name {{
+.lb-rank-top {{ color: {GOLD}; font-weight: 700; }}
+.lb-name {{
     color: {CREAM};
     font-size: 0.85rem;
     font-weight: 600;
     flex: 1;
-    margin-left: 0.4rem;
 }}
-.editorial-team {{
+.lb-team {{
     color: {SLATE};
-    font-size: 0.75rem;
+    font-size: 0.72rem;
+    margin-left: 0.3rem;
+    margin-right: 0.4rem;
+}}
+.lb-val {{
+    color: {SAGE};
+    font-size: 0.92rem;
+    font-weight: 700;
+    min-width: 3rem;
+    text-align: right;
+}}
+.lb-range {{
+    color: {SLATE};
+    font-size: 0.68rem;
+    min-width: 4.5rem;
+    text-align: right;
     margin-left: 0.3rem;
 }}
-.editorial-detail {{
-    font-size: 0.78rem;
-    margin-left: 0.5rem;
-    white-space: nowrap;
-}}
-.editorial-positive {{
-    color: {POSITIVE};
-    font-weight: 600;
-}}
-.editorial-negative {{
-    color: {NEGATIVE};
-    font-weight: 600;
-}}
-.editorial-muted {{
+.lb-watch-header {{
     color: {SLATE};
-    font-size: 0.75rem;
-    margin-top: 0.1rem;
+    font-size: 0.88rem;
+    font-weight: 600;
+    margin: 1.2rem 0 0.5rem 0;
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid {DARK_BORDER};
+}}
+.lb-watch-row {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.25rem 0;
+}}
+.lb-watch-name {{
+    color: {SLATE};
+    font-size: 0.80rem;
+    flex: 1;
+}}
+.lb-watch-val {{
+    color: {SLATE};
+    font-size: 0.80rem;
+    font-weight: 600;
+    min-width: 3rem;
+    text-align: right;
+}}
+.lb-watch-range {{
+    color: {SLATE};
+    font-size: 0.65rem;
+    min-width: 4.5rem;
+    text-align: right;
+    margin-left: 0.3rem;
+    opacity: 0.7;
 }}
 </style>
 """
 
 
-# ── Editorial section renderers ───────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────────
 
-def _render_top_risers(
+def _fmt(val: float, fmt: str) -> str:
+    if pd.isna(val):
+        return "--"
+    if fmt == "int":
+        return str(int(round(val)))
+    if fmt == "dec0":
+        return f"{val:.0f}"
+    if fmt == "dec1":
+        return f"{val:.1f}"
+    if fmt == "dec2":
+        return f"{val:.2f}"
+    return str(val)
+
+
+def _compute_stat_cv(df: pd.DataFrame, prefix: str) -> pd.Series:
+    """Compute coefficient of variation for a stat."""
+    mean_col = f"{prefix}_mean"
+    sd_col = f"{prefix}_sd"
+    if mean_col in df.columns and sd_col in df.columns:
+        mean = df[mean_col].fillna(0).clip(lower=0.01).abs()
+        sd = df[sd_col].fillna(mean * 0.5)
+        return sd / mean
+    return pd.Series(1.0, index=df.index)
+
+
+def _render_leaderboard(
     df: pd.DataFrame,
+    title: str,
+    prefix: str,
+    fmt: str,
+    higher_is_better: bool,
+    teams_lookup: dict[int, str],
     id_col: str,
     name_col: str,
-    teams_lookup: dict[int, str],
-    stat_configs: list,
+    show_all: bool = False,
+    n_show: int = 10,
+    role_filter=None,
 ) -> None:
-    """Render Top Risers — players with the largest positive composite_score."""
-    if df.empty or "composite_score" not in df.columns:
-        st.markdown(
-            '<div class="editorial-section">'
-            '<div class="editorial-header">Top Risers</div>'
-            f'<div class="editorial-muted">No projection data available.</div>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
+    """Render a single leaderboard card."""
+    work = df.copy()
+
+    # Apply role filter (e.g. SP only for FIP-ERA, RP only for SV)
+    if role_filter is not None:
+        work = role_filter(work)
+
+    mean_col = f"{prefix}_mean"
+    if mean_col not in work.columns:
         return
 
-    top = df.nlargest(5, "composite_score")
-    rows_html: list[str] = []
+    work = work.dropna(subset=[mean_col])
+
+    # Compute per-stat CV for confidence filtering
+    cv = _compute_stat_cv(work, prefix)
+
+    if not show_all:
+        # Filter to confident projections: low CV + enough MLB history
+        confident = cv < _CV_THRESHOLD_MED
+        if "career_pa" in work.columns:
+            confident = confident & (work["career_pa"] >= _MIN_CAREER_PA)
+        work_confident = work[confident]
+        work_watch = work[~confident]
+    else:
+        work_confident = work
+        work_watch = pd.DataFrame()
+
+    # Sort
+    ascending = not higher_is_better
+    work_confident = work_confident.sort_values(mean_col, ascending=ascending)
+    top = work_confident.head(n_show)
+
+    # Range columns
+    p10_col = f"{prefix}_p10"
+    p90_col = f"{prefix}_p90"
+    has_range = p10_col in work.columns and p90_col in work.columns
+
+    # Subtitle
+    subtitle = "SP" if role_filter and "SP" in str(role_filter) else ""
+    if "SV" in title or "Hold" in title:
+        subtitle = "RP"
+
+    # Build HTML
+    rows_html = []
     for i, (_, row) in enumerate(top.iterrows(), 1):
         name = row[name_col]
         pid = int(row[id_col])
         team = teams_lookup.get(pid, "")
-        team_span = f'<span class="editorial-team">({team})</span>' if team else ""
+        team_html = f'<span class="lb-team">{team}</span>' if team else ""
+        val = _fmt(row[mean_col], fmt)
+        rank_class = "lb-rank-top" if i <= 3 else "lb-rank"
 
-        best_label, best_delta = "", 0.0
-        for label, key, higher_better, _ in stat_configs:
-            delta_col = f"delta_{key}"
-            if delta_col in row.index and pd.notna(row.get(delta_col)):
-                d = row[delta_col]
-                improving = (d > 0 and higher_better) or (d < 0 and not higher_better)
-                if improving and abs(d) > abs(best_delta):
-                    best_delta = d
-                    best_label = label
+        range_html = ""
+        if has_range and pd.notna(row.get(p10_col)) and pd.notna(row.get(p90_col)):
+            lo = _fmt(row[p10_col], fmt)
+            hi = _fmt(row[p90_col], fmt)
+            range_html = f'<span class="lb-range">({lo}-{hi})</span>'
 
-        if best_label:
-            delta_pp = best_delta * 100
-            css_class = "editorial-positive" if delta_pp > 0 else "editorial-negative"
-            detail = (
-                f'<span class="{css_class}">'
-                f'{best_label} {delta_pp:+.1f}pp</span>'
+        rows_html.append(
+            f'<div class="lb-row">'
+            f'<span class="{rank_class}">{i}.</span>'
+            f'<span class="lb-name">{name}</span>'
+            f'{team_html}'
+            f'<span class="lb-val">{val}</span>'
+            f'{range_html}'
+            f'</div>'
+        )
+
+    subtitle_html = f'<span class="lb-subtitle">{subtitle}</span>' if subtitle else ""
+
+    html = (
+        f'<div class="lb-card">'
+        f'<div class="lb-title">{title}{subtitle_html}</div>'
+        + "".join(rows_html)
+    )
+
+    # "Players to Watch" section for low-confidence players
+    if not work_watch.empty and not show_all:
+        watch = work_watch.sort_values(mean_col, ascending=ascending).head(5)
+        if not watch.empty:
+            watch_rows = []
+            for _, row in watch.iterrows():
+                name = row[name_col]
+                pid = int(row[id_col])
+                team = teams_lookup.get(pid, "")
+                val = _fmt(row[mean_col], fmt)
+                range_html = ""
+                if has_range and pd.notna(row.get(p10_col)) and pd.notna(row.get(p90_col)):
+                    lo = _fmt(row[p10_col], fmt)
+                    hi = _fmt(row[p90_col], fmt)
+                    range_html = f'<span class="lb-watch-range">({lo}-{hi})</span>'
+                watch_rows.append(
+                    f'<div class="lb-watch-row">'
+                    f'<span class="lb-watch-name">{name} ({team})</span>'
+                    f'<span class="lb-watch-val">{val}</span>'
+                    f'{range_html}'
+                    f'</div>'
+                )
+            html += (
+                '<div class="lb-watch-header">Players to Watch</div>'
+                + "".join(watch_rows)
             )
-        else:
-            detail = f'<span class="editorial-muted">--</span>'
 
-        rating_html = diamond_rating_html_composite(row["composite_score"], size="sm")
-
-        rows_html.append(
-            f'<div class="editorial-row">'
-            f'<span class="editorial-rank">{i}.</span>'
-            f'<span class="editorial-name">{name}</span>'
-            f'{team_span}'
-            f'<span class="editorial-detail">{detail}</span>'
-            f'</div>'
-            f'<div style="padding-left:1.8rem; margin-top:-0.2rem; margin-bottom:0.2rem;">'
-            f'{rating_html}</div>'
-        )
-
-    st.markdown(
-        '<div class="editorial-section">'
-        '<div class="editorial-header">Top Risers</div>'
-        + "".join(rows_html)
-        + '</div>',
-        unsafe_allow_html=True,
-    )
+    html += '</div>'
+    st.markdown(html, unsafe_allow_html=True)
 
 
-def _render_diamond_leaders(
-    df: pd.DataFrame,
-    id_col: str,
-    name_col: str,
-    teams_lookup: dict[int, str],
-) -> None:
-    """Render Diamond Leaders — top 5 by Diamond Rating."""
-    if df.empty or "composite_score" not in df.columns:
-        st.markdown(
-            '<div class="editorial-section">'
-            '<div class="editorial-header">Diamond Leaders</div>'
-            f'<div class="editorial-muted">No projection data available.</div>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-        return
-
-    top = df.nlargest(5, "composite_score")
-    rows_html: list[str] = []
-    for i, (_, row) in enumerate(top.iterrows(), 1):
-        name = row[name_col]
-        pid = int(row[id_col])
-        team = teams_lookup.get(pid, "")
-        team_span = f'<span class="editorial-team">({team})</span>' if team else ""
-        rating_html = diamond_rating_html_composite(row["composite_score"], size="sm")
-
-        rows_html.append(
-            f'<div class="editorial-row">'
-            f'<span class="editorial-rank">{i}.</span>'
-            f'<span class="editorial-name">{name}</span>'
-            f'{team_span}'
-            f'<span class="editorial-detail">{rating_html}</span>'
-            f'</div>'
-        )
-
-    st.markdown(
-        '<div class="editorial-section">'
-        '<div class="editorial-header">Diamond Leaders</div>'
-        + "".join(rows_html)
-        + '</div>',
-        unsafe_allow_html=True,
-    )
-
-
-# ── Main page ─────────────────────────────────────────────────────────────
+# ── Main page ─────────────────────────────────────────────────────────
 
 def page_projections() -> None:
-    """Sortable Bayesian projection tables for pitchers and hitters."""
-    st.markdown('<div class="section-header">Projections</div>',
-                unsafe_allow_html=True)
+    """Leaderboard-style projections page."""
+    st.markdown(_CSS, unsafe_allow_html=True)
 
     player_type = st.radio(
         "Player type",
-        ["Pitcher", "Hitter"],
+        ["Hitter", "Pitcher"],
         horizontal=True,
         key="proj_type",
     )
 
-    df = load_projections(player_type.lower())
+    pt_key = "hitter" if player_type == "Hitter" else "pitcher"
+    df = load_counting_sim(pt_key)
     if df.empty:
-        st.warning(
-            "No projection data found. "
-            "Run `python scripts/precompute_dashboard_data.py` first."
-        )
+        st.warning("No sim projection data found. Run precompute first.")
         return
 
-    if player_type == "Pitcher":
-        id_col, name_col, hand_col = "pitcher_id", "pitcher_name", "pitch_hand"
-        stat_configs = PITCHER_STATS
-        counting_display = PITCHER_COUNTING_DISPLAY
-    else:
-        id_col, name_col, hand_col = "batter_id", "batter_name", "batter_stand"
-        stat_configs = HITTER_STATS
-        counting_display = HITTER_COUNTING_DISPLAY
+    id_col = "batter_id" if player_type == "Hitter" else "pitcher_id"
+    name_col = "batter_name" if player_type == "Hitter" else "pitcher_name"
 
-    counting_df = load_counting(player_type.lower())
-    if not counting_df.empty:
-        counting_cols = [id_col] + [
-            c for c in counting_df.columns
-            if c.endswith("_mean") or c.endswith("_p10") or c.endswith("_p90")
-            or c.startswith("actual_") or c in ("confidence_tier", "confidence_score", "role")
-        ]
-        available = [c for c in counting_cols if c in counting_df.columns]
-        df = df.merge(counting_df[available], on=id_col, how="left", suffixes=("", "_sim"))
-
+    # Load teams
     teams_df = load_player_teams()
+    teams_lookup: dict[int, str] = {}
     if not teams_df.empty:
-        df = df.merge(
-            teams_df[["player_id", "team_abbr"]].rename(columns={"player_id": id_col}),
-            on=id_col, how="left",
-        )
-        df["team_abbr"] = df["team_abbr"].fillna("")
-        teams_lookup: dict[int, str] = dict(
+        teams_lookup = dict(
             zip(teams_df["player_id"].astype(int), teams_df["team_abbr"])
         )
-    else:
-        df["team_abbr"] = ""
-        teams_lookup = {}
 
-    # ── Editorial highlights ──────────────────────────────────────────
-    st.markdown(_EDITORIAL_CSS, unsafe_allow_html=True)
+    # Get career PA/BF for confidence filtering
+    try:
+        from lib.db import read_sql
+        role = "batter" if player_type == "Hitter" else "pitcher"
+        pa_col = "bat_pa" if player_type == "Hitter" else "pit_bf"
+        career = read_sql(f"""
+            SELECT player_id as {id_col},
+                   SUM({pa_col}) as career_pa
+            FROM production.fact_player_game_mlb
+            WHERE player_role = :role AND season BETWEEN 2020 AND 2025
+            GROUP BY player_id
+        """, {"role": role})
+        if not career.empty:
+            df = df.merge(career, on=id_col, how="left")
+            df["career_pa"] = df["career_pa"].fillna(0)
+    except Exception:
+        df["career_pa"] = 999  # assume established if query fails
 
-    ed_cols = st.columns(2)
-    with ed_cols[0]:
-        _render_top_risers(df, id_col, name_col, teams_lookup, stat_configs)
-    with ed_cols[1]:
-        _render_diamond_leaders(df, id_col, name_col, teams_lookup)
+    # Controls
+    ctrl_cols = st.columns(3)
+    with ctrl_cols[0]:
+        league_filter = st.radio(
+            "League", ["ALL", "American League", "National League"],
+            horizontal=True, key="proj_league",
+        )
+    with ctrl_cols[1]:
+        show_all = st.checkbox("Show all players (incl. low confidence)", key="proj_show_all")
+    with ctrl_cols[2]:
+        n_show = st.selectbox("Show top", [5, 10, 15, 20], index=1, key="proj_n")
 
+    # League filtering (if we have team data)
+    # TODO: Add AL/NL team mapping when available
+
+    # Page header
+    season_label = "2026"
+    st.markdown(
+        f'<div style="text-align:center; margin-bottom:1rem;">'
+        f'<span style="color:{CREAM}; font-size:1.6rem; font-weight:800; letter-spacing:1px;">'
+        f'{season_label} {"BATTER" if player_type == "Hitter" else "PITCHER"} PROJECTIONS'
+        f'</span></div>',
+        unsafe_allow_html=True,
+    )
+
+    # Leaderboard cards
+    leaderboards = HITTER_LEADERBOARDS if player_type == "Hitter" else PITCHER_LEADERBOARDS
+
+    # Render in rows of 3
+    for i in range(0, len(leaderboards), 3):
+        batch = leaderboards[i:i+3]
+        cols = st.columns(len(batch))
+        for col, (title, prefix, fmt, hib, role_fn) in zip(cols, batch):
+            with col:
+                _render_leaderboard(
+                    df, title, prefix, fmt, hib,
+                    teams_lookup, id_col, name_col,
+                    show_all=show_all, n_show=n_show,
+                    role_filter=role_fn,
+                )
+
+    # Footer
     st.markdown("---")
-
-    # ── Full table (preserved from original) ──────────────────────────
-    obs_configs = PITCHER_OBSERVED_STATS if player_type == "Pitcher" else HITTER_OBSERVED_STATS
-
-    search = st.text_input(
-        "Search player", "", placeholder="Type a name...", key="proj_search",
-    )
-    filter_cols = st.columns(4)
-    with filter_cols[0]:
-        team_options = ["All"] + sorted(df["team_abbr"].replace("", pd.NA).dropna().unique().tolist())
-        team_filter = st.selectbox("Team", team_options, key="proj_team")
-    with filter_cols[1]:
-        if player_type == "Pitcher":
-            role = st.selectbox("Role", ["All", "Starters", "Relievers"], key="proj_role")
-        else:
-            role = "All"
-    with filter_cols[2]:
-        hand_options = ["All"] + sorted(df[hand_col].dropna().unique().tolist())
-        hand_filter = st.selectbox("Hand", hand_options, key="proj_hand")
-    with filter_cols[3]:
-        conf_options = ["All", "HIGH", "MEDIUM", "LOW"]
-        conf_filter = st.selectbox("Confidence", conf_options, key="proj_conf")
-
-    sort_cols = st.columns(1)
-    sort_options = ["Diamond Rating"] + [s[0] for s in stat_configs] + [s[0] for s in obs_configs]
-    sort_by = st.selectbox("Sort by", sort_options, key="proj_sort")
-
-    if search:
-        _search_norm = strip_accents(search)
-        df = df[df[name_col].apply(lambda x: _search_norm.lower() in strip_accents(str(x)).lower())]
-    if team_filter != "All":
-        df = df[df["team_abbr"] == team_filter]
-    if player_type == "Pitcher":
-        if role == "Starters":
-            df = df[df["is_starter"] == 1]
-        elif role == "Relievers":
-            df = df[df["is_starter"] == 0]
-    if hand_filter != "All":
-        df = df[df[hand_col] == hand_filter]
-    if conf_filter != "All" and "confidence_tier" in df.columns:
-        df = df[df["confidence_tier"] == conf_filter]
-
-    all_sort_configs = stat_configs + obs_configs
-    if sort_by == "Diamond Rating":
-        sort_col = "composite_score"
-        ascending = False
-    else:
-        stat_key = next(s[1] for s in all_sort_configs if s[0] == sort_by)
-        higher_is_better = next(s[2] for s in all_sort_configs if s[0] == sort_by)
-        if any(s[0] == sort_by for s in stat_configs):
-            sort_col = f"delta_{stat_key}"
-        else:
-            sort_col = stat_key
-        ascending = not higher_is_better
-
-    df_sorted = df.sort_values(sort_col, ascending=ascending).reset_index(drop=True)
-
-    injury_lookup = get_injury_lookup()
-    display_rows = []
-    for _, row in df_sorted.iterrows():
-        name_display = row[name_col]
-        team = row.get("team_abbr", "")
-        if team:
-            name_display = f"{name_display} ({team})"
-        pid = int(row[id_col])
-        inj_info = injury_lookup.get(pid)
-        if inj_info and inj_info["missed_games"] > 0:
-            sev = inj_info["severity"]
-            if sev == "major":
-                name_display = f"[IL-60] {name_display}"
-            elif sev == "significant":
-                name_display = f"[IL] {name_display}"
-            else:
-                name_display = f"[DTD] {name_display}"
-        # Confidence tier badge
-        tier = row.get("confidence_tier", "")
-        if pd.isna(tier):
-            tier = ""
-
-        r: dict[str, object] = {
-            "Rank": len(display_rows) + 1,
-            "Name": name_display,
-            "Age": int(row["age"]) if pd.notna(row.get("age")) else "",
-            "Hand": row.get(hand_col, ""),
-            "Conf.": tier if tier else "--",
-            "Rating": diamond_rating_text_composite(row["composite_score"]),
-        }
-        for label, key, higher_better, _ in stat_configs:
-            proj_col = f"projected_{key}"
-            delta_col = f"delta_{key}"
-            if proj_col in row.index and pd.notna(row.get(proj_col)):
-                proj_val = fmt_stat(row[proj_col], key)
-                delta_pp = row[delta_col] * 100
-                if abs(delta_pp) < 0.05:
-                    r[label] = proj_val
-                else:
-                    r[label] = f"{proj_val} ({delta_pp:+.1f})"
-            else:
-                r[label] = "--"
-        for c_label, c_prefix, c_actual, c_hb in counting_display:
-            mean_col = f"{c_prefix}_mean"
-            has_proj = mean_col in row.index and pd.notna(row.get(mean_col))
-            has_actual = c_actual is not None and c_actual in row.index and pd.notna(row.get(c_actual))
-            if has_proj:
-                raw_val = row[mean_col]
-                # Format: decimals for rate stats, integers for counting
-                if c_prefix in ("projected_fip_era", "projected_whip", "projected_woba"):
-                    proj_display = f"{raw_val:.2f}"
-                elif c_prefix in ("projected_wrc_plus", "projected_ip"):
-                    proj_display = f"{raw_val:.0f}"
-                else:
-                    proj_display = str(int(round(raw_val)))
-                if has_actual:
-                    actual_val = int(row[c_actual])
-                    delta = int(round(raw_val)) - actual_val
-                    r[c_label] = f"{proj_display} ({delta:+d})"
-                else:
-                    r[c_label] = proj_display
-            else:
-                r[c_label] = "--"
-        display_rows.append(r)
-
-    display_df = pd.DataFrame(display_rows)
-    st.dataframe(
-        display_df,
-        width='stretch',
-        hide_index=True,
-        height=600,
-    )
-
     st.caption(
-        f"Showing {len(display_df)} {player_type.lower()}s. "
-        "Conf. = projection confidence (HIGH/MEDIUM/LOW) based on track record, "
-        "rate stability, and playing time certainty. "
-        "Counting stats from PA-by-PA game simulator with Bayesian rate posteriors. "
-        "Deltas vs prior season shown in parentheses."
+        "Projections from PA-by-PA game simulator with Bayesian hierarchical rate models. "
+        "Ranges show 80% credible interval (p10-p90). "
+        "Players to Watch have limited MLB track record — projections carry higher uncertainty. "
+        f"{'wRC+ uses FanGraphs linear weights (100 = league average).' if player_type == 'Hitter' else 'FIP-ERA strips out BABIP/sequencing — more predictive than traditional ERA.'}"
     )
