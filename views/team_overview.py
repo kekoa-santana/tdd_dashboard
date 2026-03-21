@@ -18,6 +18,7 @@ from services.data_loader import (
     load_cluster_metadata, load_baselines_arch,
     load_hitter_archetypes, load_pitcher_archetypes,
     load_rankings, load_position_eligibility,
+    load_probable_starters,
 )
 from utils.helpers import get_team_lookup, get_injury_lookup
 from utils.formatters import fmt_stat
@@ -177,6 +178,14 @@ def _render_depth_chart_tab(selected_team: str, teams_df: pd.DataFrame) -> None:
     if team_h.empty and team_p.empty:
         st.info("No rankings data available. Run the rankings precompute first.")
         return
+
+    # ── Diamond chart (probable starters on a field) ──────────────
+    probable = load_probable_starters()
+    if not probable.empty:
+        team_starters = probable[probable["team_abbr"] == selected_team]
+        if not team_starters.empty:
+            from components.depth_chart_diamond import render_diamond_chart
+            render_diamond_chart(team_starters, selected_team)
 
     # ── Summary metric cards ─────────────────────────────────────
     if not team_h.empty:
