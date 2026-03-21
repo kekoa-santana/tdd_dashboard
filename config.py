@@ -115,15 +115,23 @@ PITCHER_OBSERVED_STATS = [
 ]
 
 # Counting stat display configs: (label, column_prefix, actual_col, higher_better)
+# Ordered by validated accuracy (MAPE): most reliable stats first
 HITTER_COUNTING_DISPLAY = [
-    ("Proj. K", "total_k", "actual_k", False),
-    ("Proj. BB", "total_bb", "actual_bb", True),
-    ("Proj. HR", "total_hr", "actual_hr", True),
+    ("wRC+", "projected_wrc_plus", None, True),        # MAPE=11%, r=0.739
+    ("Proj. K", "total_k", "actual_k", False),         # MAPE=25%, r=0.783
+    ("Proj. HR", "total_hr", "actual_hr", True),       # MAPE=28%, r=0.936
+    ("Proj. BB", "total_bb", "actual_bb", True),       # MAPE=30%, r=0.871
+    ("Proj. R", "total_r", None, True),                # MAPE=30%, r=0.786
+    ("Proj. RBI", "total_rbi", None, True),            # MAPE=30%, r=0.817
+    ("Proj. SB", "total_sb", None, True),              # r=0.937
 ]
 PITCHER_COUNTING_DISPLAY = [
-    ("Proj. K", "total_k", "actual_k", True),
-    ("Proj. BB", "total_bb", "actual_bb", False),
-    ("Proj. Outs", "total_outs", "actual_outs", True),
+    ("FIP-ERA", "projected_fip_era", None, False),     # best rate metric, r=0.297
+    ("Proj. K", "total_k", "actual_k", True),          # MAPE=47%, r=0.777
+    ("Proj. IP", "projected_ip", None, True),          # MAPE=47%, r=0.769
+    ("Proj. BB", "total_bb", "actual_bb", False),      # MAPE=48%, r=0.692
+    ("Proj. SV", "total_sv", None, True),              # role-specific
+    ("Proj. HLD", "total_hld", None, True),            # role-specific
 ]
 
 # Traditional stat display configs
