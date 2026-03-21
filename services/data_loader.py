@@ -87,6 +87,11 @@ def load_hitter_strength(career: bool = False) -> pd.DataFrame:
 
 
 def load_counting(player_type: str) -> pd.DataFrame:
+    # Prefer sim-based counting stats (correlated joint distributions)
+    sim_path = DASHBOARD_DIR / f"{player_type}_counting_sim.parquet"
+    if sim_path.exists():
+        return pd.read_parquet(sim_path)
+    # Fallback to old rate x BF counting stats
     path = DASHBOARD_DIR / f"{player_type}_counting.parquet"
     if not path.exists():
         return pd.DataFrame()
