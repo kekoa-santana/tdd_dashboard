@@ -7,6 +7,7 @@ import streamlit as st
 from config import GOLD, EMBER, SAGE, SLATE, CREAM, DARK_CARD, DARK_BORDER
 from components.metric_cards import metric_card
 from components.diamond_rating import diamond_rating_text
+from components.expandable_card import EXPANDABLE_CARD_CSS, expandable_card_html
 from components.headshot import headshot_html
 from lib.diamond_rating import score_to_diamonds, diamond_tier
 from services.data_loader import (
@@ -15,6 +16,8 @@ from services.data_loader import (
     load_prospect_readiness,
     load_milb_translated,
     load_milb_factors,
+    load_hitter_archetypes,
+    load_pitcher_archetypes,
 )
 
 
@@ -226,6 +229,47 @@ _CSS = f"""
 .stSelectbox div[data-baseweb="select"] > div:hover {{
     background-color: transparent !important;
 }}
+
+/* ── hover tooltip for compact cards ──────────────── */
+.lb-row-tip {{
+    position: relative;
+}}
+.lb-row-tip .lb-tooltip {{
+    display: none;
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: {DARK_CARD};
+    border: 1px solid {GOLD}44;
+    border-radius: 8px;
+    padding: 0.5rem 0.7rem;
+    white-space: nowrap;
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    pointer-events: none;
+}}
+.lb-row-tip:hover .lb-tooltip {{
+    display: flex;
+    gap: 0.7rem;
+}}
+.lb-tip-stat {{
+    text-align: center;
+}}
+.lb-tip-val {{
+    color: {CREAM};
+    font-size: 0.85rem;
+    font-weight: 700;
+}}
+.lb-tip-lbl {{
+    color: {SLATE};
+    font-size: 0.62rem;
+}}
+/* First-row tooltip: show below instead of above */
+.lb-tooltip-below {{
+    bottom: auto !important;
+    top: 100% !important;
+}}
 </style>
 """
 
@@ -321,12 +365,18 @@ def _render_ranking_card(
     detail_stats: list[tuple[str, str, str]] | None = None,
     wide: bool = False,
     link_type: str = "",
+    expandable: bool = False,
+    archetype_lookup: dict[int, tuple[str, str]] | None = None,
+    hover_stats: list[tuple[str, str, str]] | None = None,
 ) -> None:
     """Render a scrollable ranking leaderboard card.
 
     detail_stats: list of (label, column, format) to show as a sub-row.
     wide: if True, card spans full width (no max-width).
     link_type: "hitter" or "pitcher" to make names link to player profile.
+    expandable: if True, each row is a <details>/<summary> expandable card.
+    archetype_lookup: {player_id: (archetype_name, archetype_desc)} for expanded view.
+    hover_stats: list of (label, column, format) to show as hover tooltip.
     """
     if df.empty:
         return
@@ -352,13 +402,6 @@ def _render_ranking_card(
         if info_col and info_col in row.index and pd.notna(row[info_col]):
             info_html = f'<span class="lb-info">{row[info_col]}</span>'
 
-        # Clickable name linking to player profile
-        if link_type:
-            profile_url = f"?page=player_profile&player_id={pid}&player_type={link_type}"
-            name_html = f'<a href="{profile_url}">{name}</a>'
-        else:
-            name_html = name
-
         val_html = _rating_val_html(row[score_col])
 
         # Inline stats (if detail_stats provided)
@@ -374,31 +417,129 @@ def _render_ranking_card(
                         f'</span>'
                     )
 
-        rows_html.append(
-            f'<div class="lb-row">'
+        # When not expandable, keep clickable name link
+        if not expandable and link_type:
+            profile_url = f"?page=player_profile&player_id={pid}&player_type={link_type}"
+            name_content = f'<a href="{profile_url}">{name}</a>'
+        else:
+            name_content = name
+
+        # Hover tooltip for compact cards
+        tooltip_html = ""
+        if hover_stats and not expandable:
+            tip_cells: list[str] = []
+            for label, col_name, fmt in hover_stats:
+                if col_name in row.index:
+                    val = _fmt_detail(row[col_name], fmt)
+                    tip_cells.append(
+                        f'<div class="lb-tip-stat">'
+                        f'<div class="lb-tip-val">{val}</div>'
+                        f'<div class="lb-tip-lbl">{label}</div>'
+                        f'</div>'
+                    )
+            if tip_cells:
+                # First row: show tooltip below to avoid clipping at top
+                tip_cls = "lb-tooltip lb-tooltip-below" if i == 1 else "lb-tooltip"
+                tooltip_html = f'<div class="{tip_cls}">{"".join(tip_cells)}</div>'
+
+        row_class = "lb-row lb-row-tip" if tooltip_html else "lb-row"
+        summary_row = (
+            f'<div class="{row_class}">'
             f'<span class="{rank_class}">{rank}.</span>'
             f'{hs}'
-            f'<span class="lb-name">{name_html}</span>'
+            f'<span class="lb-name">{name_content}</span>'
             f'{info_html}'
             f'{team_html}'
             f'<span class="lb-val">{val_html}</span>'
             f'{stat_inline}'
+            f'{tooltip_html}'
             f'</div>'
         )
 
+        if expandable:
+            detail_parts: list[str] = []
+
+            # Larger headshot + name header
+            detail_parts.append(
+                f'<div style="display:flex; align-items:center; gap:0.8rem; margin-bottom:0.6rem;">'
+                f'{headshot_html(pid, size=80)}'
+                f'<div>'
+                f'<div style="color:{CREAM}; font-size:1.1rem; font-weight:700;">{name}</div>'
+                f'<div style="color:{SLATE}; font-size:0.8rem;">'
+                f'{row.get(info_col, "") if info_col else ""}'
+                f'{" · " + team if team else ""}</div>'
+                f'</div></div>'
+            )
+
+            # Archetype badge
+            if archetype_lookup and pid in archetype_lookup:
+                arch_name, arch_desc = archetype_lookup[pid]
+                detail_parts.append(
+                    f'<div style="margin-bottom:0.5rem;">'
+                    f'<span style="background:{GOLD}22; color:{GOLD}; border:1px solid {GOLD}44; '
+                    f'padding:3px 10px; border-radius:12px; font-size:0.8rem; font-weight:600;">'
+                    f'{arch_name}</span>'
+                    f'<span style="color:{SLATE}; font-size:0.78rem; margin-left:0.5rem;">'
+                    f'{arch_desc}</span>'
+                    f'</div>'
+                )
+
+            # Key stats from detail_stats
+            if has_detail:
+                stat_cells: list[str] = []
+                for label, col_name, fmt in detail_stats:
+                    if col_name in row.index:
+                        val = _fmt_detail(row[col_name], fmt)
+                        stat_cells.append(
+                            f'<div style="text-align:center; min-width:55px;">'
+                            f'<div style="color:{CREAM}; font-size:0.9rem; font-weight:700;">{val}</div>'
+                            f'<div style="color:{SLATE}; font-size:0.65rem;">{label}</div>'
+                            f'</div>'
+                        )
+                if stat_cells:
+                    detail_parts.append(
+                        f'<div style="display:flex; flex-wrap:wrap; gap:0.6rem; '
+                        f'margin-bottom:0.5rem;">{"".join(stat_cells)}</div>'
+                    )
+
+            # Profile link
+            if link_type:
+                profile_url = f"?page=player_profile&player_id={pid}&player_type={link_type}"
+                detail_parts.append(
+                    f'<a href="{profile_url}" style="color:{GOLD}; font-size:0.85rem; '
+                    f'font-weight:600; text-decoration:none;">'
+                    f'View Full Profile &#8594;</a>'
+                )
+
+            rows_html.append(expandable_card_html(summary_row, "".join(detail_parts)))
+        else:
+            rows_html.append(summary_row)
+
     count_html = f'<span class="lb-subtitle">{len(work)}</span>'
-    scroll_style = f' style="max-height:{max_height}px;"' if max_height > 0 else ""
     card_class = "lb-card lb-card-wide" if wide else "lb-card"
 
-    html = (
-        f'<div class="{card_class}">'
-        f'<div class="lb-title-row">'
-        f'<span class="lb-title">{title}{count_html}</span>'
-        f'</div>'
-        f'<div class="lb-scroll"{scroll_style}>'
-        + "".join(rows_html)
-        + '</div></div>'
-    )
+    if expandable:
+        scroll_style = f' style="max-height:{max_height}px;"' if max_height > 0 else ""
+        html = (
+            f'<div class="{card_class}">'
+            f'<div class="lb-title-row">'
+            f'<span class="lb-title">{title}{count_html}</span>'
+            f'</div>'
+            f'<div class="lb-scroll"{scroll_style}>'
+            + "".join(rows_html)
+            + '</div></div>'
+        )
+    else:
+        scroll_style = f' style="max-height:{max_height}px;"' if max_height > 0 else ""
+        html = (
+            f'<div class="{card_class}">'
+            f'<div class="lb-title-row">'
+            f'<span class="lb-title">{title}{count_html}</span>'
+            f'</div>'
+            f'<div class="lb-scroll"{scroll_style}>'
+            + "".join(rows_html)
+            + '</div></div>'
+        )
     st.markdown(html, unsafe_allow_html=True)
 
 
@@ -406,46 +547,51 @@ def _render_ranking_card(
 
 def _render_batter_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> None:
     """Render batter rankings as leaderboard cards with positional breakdowns."""
-    search = st.text_input("Search", placeholder="Search player...", key="rank_h_search")
+
+    # ── Filter row ──
+    f1, f2 = st.columns([1, 3])
+    with f1:
+        league_filter = st.selectbox(
+            "League", ["All", "American League", "National League"],
+            key="rank_h_league", label_visibility="collapsed",
+        )
+    with f2:
+        search = st.text_input("Search", placeholder="Search player...", key="rank_h_search")
+
+    # Apply filters
     if search:
         df = df[df["batter_name"].str.contains(search, case=False, na=False)]
+    if league_filter == "American League":
+        al_ids = {pid for pid, abbr in teams_lookup.items() if abbr in _AL_TEAMS}
+        df = df[df["batter_id"].isin(al_ids)]
+    elif league_filter == "National League":
+        nl_ids = {pid for pid, abbr in teams_lookup.items() if abbr in _NL_TEAMS}
+        df = df[df["batter_id"].isin(nl_ids)]
 
     if df.empty:
         st.info("No matching batters found.")
         return
 
-    # Overall rankings (with detail stats, full width)
+    # Build archetype lookup
+    arch_df = load_hitter_archetypes()
+    arch_lookup: dict[int, tuple[str, str]] = {}
+    if not arch_df.empty and "archetype_name" in arch_df.columns:
+        for _, arow in arch_df.iterrows():
+            arch_lookup[int(arow["batter_id"])] = (
+                str(arow.get("archetype_name", "")),
+                str(arow.get("archetype_desc", "")),
+            )
+
+    # Overall rankings — expandable cards
     _render_ranking_card(
         df, "Overall", "overall_rank", "batter_name", "batter_id",
         "tdd_value_score", teams_lookup,
-        info_col="position", max_height=500, n_headshots=10,
+        info_col="position", max_height=600, n_headshots=10,
         detail_stats=BATTER_DETAIL_STATS, wide=True, link_type="hitter",
+        expandable=True, archetype_lookup=arch_lookup,
     )
 
-    # AL / NL split
-    st.markdown('<div class="rank-section">By League</div>', unsafe_allow_html=True)
-    al_ids = {pid for pid, abbr in teams_lookup.items() if abbr in _AL_TEAMS}
-    nl_ids = {pid for pid, abbr in teams_lookup.items() if abbr in _NL_TEAMS}
-
-    lg_cols = st.columns(2)
-    with lg_cols[0]:
-        al_df = df[df["batter_id"].isin(al_ids)]
-        _render_ranking_card(
-            al_df, "American League", "overall_rank", "batter_name", "batter_id",
-            "tdd_value_score", teams_lookup,
-            info_col="position", max_height=450, n_headshots=5,
-            link_type="hitter",
-        )
-    with lg_cols[1]:
-        nl_df = df[df["batter_id"].isin(nl_ids)]
-        _render_ranking_card(
-            nl_df, "National League", "overall_rank", "batter_name", "batter_id",
-            "tdd_value_score", teams_lookup,
-            info_col="position", max_height=450, n_headshots=5,
-            link_type="hitter",
-        )
-
-    # Positional rankings
+    # Positional breakdowns (with hover tooltips)
     st.markdown('<div class="rank-section">By Position</div>', unsafe_allow_html=True)
 
     positions = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"]
@@ -459,6 +605,7 @@ def _render_batter_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> N
                     pos_df, pos, "pos_rank", "batter_name", "batter_id",
                     "tdd_value_score", teams_lookup,
                     max_height=400, n_headshots=3, link_type="hitter",
+                    hover_stats=BATTER_DETAIL_STATS,
                 )
 
 
@@ -466,46 +613,51 @@ def _render_batter_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> N
 
 def _render_pitcher_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> None:
     """Render pitcher rankings as leaderboard cards with role breakdowns."""
-    search = st.text_input("Search", placeholder="Search player...", key="rank_p_search")
+
+    # ── Filter row ──
+    f1, f2 = st.columns([1, 3])
+    with f1:
+        league_filter = st.selectbox(
+            "League", ["All", "American League", "National League"],
+            key="rank_p_league", label_visibility="collapsed",
+        )
+    with f2:
+        search = st.text_input("Search", placeholder="Search player...", key="rank_p_search")
+
+    # Apply filters
     if search:
         df = df[df["pitcher_name"].str.contains(search, case=False, na=False)]
+    if league_filter == "American League":
+        al_ids = {pid for pid, abbr in teams_lookup.items() if abbr in _AL_TEAMS}
+        df = df[df["pitcher_id"].isin(al_ids)]
+    elif league_filter == "National League":
+        nl_ids = {pid for pid, abbr in teams_lookup.items() if abbr in _NL_TEAMS}
+        df = df[df["pitcher_id"].isin(nl_ids)]
 
     if df.empty:
         st.info("No matching pitchers found.")
         return
 
-    # Overall rankings (with detail stats, full width)
+    # Build archetype lookup
+    arch_df = load_pitcher_archetypes()
+    arch_lookup: dict[int, tuple[str, str]] = {}
+    if not arch_df.empty and "archetype_name" in arch_df.columns:
+        for _, arow in arch_df.iterrows():
+            arch_lookup[int(arow["pitcher_id"])] = (
+                str(arow.get("archetype_name", "")),
+                str(arow.get("archetype_desc", "")),
+            )
+
+    # Overall rankings — expandable cards
     _render_ranking_card(
         df, "Overall", "overall_rank", "pitcher_name", "pitcher_id",
         "tdd_value_score", teams_lookup,
-        info_col="role", max_height=500, n_headshots=10,
+        info_col="role", max_height=600, n_headshots=10,
         detail_stats=PITCHER_DETAIL_STATS, wide=True, link_type="pitcher",
+        expandable=True, archetype_lookup=arch_lookup,
     )
 
-    # AL / NL split
-    st.markdown('<div class="rank-section">By League</div>', unsafe_allow_html=True)
-    al_ids = {pid for pid, abbr in teams_lookup.items() if abbr in _AL_TEAMS}
-    nl_ids = {pid for pid, abbr in teams_lookup.items() if abbr in _NL_TEAMS}
-
-    lg_cols = st.columns(2)
-    with lg_cols[0]:
-        al_df = df[df["pitcher_id"].isin(al_ids)]
-        _render_ranking_card(
-            al_df, "American League", "overall_rank", "pitcher_name", "pitcher_id",
-            "tdd_value_score", teams_lookup,
-            info_col="role", max_height=450, n_headshots=5,
-            link_type="pitcher",
-        )
-    with lg_cols[1]:
-        nl_df = df[df["pitcher_id"].isin(nl_ids)]
-        _render_ranking_card(
-            nl_df, "National League", "overall_rank", "pitcher_name", "pitcher_id",
-            "tdd_value_score", teams_lookup,
-            info_col="role", max_height=450, n_headshots=5,
-            link_type="pitcher",
-        )
-
-    # Role rankings
+    # Role breakdowns (with hover tooltips)
     st.markdown('<div class="rank-section">By Role</div>', unsafe_allow_html=True)
 
     cols = st.columns(2)
@@ -516,6 +668,7 @@ def _render_pitcher_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> 
                 role_df, role, "role_rank", "pitcher_name", "pitcher_id",
                 "tdd_value_score", teams_lookup,
                 max_height=500, n_headshots=5, link_type="pitcher",
+                hover_stats=PITCHER_DETAIL_STATS,
             )
 
 
@@ -873,6 +1026,7 @@ def _render_prospect_readiness(df: pd.DataFrame) -> None:
 def page_player_rankings() -> None:
     """Render the Player Rankings page."""
     st.markdown(_CSS, unsafe_allow_html=True)
+    st.markdown(EXPANDABLE_CARD_CSS, unsafe_allow_html=True)
 
     # Title
     st.markdown(

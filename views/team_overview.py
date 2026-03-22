@@ -28,6 +28,8 @@ from components.diamond_rating import diamond_rating_text_composite
 
 # ── Constants ─────────────────────────────────────────────────────────
 _HITTER_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"]
+_PITCHER_POSITIONS = {"SP", "RP", "P"}
+_MLB_ROSTER_STATUSES = {"active", "il_7", "il_10", "il_15", "il_60"}
 
 _PILL_COLORS = {
     # Pitcher archetypes
@@ -1096,6 +1098,76 @@ def _render_staff_metrics(
             st.markdown(f'<span style="color:{SLATE};">None vs league average</span>', unsafe_allow_html=True)
 
 
+def _build_limited_pitcher_rows(
+    pitchers: pd.DataFrame, injury_lookup: dict, use_priors: bool,
+) -> list[dict]:
+    """Build display rows for pitchers without full projections."""
+    rows: list[dict] = []
+    for _, row in pitchers.sort_values("player_name").iterrows():
+        pid = int(row["player_id"])
+        inj = injury_lookup.get(pid)
+        name = row["player_name"]
+        if inj and inj["missed_games"] > 0:
+            sev = inj["severity"]
+            tag = "[IL-60]" if sev == "major" else "[IL]" if sev == "significant" else "[DTD]"
+            name = f"{tag} {name}"
+        status = row.get("roster_status", "active")
+        badge = "IL" if status.startswith("il_") else "Limited Data"
+        r: dict[str, object] = {
+            "Name": name,
+            "Age": "",
+            "Hand": "",
+            "Rating": badge,
+        }
+        if use_priors:
+            for label, key, _, _ in PITCHER_STATS:
+                r[f"{label} ({PRIOR_SEASON})"] = "--"
+            for label, _ in [("Whiff%", "whiff_rate"), ("Avg Velo", "avg_velo")]:
+                r[label] = "--"
+        else:
+            for label, key, _, _ in PITCHER_STATS:
+                r[label] = "--"
+            r["Proj. K"] = "--"
+        rows.append(r)
+    return rows
+
+
+def _build_limited_hitter_rows(
+    hitters: pd.DataFrame, injury_lookup: dict, use_priors: bool,
+) -> list[dict]:
+    """Build display rows for hitters without full projections."""
+    rows: list[dict] = []
+    for _, row in hitters.sort_values("player_name").iterrows():
+        pid = int(row["player_id"])
+        inj = injury_lookup.get(pid)
+        name = row["player_name"]
+        if inj and inj["missed_games"] > 0:
+            sev = inj["severity"]
+            tag = "[IL-60]" if sev == "major" else "[IL]" if sev == "significant" else "[DTD]"
+            name = f"{tag} {name}"
+        pos = row.get("primary_position", "")
+        status = row.get("roster_status", "active")
+        badge = "IL" if status.startswith("il_") else "Limited Data"
+        r: dict[str, object] = {
+            "Name": name,
+            "Age": "",
+            "Bats": "",
+            "Rating": f"{badge} ({pos})" if pos else badge,
+        }
+        if use_priors:
+            for label, key, _, _ in HITTER_STATS:
+                r[f"{label} ({PRIOR_SEASON})"] = "--"
+            for label, _ in [("Whiff%", "whiff_rate"), ("Avg EV", "avg_exit_velo"), ("Hard-Hit%", "hard_hit_pct")]:
+                r[label] = "--"
+        else:
+            for label, key, _, _ in HITTER_STATS:
+                r[label] = "--"
+            for c_label, _ in [("Proj. HR", "total_hr"), ("Proj. BB", "total_bb")]:
+                r[c_label] = "--"
+        rows.append(r)
+    return rows
+
+
 def _build_pitcher_rows(
     pitchers: pd.DataFrame, injury_lookup: dict, use_priors: bool,
 ) -> list[dict]:
@@ -1152,8 +1224,15 @@ def _render_roster_tab(
     h_proj: pd.DataFrame,
     p_proj: pd.DataFrame,
     injury_lookup: dict,
+    *,
+    missing_hitters: pd.DataFrame | None = None,
+    missing_pitchers: pd.DataFrame | None = None,
 ) -> None:
     """Roster tab — the original overview content (projections, tables)."""
+    if missing_hitters is None:
+        missing_hitters = pd.DataFrame()
+    if missing_pitchers is None:
+        missing_pitchers = pd.DataFrame()
     view_mode = st.radio(
         "View",
         [f"{CURRENT_SEASON} Projections", f"{PRIOR_SEASON} Priors (Observed)"],
@@ -1207,76 +1286,95 @@ def _render_roster_tab(
         st.dataframe(pd.DataFrame(inj_rows), width='stretch', hide_index=True)
 
     # ── Pitchers tables ─────────────────────────────────────────────
-    if team_pitchers.empty:
-        st.markdown("### Pitchers")
-        st.info("No pitcher projections for this team.")
+    # Split missing pitchers by role using roster is_starter flag
+    if not missing_pitchers.empty and "is_starter" in missing_pitchers.columns:
+        miss_sp = missing_pitchers[missing_pitchers["is_starter"] == True]  # noqa: E712
+        miss_rp = missing_pitchers[missing_pitchers["is_starter"] == False]  # noqa: E712
+    elif not missing_pitchers.empty:
+        miss_sp = missing_pitchers[missing_pitchers["primary_position"] == "SP"]
+        miss_rp = missing_pitchers[missing_pitchers["primary_position"] != "SP"]
     else:
-        team_sp_tbl = team_pitchers[team_pitchers["is_starter"] == True]  # noqa: E712
-        team_rp_tbl = team_pitchers[team_pitchers["is_starter"] == False]  # noqa: E712
+        miss_sp = pd.DataFrame()
+        miss_rp = pd.DataFrame()
+
+    has_any_pitchers = not team_pitchers.empty or not missing_pitchers.empty
+
+    if not has_any_pitchers:
+        st.markdown("### Pitchers")
+        st.info("No pitcher data for this team.")
+    else:
+        team_sp_tbl = team_pitchers[team_pitchers["is_starter"] == True] if not team_pitchers.empty else pd.DataFrame()  # noqa: E712
+        team_rp_tbl = team_pitchers[team_pitchers["is_starter"] == False] if not team_pitchers.empty else pd.DataFrame()  # noqa: E712
 
         st.markdown("### Starting Rotation")
-        if team_sp_tbl.empty:
-            st.info("No starters projected for this team.")
-        else:
-            sp_rows = _build_pitcher_rows(team_sp_tbl, injury_lookup, use_priors)
+        sp_rows = _build_pitcher_rows(team_sp_tbl, injury_lookup, use_priors) if not team_sp_tbl.empty else []
+        sp_rows += _build_limited_pitcher_rows(miss_sp, injury_lookup, use_priors) if not miss_sp.empty else []
+        if sp_rows:
             st.dataframe(pd.DataFrame(sp_rows), width='stretch', hide_index=True)
+        else:
+            st.info("No starters for this team.")
 
         st.markdown("### Bullpen")
-        if team_rp_tbl.empty:
-            st.info("No relievers projected for this team.")
-        else:
-            rp_rows = _build_pitcher_rows(team_rp_tbl, injury_lookup, use_priors)
+        rp_rows = _build_pitcher_rows(team_rp_tbl, injury_lookup, use_priors) if not team_rp_tbl.empty else []
+        rp_rows += _build_limited_pitcher_rows(miss_rp, injury_lookup, use_priors) if not miss_rp.empty else []
+        if rp_rows:
             st.dataframe(pd.DataFrame(rp_rows), width='stretch', hide_index=True)
+        else:
+            st.info("No relievers for this team.")
 
     # ── Hitters table ───────────────────────────────────────────────
     st.markdown("### Hitters")
-    if team_hitters.empty:
-        st.info("No hitter projections for this team.")
+    has_any_hitters = not team_hitters.empty or not missing_hitters.empty
+    if not has_any_hitters:
+        st.info("No hitter data for this team.")
     else:
         h_rows = []
-        for _, row in team_hitters.sort_values("composite_score", ascending=False).iterrows():
-            pid = int(row["batter_id"])
-            inj = injury_lookup.get(pid)
-            name = row["batter_name"]
-            if inj and inj["missed_games"] > 0:
-                sev = inj["severity"]
-                tag = "[IL-60]" if sev == "major" else "[IL]" if sev == "significant" else "[DTD]"
-                name = f"{tag} {name}"
-            r: dict[str, object] = {
-                "Name": name,
-                "Age": int(row["age"]) if pd.notna(row.get("age")) else "",
-                "Bats": row.get("batter_stand", ""),
-                "Rating": diamond_rating_text_composite(row["composite_score"]),
-            }
-            if use_priors:
-                for label, key, _, _ in HITTER_STATS:
-                    obs_col = f"observed_{key}"
-                    if obs_col in row.index and pd.notna(row.get(obs_col)):
-                        r[f"{label} ({PRIOR_SEASON})"] = fmt_stat(row[obs_col], key)
-                    else:
-                        r[f"{label} ({PRIOR_SEASON})"] = "--"
-                for label, key in [("Whiff%", "whiff_rate"), ("Avg EV", "avg_exit_velo"), ("Hard-Hit%", "hard_hit_pct")]:
-                    if key in row.index and pd.notna(row.get(key)):
-                        r[label] = fmt_stat(row[key], key)
-                    else:
-                        r[label] = "--"
-            else:
-                for label, key, _, _ in HITTER_STATS:
-                    proj_col = f"projected_{key}"
-                    delta_col = f"delta_{key}"
-                    if proj_col in row.index and pd.notna(row.get(proj_col)):
-                        proj_val = fmt_stat(row[proj_col], key)
-                        delta_pp = row[delta_col] * 100
-                        r[label] = f"{proj_val} ({delta_pp:+.1f})" if abs(delta_pp) >= 0.05 else proj_val
-                    else:
-                        r[label] = "--"
-                for c_label, c_prefix in [("Proj. HR", "total_hr"), ("Proj. BB", "total_bb")]:
-                    mean_col = f"{c_prefix}_mean"
-                    if mean_col in row.index and pd.notna(row.get(mean_col)):
-                        r[c_label] = int(round(row[mean_col]))
-                    else:
-                        r[c_label] = "--"
-            h_rows.append(r)
+        if not team_hitters.empty:
+            for _, row in team_hitters.sort_values("composite_score", ascending=False).iterrows():
+                pid = int(row["batter_id"])
+                inj = injury_lookup.get(pid)
+                name = row["batter_name"]
+                if inj and inj["missed_games"] > 0:
+                    sev = inj["severity"]
+                    tag = "[IL-60]" if sev == "major" else "[IL]" if sev == "significant" else "[DTD]"
+                    name = f"{tag} {name}"
+                r: dict[str, object] = {
+                    "Name": name,
+                    "Age": int(row["age"]) if pd.notna(row.get("age")) else "",
+                    "Bats": row.get("batter_stand", ""),
+                    "Rating": diamond_rating_text_composite(row["composite_score"]),
+                }
+                if use_priors:
+                    for label, key, _, _ in HITTER_STATS:
+                        obs_col = f"observed_{key}"
+                        if obs_col in row.index and pd.notna(row.get(obs_col)):
+                            r[f"{label} ({PRIOR_SEASON})"] = fmt_stat(row[obs_col], key)
+                        else:
+                            r[f"{label} ({PRIOR_SEASON})"] = "--"
+                    for label, key in [("Whiff%", "whiff_rate"), ("Avg EV", "avg_exit_velo"), ("Hard-Hit%", "hard_hit_pct")]:
+                        if key in row.index and pd.notna(row.get(key)):
+                            r[label] = fmt_stat(row[key], key)
+                        else:
+                            r[label] = "--"
+                else:
+                    for label, key, _, _ in HITTER_STATS:
+                        proj_col = f"projected_{key}"
+                        delta_col = f"delta_{key}"
+                        if proj_col in row.index and pd.notna(row.get(proj_col)):
+                            proj_val = fmt_stat(row[proj_col], key)
+                            delta_pp = row[delta_col] * 100
+                            r[label] = f"{proj_val} ({delta_pp:+.1f})" if abs(delta_pp) >= 0.05 else proj_val
+                        else:
+                            r[label] = "--"
+                    for c_label, c_prefix in [("Proj. HR", "total_hr"), ("Proj. BB", "total_bb")]:
+                        mean_col = f"{c_prefix}_mean"
+                        if mean_col in row.index and pd.notna(row.get(mean_col)):
+                            r[c_label] = int(round(row[mean_col]))
+                        else:
+                            r[c_label] = "--"
+                h_rows.append(r)
+        # Append limited-data hitters at the end
+        h_rows += _build_limited_hitter_rows(missing_hitters, injury_lookup, use_priors) if not missing_hitters.empty else []
         st.dataframe(pd.DataFrame(h_rows), width='stretch', hide_index=True)
 
     st.caption(
@@ -1350,6 +1448,30 @@ def page_team_overview() -> None:
         available = [c for c in p_merge_cols if c in p_count.columns]
         team_pitchers = team_pitchers.merge(p_count[available], on="pitcher_id", how="left")
 
+    # ── Identify rostered players without projections ────────────
+    # Only works when roster.parquet is available (has roster_status, primary_position).
+    # Falls back gracefully when using player_teams.parquet (no extra columns).
+    projected_pids = set(team_hitters["batter_id"]) | set(team_pitchers["pitcher_id"])
+    team_roster = teams_df[teams_df["team_abbr"] == selected_team].copy()
+    has_roster_detail = (
+        "roster_status" in team_roster.columns
+        and "primary_position" in team_roster.columns
+    )
+    if has_roster_detail:
+        missing_roster = team_roster[
+            (~team_roster["player_id"].isin(projected_pids))
+            & (team_roster["roster_status"].isin(_MLB_ROSTER_STATUSES))
+        ].copy()
+        missing_pitchers = missing_roster[
+            missing_roster["primary_position"].isin(_PITCHER_POSITIONS)
+        ]
+        missing_hitters = missing_roster[
+            ~missing_roster["primary_position"].isin(_PITCHER_POSITIONS)
+        ]
+    else:
+        missing_pitchers = pd.DataFrame()
+        missing_hitters = pd.DataFrame()
+
     # ── Header ──────────────────────────────────────────────────────
     # Enrich header with ELO + tier
     rankings = load_team_rankings()
@@ -1387,12 +1509,14 @@ def page_team_overview() -> None:
         (_inj_full["team_abbr"] == selected_team) & (_inj_full["est_missed_games"] > 0)
     ]) if not _inj_full.empty else 0
 
+    total_pitchers = len(team_pitchers) + len(missing_pitchers)
+    total_hitters = len(team_hitters) + len(missing_hitters)
     team_header_html = (
         f'<div class="brand-header">'
         f'<div>'
         f'<div class="brand-title">{selected_team}{elo_html}{tier_html}</div>'
         f'<div class="brand-subtitle">'
-        f'{len(team_pitchers)} pitchers | {len(team_hitters)} hitters | '
+        f'{total_pitchers} pitchers | {total_hitters} hitters | '
         f'{n_injured} injured{proj_w_html}</div>'
         f'</div>'
         f'<div style="color:{SLATE}; font-size:0.9rem;">'
@@ -1413,6 +1537,8 @@ def page_team_overview() -> None:
         _render_roster_tab(
             selected_team, team_hitters, team_pitchers,
             h_proj, p_proj, injury_lookup,
+            missing_hitters=missing_hitters,
+            missing_pitchers=missing_pitchers,
         )
 
     with tab_depth:

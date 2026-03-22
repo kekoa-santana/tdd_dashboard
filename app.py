@@ -39,6 +39,7 @@ from views.matchup_explorer import page_matchup_explorer  # noqa: E402
 from views.data_health import page_data_health  # noqa: E402
 from views.model_performance import page_model_performance  # noqa: E402
 from views.player_rankings import page_player_rankings  # noqa: E402
+from views.team_rankings import page_team_rankings  # noqa: E402
 from views.compare import page_compare  # noqa: E402
 from views.breakout import page_breakout  # noqa: E402
 
@@ -90,6 +91,7 @@ PAGES = {
     "Team Overview": page_team_overview,
     "Matchup Explorer": page_matchup_explorer,
     "Player Rankings": page_player_rankings,
+    "Team Rankings": page_team_rankings,
     "Compare Players": page_compare,
     "Model Performance": page_model_performance,
     "Data Health": page_data_health,
