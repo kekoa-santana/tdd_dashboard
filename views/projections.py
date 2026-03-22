@@ -119,29 +119,30 @@ _CSS = f"""
 }}
 .lb-rank-top {{ color: {GOLD}; font-weight: 700; }}
 .lb-headshot {{
+    margin-left: 0.5rem;
     margin-right: 0.5rem;
 }}
 .lb-name {{
     color: {CREAM};
-    font-size: 0.85rem;
+    font-size: 0.95rem;
     font-weight: 600;
     flex: 1;
 }}
 .lb-team {{
     color: {SLATE};
-    font-size: 0.70rem;
+    font-size: 0.80rem;
     margin-right: 0.5rem;
 }}
 .lb-val {{
     color: {SAGE};
-    font-size: 0.92rem;
+    font-size: 1rem;
     font-weight: 700;
     min-width: 2.5rem;
     text-align: right;
 }}
 .lb-range {{
     color: {SLATE};
-    font-size: 0.65rem;
+    font-size: 0.7rem;
     min-width: 4.2rem;
     text-align: right;
     margin-left: 0.3rem;
@@ -163,13 +164,13 @@ _CSS = f"""
 }}
 .lb-watch-name {{
     color: {SLATE};
-    font-size: 0.78rem;
+    font-size: 0.9rem;
     flex: 1;
 }}
 .lb-watch-val {{
     color: {SLATE};
     font-size: 0.78rem;
-    font-weight: 600;
+    font-weight: 800;
     min-width: 2.5rem;
     text-align: right;
 }}
@@ -179,7 +180,24 @@ _CSS = f"""
     min-width: 4.2rem;
     text-align: right;
     margin-left: 0.3rem;
-    opacity: 0.7;
+    opacity: 0.8;
+}}
+
+.stSelectbox div[data-baseweb="select"] > div {{
+    background-color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding-left: 0 !important;
+}}
+
+.stSelectbox div[data-baseweb="select"] {{
+    font-size: 1.2rem !important;
+    font-weight: 800 !important;
+    color: #C8A96E !important;
+    cursor: pointer !important;
+}}
+.stSelectbox div[data-baseweb="select"] > div:hover {{
+    background-color: transparent !important;
 }}
 </style>
 """
@@ -262,12 +280,12 @@ def _render_leaderboard(
         pid = int(row[id_col])
         team = teams_lookup.get(pid, "")
         val = _fmt(row[mean_col], fmt)
-        rank_class = "lb-rank-top" if i <= 3 else "lb-rank"
+        rank_class = "lb-rank-top lb-rank" if i <= 3 else "lb-rank"
 
         # Headshot for top 3
         hs = ""
-        if i <= 3:
-            hs = f'<span class="lb-headshot">{headshot_html(pid, size=32)}</span>'
+        if i <= 5:
+            hs = f'<span class="lb-headshot">{headshot_html(pid, size=50)}</span>'
 
         team_html = f'<span class="lb-team">{team}</span>' if team else ""
 
@@ -335,23 +353,50 @@ def page_projections() -> None:
     """Leaderboard-style projections page."""
     st.markdown(_CSS, unsafe_allow_html=True)
 
-    # ── Player type toggle (clickable text) ───────────────────────
+    # ── Title ─────────────────────────────────────────────────────
+    st.markdown(
+        f'<div class="proj-header">'
+        f'<div class="proj-title">2026 PROJECTIONS</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+    # ── Dropdown Filters ──────────────────────────────────────────────
     if "proj_player_type" not in st.session_state:
         st.session_state.proj_player_type = "Batter"
+    if "proj_league" not in st.session_state:
+        st.session_state.proj_league = "All"
 
-    type_cols = st.columns([1, 1, 4])
-    with type_cols[0]:
-        if st.button("Batters", key="btn_batter",
-                      type="primary" if st.session_state.proj_player_type == "Batter" else "secondary"):
-            st.session_state.proj_player_type = "Batter"
-            st.rerun()
-    with type_cols[1]:
-        if st.button("Pitchers", key="btn_pitcher",
-                      type="primary" if st.session_state.proj_player_type == "Pitcher" else "secondary"):
-            st.session_state.proj_player_type = "Pitcher"
-            st.rerun()
+    filter_cols = st.columns([2, 2, 2, 3])
+    
+    with filter_cols[0]:
+        player_type = st.selectbox(
+            "Player Type",
+            options=["Batter", "Pitcher"],
+            key="proj_player_type",
+            label_visibility="collapsed"
+        )
+    with filter_cols[1]:
+        league_filter = st.selectbox(
+            "League",
+            options=["All", "American League", "National League"],
+            key="proj_league",
+            label_visibility="collapsed"
+        )
+    with filter_cols[2]:
+        n_show = st.selectbox(
+            "Show Top", 
+            [5, 10, 15], 
+            index=1, 
+            key="proj_n",
+            label_visibility="collapsed"
+        )
+    with filter_cols[3]:
+        # Add a tiny bit of margin so the checkbox vertically aligns with the text
+        st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
+        show_watch = st.checkbox("Show Players to Watch", value=False, key="proj_watch")
 
-    player_type = st.session_state.proj_player_type
     pt_key = "hitter" if player_type == "Batter" else "pitcher"
 
     # ── Load data ─────────────────────────────────────────────────
@@ -376,39 +421,11 @@ def page_projections() -> None:
     if "career_pa" not in df.columns:
         df["career_pa"] = 999
 
-    # ── Title ─────────────────────────────────────────────────────
-    st.markdown(
-        f'<div class="proj-header">'
-        f'<div class="proj-title">2026 {"BATTER" if player_type == "Batter" else "PITCHER"} PROJECTIONS</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    # ── League filter (clickable text) ────────────────────────────
-    if "proj_league" not in st.session_state:
-        st.session_state.proj_league = "ALL"
-
-    lg_cols = st.columns([1, 1, 1, 3])
-    for i, lg in enumerate(["ALL", "American League", "National League"]):
-        with lg_cols[i]:
-            label = lg if lg != "ALL" else "All"
-            btn_type = "primary" if st.session_state.proj_league == lg else "secondary"
-            if st.button(label, key=f"btn_lg_{lg}", type=btn_type):
-                st.session_state.proj_league = lg
-                st.rerun()
-
     # Apply league filter
     if st.session_state.proj_league != "ALL" and league_lookup:
         target_league = "AL" if "American" in st.session_state.proj_league else "NL"
         league_ids = {pid for pid, lg in league_lookup.items() if lg == target_league}
         df = df[df[id_col].isin(league_ids)]
-
-    # ── Controls ──────────────────────────────────────────────────
-    ctrl_cols = st.columns([1, 1])
-    with ctrl_cols[0]:
-        show_watch = st.checkbox("Show Players to Watch", value=False, key="proj_watch")
-    with ctrl_cols[1]:
-        n_show = st.selectbox("Show top", [5, 10, 15], index=1, key="proj_n")
 
     # ── Leaderboard cards ─────────────────────────────────────────
     leaderboards = BATTER_LEADERBOARDS if player_type == "Batter" else PITCHER_LEADERBOARDS
