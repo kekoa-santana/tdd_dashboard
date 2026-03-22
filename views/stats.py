@@ -72,7 +72,8 @@ _CSS = f"""
     border: 1px solid {DARK_BORDER};
     border-radius: 10px;
     padding: 0.8rem 1rem;
-    margin-bottom: 0.6rem;
+    margin-bottom: 1.5rem;
+    max-width: 380px;
 }}
 .lb-title-row {{
     display: flex;
@@ -118,6 +119,14 @@ _CSS = f"""
     font-size: 0.95rem;
     font-weight: 600;
     flex: 1;
+}}
+.lb-name a {{
+    color: inherit;
+    text-decoration: none;
+}}
+.lb-name a:hover {{
+    color: {GOLD};
+    text-decoration: underline;
 }}
 .lb-team {{
     color: {SLATE};
@@ -179,6 +188,7 @@ def _render_stat_leaderboard(
     name_col: str,
     n_show: int = 10,
     role_filter=None,
+    link_type: str = "",
 ) -> None:
     """Render a single stat leaderboard card."""
     work = df.copy()
@@ -210,9 +220,13 @@ def _render_stat_leaderboard(
         val = _fmt_stat(row[col], fmt)
         rank_class = "lb-rank-top lb-rank" if i <= 5 else "lb-rank"
 
-        hs = ""
-        if i <= 5:
-            hs = f'<span class="lb-headshot">{headshot_html(pid, size=50)}</span>'
+        hs = f'<span class="lb-headshot">{headshot_html(pid, size=50)}</span>'
+
+        if link_type:
+            profile_url = f"?page=player_profile&player_id={pid}&player_type={link_type}"
+            name_html = f'<a href="{profile_url}">{name}</a>'
+        else:
+            name_html = name
 
         team_html = f'<span class="lb-team">{team}</span>' if team else ""
 
@@ -220,7 +234,7 @@ def _render_stat_leaderboard(
             f'<div class="lb-row">'
             f'<span class="{rank_class}">{i}.</span>'
             f'{hs}'
-            f'<span class="lb-name">{name}</span>'
+            f'<span class="lb-name">{name_html}</span>'
             f'{team_html}'
             f'<span class="lb-val">{val}</span>'
             f'</div>'
@@ -341,6 +355,7 @@ def page_stats() -> None:
 
     # ── Leaderboard cards ─────────────────────────────────────────
     leaderboards = HITTER_LEADERBOARDS if player_type == "Hitter" else PITCHER_LEADERBOARDS
+    lt = "hitter" if player_type == "Hitter" else "pitcher"
 
     for i in range(0, len(leaderboards), 3):
         batch = leaderboards[i:i + 3]
@@ -350,7 +365,7 @@ def page_stats() -> None:
                 _render_stat_leaderboard(
                     df, title, stat_col, hib, fmt,
                     teams_lookup, id_col, name_col,
-                    n_show=n_show, role_filter=role_fn,
+                    link_type=lt, n_show=n_show, role_filter=role_fn,
                 )
 
     # ── Footer ────────────────────────────────────────────────────
