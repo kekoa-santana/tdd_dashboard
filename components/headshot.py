@@ -15,18 +15,17 @@ def _headshot_url(player_id: int, size: int = 60) -> str:
 def render_headshot(player_id: int, size: int = 60, border_color: str = "#C8A96E") -> None:
     """Render a player headshot using st.image (reliable rendering)."""
     st.image(
-        _headshot_url(player_id, size),
+        _headshot_url(player_id, size * 3),
         width=size,
     )
 
 
 def headshot_html(player_id: int, size: int = 50) -> str:
     """Return headshot as inline HTML string using an img tag for maximum crispness."""
-    # Fetch a high-quality 150px PNG (3x resolution for 50px display)
-    url = _headshot_url(player_id, 150)
+    url = _headshot_url(player_id, size * 3)
     return (
         f'<img src="{url}" '
-        f'style="width:{size}px; height:{size}px; border-radius:6px; '
-        f'object-fit:cover; background-color:#181b23; '
+        f'style="width:{size}px; border-radius:6px; '
+        f'background-color:#181b23; '
         f'display:inline-block; vertical-align:middle;" />'
     )

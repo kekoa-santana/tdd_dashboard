@@ -648,3 +648,41 @@ def load_pitcher_exit_tendencies() -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
     return pd.read_parquet(path)
+
+
+# ---------------------------------------------------------------------------
+# Team intelligence data (ELO, profiles, rankings)
+# ---------------------------------------------------------------------------
+
+@st.cache_data
+def load_team_elo(preseason: bool = False) -> pd.DataFrame:
+    """Load team ELO ratings (end-of-season or pre-season regressed)."""
+    fname = "team_elo_preseason.parquet" if preseason else "team_elo.parquet"
+    path = DASHBOARD_DIR / fname
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
+def load_team_elo_history() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "team_elo_history.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
+def load_team_profiles() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "team_profiles.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data
+def load_team_rankings() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "team_rankings.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
