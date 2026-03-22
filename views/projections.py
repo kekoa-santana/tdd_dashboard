@@ -280,9 +280,9 @@ def _render_leaderboard(
         pid = int(row[id_col])
         team = teams_lookup.get(pid, "")
         val = _fmt(row[mean_col], fmt)
-        rank_class = "lb-rank-top lb-rank" if i <= 3 else "lb-rank"
+        rank_class = "lb-rank-top lb-rank" if i <= 5 else "lb-rank"
 
-        # Headshot for top 3
+        # Headshot for top 5
         hs = ""
         if i <= 5:
             hs = f'<span class="lb-headshot">{headshot_html(pid, size=50)}</span>'

@@ -7,9 +7,11 @@ import streamlit as st
 from config import GOLD, EMBER, SAGE, SLATE, CREAM, DARK_CARD, DARK_BORDER
 from components.metric_cards import metric_card
 from components.diamond_rating import diamond_rating_text
+from components.headshot import headshot_html
 from lib.diamond_rating import score_to_diamonds, diamond_tier
 from services.data_loader import (
     load_rankings,
+    load_player_teams,
     load_prospect_readiness,
     load_milb_translated,
     load_milb_factors,
@@ -46,7 +48,6 @@ _LEVEL_ORDER = ["AAA", "AA", "A+", "A", "ROK"]
 
 
 def _score_color(val: float) -> str:
-    """Color-code a diamond rating value (0-5 scale)."""
     if val >= 4.0:
         return f"color: {GOLD}; font-weight: bold"
     if val >= 3.0:
@@ -57,220 +58,449 @@ def _score_color(val: float) -> str:
 
 
 def _style_tier(val: str) -> str:
-    """Color-code prospect tier."""
     color = _PROSPECT_TIER_COLORS.get(val, CREAM)
     return f"color: {color}; font-weight: bold"
 
 
 def _style_health(val: str) -> str:
-    """Color-code health label."""
     color = _HEALTH_COLORS.get(val, CREAM)
     return f"color: {color}; font-weight: bold"
 
 
-# ── Pitcher Rankings ────────────────────────────────────────────────────────
+# ── CSS ─────────────────────────────────────────────────────────────────────
 
-def _render_pitcher_rankings(df: pd.DataFrame) -> None:
-    """Render pitcher rankings table with filters."""
-    # Filters
-    col_role, col_hand, col_search = st.columns([1, 1, 2])
-    with col_role:
-        roles = ["All"] + sorted(df["role"].dropna().unique().tolist()) if "role" in df.columns else ["All"]
-        role_filter = st.selectbox("Role", roles, key="rank_p_role")
-    with col_hand:
-        hands = ["All", "L", "R"]
-        hand_filter = st.selectbox("Throws", hands, key="rank_p_hand")
-    with col_search:
-        search = st.text_input("Search pitcher", key="rank_p_search")
+_CSS = f"""
+<style>
+.rank-header {{
+    text-align: center;
+    margin-bottom: 0.8rem;
+}}
+.rank-title {{
+    color: {CREAM};
+    font-size: 1.7rem;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+}}
+.rank-section {{
+    color: {GOLD};
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    margin: 1.2rem 0 0.6rem 0;
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid {DARK_BORDER};
+}}
+.lb-card {{
+    background: {DARK_CARD};
+    border: 1px solid {DARK_BORDER};
+    border-radius: 10px;
+    padding: 0.8rem 1rem;
+    margin-bottom: 0.6rem;
+}}
+.lb-title-row {{
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid {DARK_BORDER};
+}}
+.lb-title {{
+    color: {GOLD};
+    font-size: 1.0rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}}
+.lb-subtitle {{
+    color: {SLATE};
+    font-size: 0.70rem;
+    font-weight: 400;
+    margin-left: 0.4rem;
+}}
+.lb-scroll {{
+    overflow-y: auto;
+}}
+.lb-scroll::-webkit-scrollbar {{
+    width: 6px;
+}}
+.lb-scroll::-webkit-scrollbar-track {{
+    background: transparent;
+}}
+.lb-scroll::-webkit-scrollbar-thumb {{
+    background: rgba(200,169,110,0.3);
+    border-radius: 3px;
+}}
+.lb-row {{
+    display: flex;
+    align-items: center;
+    padding: 0.28rem 0;
+    border-bottom: 1px solid {DARK_BORDER}15;
+}}
+.lb-row:last-child {{ border-bottom: none; }}
+.lb-rank {{
+    color: {SLATE};
+    font-size: 0.82rem;
+    min-width: 1.6rem;
+    text-align: right;
+    margin-right: 0.5rem;
+}}
+.lb-rank-top {{ color: {GOLD}; font-weight: 700; }}
+.lb-headshot {{
+    margin-left: 0.5rem;
+    margin-right: 0.5rem;
+}}
+.lb-name {{
+    color: {CREAM};
+    font-size: 0.95rem;
+    font-weight: 600;
+    flex: 1;
+}}
+.lb-info {{
+    color: {SLATE};
+    font-size: 0.72rem;
+    background: rgba(123,143,166,0.12);
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-right: 0.5rem;
+}}
+.lb-team {{
+    color: {SLATE};
+    font-size: 0.80rem;
+    margin-right: 0.5rem;
+}}
+.lb-val {{
+    display: flex;
+    align-items: center;
+    min-width: 5rem;
+    justify-content: flex-end;
+}}
+.lb-diamonds {{
+    letter-spacing: 1px;
+    font-size: 0.7rem;
+}}
+.lb-rating-num {{
+    font-weight: 700;
+    font-size: 0.9rem;
+    margin-left: 3px;
+    min-width: 1.5rem;
+    text-align: right;
+}}
+.lb-entry {{
+    border-bottom: 1px solid {DARK_BORDER}15;
+    padding-bottom: 0.15rem;
+    margin-bottom: 0.1rem;
+}}
+.lb-entry:last-child {{ border-bottom: none; }}
+.lb-entry .lb-row {{ border-bottom: none; padding-bottom: 0; }}
+.lb-stats-row {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.15rem 0.7rem;
+    padding: 0 0 0.2rem 2.2rem;
+}}
+.lb-stat-lbl {{
+    color: {SLATE};
+    font-size: 0.62rem;
+    margin-right: 2px;
+}}
+.lb-stat-val {{
+    color: {CREAM};
+    font-size: 0.72rem;
+    font-weight: 600;
+}}
 
-    filtered = df.copy()
-    if role_filter != "All" and "role" in filtered.columns:
-        filtered = filtered[filtered["role"] == role_filter]
-    if hand_filter != "All" and "pitch_hand" in filtered.columns:
-        filtered = filtered[filtered["pitch_hand"] == hand_filter]
-    if search:
-        filtered = filtered[
-            filtered["pitcher_name"].str.contains(search, case=False, na=False)
-        ]
+.stSelectbox div[data-baseweb="select"] > div {{
+    background-color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding-left: 0 !important;
+}}
+.stSelectbox div[data-baseweb="select"] {{
+    font-size: 1.2rem !important;
+    font-weight: 800 !important;
+    color: #C8A96E !important;
+    cursor: pointer !important;
+}}
+.stSelectbox div[data-baseweb="select"] > div:hover {{
+    background-color: transparent !important;
+}}
+</style>
+"""
 
-    # Summary metrics
-    cols = st.columns(4)
-    with cols[0]:
-        st.markdown(metric_card("Pitchers Ranked", f"{len(filtered):,}"), unsafe_allow_html=True)
-    with cols[1]:
-        n_sp = (filtered["role"] == "SP").sum() if "role" in filtered.columns else 0
-        st.markdown(metric_card("Starters", f"{n_sp}"), unsafe_allow_html=True)
-    with cols[2]:
-        n_rp = (filtered["role"] == "RP").sum() if "role" in filtered.columns else 0
-        st.markdown(metric_card("Relievers", f"{n_rp}"), unsafe_allow_html=True)
-    with cols[3]:
-        avg_score = filtered["tdd_value_score"].mean() if len(filtered) > 0 else 0
-        avg_diamonds = score_to_diamonds(avg_score)
-        st.markdown(metric_card("Avg Rating", f"{avg_diamonds:.1f} / 5"), unsafe_allow_html=True)
 
-    # Compute diamond rating column
-    filtered = filtered.copy()
-    if "tdd_value_score" in filtered.columns:
-        filtered["_diamond_rating"] = filtered["tdd_value_score"].apply(score_to_diamonds)
+# ── Diamond rating display helpers ──────────────────────────────────────────
 
-    # Display table
-    display_map = {
-        "overall_rank": "#",
-        "role_rank": "Role #",
-        "pitcher_name": "Pitcher",
-        "role": "Role",
-        "age": "Age",
-        "pitch_hand": "Throws",
-        "_diamond_rating": "Rating",
-        "health_label": "Health",
-        "stuff_score": "Stuff",
-        "command_score": "Command",
-        "workload_score": "Workload",
-        "trajectory_score": "Trajectory",
-        "k_pct": "K%",
-        "bb_pct": "BB%",
-        "swstr_pct": "SwStr%",
-        "csw_pct": "CSW%",
-        "batters_faced": "BF",
-        "projected_k_rate": "Proj K%",
-        "projected_bb_rate": "Proj BB%",
-    }
+def _diamonds_html(rating: float) -> str:
+    """Build filled/empty diamond symbols for a 0-5 rating."""
+    parts = []
+    for i in range(5):
+        if i < int(rating) or (i == int(rating) and rating - int(rating) >= 0.5):
+            parts.append(f'<span style="color:{GOLD}">&#9670;</span>')
+        else:
+            parts.append(f'<span style="color:{SLATE}; opacity:0.35">&#9671;</span>')
+    return "".join(parts)
 
-    available = [c for c in display_map if c in filtered.columns]
-    display_df = filtered[available].copy()
-    sort_col = "overall_rank" if "overall_rank" in available else "_diamond_rating"
-    ascending = sort_col == "overall_rank"
-    display_df = display_df.sort_values(sort_col, ascending=ascending)
-    display_df.columns = [display_map[c] for c in available]
 
-    fmt: dict[str, str] = {}
-    for col, f in [
-        ("Rating", "{:.1f}"), ("Stuff", "{:.3f}"), ("Command", "{:.3f}"),
-        ("Workload", "{:.3f}"), ("Trajectory", "{:.3f}"),
-        ("K%", "{:.1%}"), ("BB%", "{:.1%}"), ("SwStr%", "{:.1%}"), ("CSW%", "{:.1%}"),
-        ("Proj K%", "{:.1%}"), ("Proj BB%", "{:.1%}"),
-        ("BF", "{:,.0f}"), ("#", "{:.0f}"), ("Role #", "{:.0f}"), ("Age", "{:.0f}"),
-    ]:
-        if col in display_df.columns:
-            fmt[col] = f
-
-    styler = display_df.style.format(fmt, na_rep="—")
-    if "Rating" in display_df.columns:
-        styler = styler.map(_score_color, subset=["Rating"])
-    if "Health" in display_df.columns:
-        styler = styler.map(_style_health, subset=["Health"])
-
-    st.dataframe(styler, width='stretch', hide_index=True, height=600)
-
-    st.caption(
-        "**Rating** = Diamond Rating (0-5) from weighted composite of "
-        "Stuff (50%), Command (20%), Workload (15%), Trajectory (15%). "
-        "**Health** = injury risk tier blended into Workload score. "
-        "**K%/BB%** are 2025 observed; **Proj** columns are 2026 Bayesian projections."
+def _rating_val_html(score: float) -> str:
+    """Format diamond rating as diamond symbols + numeric value for card rows."""
+    rating = score_to_diamonds(score)
+    color = GOLD if rating >= 4.0 else SAGE if rating >= 3.0 else SLATE
+    return (
+        f'<span class="lb-diamonds">{_diamonds_html(rating)}</span>'
+        f'<span class="lb-rating-num" style="color:{color}">{rating:.1f}</span>'
     )
 
 
-# ── Batter Rankings ─────────────────────────────────────────────────────────
+# ── AL / NL team mapping ──────────────────────────────────────────────────
 
-def _render_batter_rankings(df: pd.DataFrame) -> None:
-    """Render batter rankings table with filters."""
-    col_pos, col_bat, col_search = st.columns([1, 1, 2])
-    with col_pos:
-        positions = ["All"] + sorted(df["position"].dropna().unique().tolist()) if "position" in df.columns else ["All"]
-        pos_filter = st.selectbox("Position", positions, key="rank_h_pos")
-    with col_bat:
-        bats = ["All", "L", "R", "B"]
-        bat_filter = st.selectbox("Bats", bats, key="rank_h_bat")
-    with col_search:
-        search = st.text_input("Search batter", key="rank_h_search")
+_AL_TEAMS = {"BAL", "BOS", "NYY", "TB", "TOR",
+             "CLE", "CWS", "DET", "KC", "MIN",
+             "HOU", "LAA", "OAK", "SEA", "TEX"}
+_NL_TEAMS = {"ATL", "MIA", "NYM", "PHI", "WSH",
+             "CHC", "CIN", "MIL", "PIT", "STL",
+             "ARI", "COL", "LAD", "SD", "SF"}
 
-    filtered = df.copy()
-    if pos_filter != "All" and "position" in filtered.columns:
-        filtered = filtered[filtered["position"] == pos_filter]
-    if bat_filter != "All" and "batter_stand" in filtered.columns:
-        filtered = filtered[filtered["batter_stand"] == bat_filter]
-    if search:
-        filtered = filtered[
-            filtered["batter_name"].str.contains(search, case=False, na=False)
-        ]
 
-    # Summary metrics
-    cols = st.columns(4)
-    with cols[0]:
-        st.markdown(metric_card("Batters Ranked", f"{len(filtered):,}"), unsafe_allow_html=True)
-    with cols[1]:
-        n_pos = filtered["position"].nunique() if "position" in filtered.columns else 0
-        st.markdown(metric_card("Positions", f"{n_pos}"), unsafe_allow_html=True)
-    with cols[2]:
-        avg_score = filtered["tdd_value_score"].mean() if len(filtered) > 0 else 0
-        avg_diamonds = score_to_diamonds(avg_score)
-        st.markdown(metric_card("Avg Rating", f"{avg_diamonds:.1f} / 5"), unsafe_allow_html=True)
-    with cols[3]:
-        top_woba = filtered["woba"].median() if "woba" in filtered.columns and len(filtered) > 0 else 0
-        st.markdown(metric_card("Median wOBA", f"{top_woba:.3f}"), unsafe_allow_html=True)
+# ── Detail stat configs for overall cards ──────────────────────────────────
+# (label, column_name, format)
 
-    # Compute diamond rating column
-    filtered = filtered.copy()
-    if "tdd_value_score" in filtered.columns:
-        filtered["_diamond_rating"] = filtered["tdd_value_score"].apply(score_to_diamonds)
+BATTER_DETAIL_STATS: list[tuple[str, str, str]] = [
+    ("wRC+", "wrc_plus", "int"),
+    ("wOBA", "woba", ".000"),
+    ("xwOBA", "xwoba", ".000"),
+    ("Brl%", "barrel_pct", "pct"),
+    ("HH%", "hard_hit_pct", "pct"),
+    ("Off", "offense_score", "dec3"),
+    ("Fld", "fielding_combined", "dec3"),
+]
 
-    display_map = {
-        "overall_rank": "#",
-        "pos_rank": "Pos #",
-        "batter_name": "Batter",
-        "position": "Pos",
-        "age": "Age",
-        "batter_stand": "Bats",
-        "_diamond_rating": "Rating",
-        "health_label": "Health",
-        "offense_score": "Offense",
-        "fielding_combined": "Fielding",
-        "pt_score": "Play Time",
-        "trajectory_score": "Trajectory",
-        "woba": "wOBA",
-        "wrc_plus": "wRC+",
-        "xwoba": "xwOBA",
-        "barrel_pct": "Barrel%",
-        "hard_hit_pct": "HardHit%",
-        "pa": "PA",
-        "projected_k_rate": "Proj K%",
-        "projected_bb_rate": "Proj BB%",
-    }
+PITCHER_DETAIL_STATS: list[tuple[str, str, str]] = [
+    ("K%", "k_pct", "pct"),
+    ("BB%", "bb_pct", "pct"),
+    ("SwStr%", "swstr_pct", "pct"),
+    ("CSW%", "csw_pct", "pct"),
+    ("ERA", "observed_era", "0.00"),
+    ("FIP", "observed_fip", "0.00"),
+    ("Stuff", "stuff_score", "dec3"),
+]
 
-    available = [c for c in display_map if c in filtered.columns]
-    display_df = filtered[available].copy()
-    sort_col = "overall_rank" if "overall_rank" in available else "_diamond_rating"
-    ascending = sort_col == "overall_rank"
-    display_df = display_df.sort_values(sort_col, ascending=ascending)
-    display_df.columns = [display_map[c] for c in available]
 
-    fmt: dict[str, str] = {}
-    for col, f in [
-        ("Rating", "{:.1f}"), ("Offense", "{:.3f}"), ("Fielding", "{:.3f}"),
-        ("Play Time", "{:.3f}"), ("Trajectory", "{:.3f}"),
-        ("wOBA", "{:.3f}"), ("xwOBA", "{:.3f}"),
-        ("wRC+", "{:.0f}"), ("PA", "{:,.0f}"),
-        ("Barrel%", "{:.1%}"), ("HardHit%", "{:.1%}"),
-        ("Proj K%", "{:.1%}"), ("Proj BB%", "{:.1%}"),
-        ("#", "{:.0f}"), ("Pos #", "{:.0f}"), ("Age", "{:.0f}"),
-    ]:
-        if col in display_df.columns:
-            fmt[col] = f
+def _fmt_detail(val, fmt: str) -> str:
+    if pd.isna(val):
+        return "--"
+    if fmt == "int":
+        return str(int(round(val)))
+    if fmt == ".000":
+        s = f"{val:.3f}"
+        return s.lstrip("0") if abs(val) < 1.0 else s
+    if fmt == "0.00":
+        return f"{val:.2f}"
+    if fmt == "pct":
+        return f"{val:.1%}"
+    if fmt == "dec3":
+        return f"{val:.3f}"
+    return str(val)
 
-    styler = display_df.style.format(fmt, na_rep="—")
-    if "Rating" in display_df.columns:
-        styler = styler.map(_score_color, subset=["Rating"])
-    if "Health" in display_df.columns:
-        styler = styler.map(_style_health, subset=["Health"])
 
-    st.dataframe(styler, width='stretch', hide_index=True, height=600)
+# ── Generic ranking card renderer ──────────────────────────────────────────
 
-    st.caption(
-        "**Rating** = Diamond Rating (0-5) from weighted composite of "
-        "Offense (55%), Fielding (20%), Playing Time (15%), Trajectory (10%). "
-        "**Health** = injury risk tier blended into Playing Time score. "
-        "**wOBA/xwOBA/Barrel%** are 2025 observed; **Proj** columns are 2026 Bayesian projections."
+def _render_ranking_card(
+    df: pd.DataFrame,
+    title: str,
+    rank_col: str,
+    name_col: str,
+    id_col: str,
+    score_col: str,
+    teams_lookup: dict[int, str],
+    *,
+    info_col: str | None = None,
+    max_height: int = 0,
+    n_headshots: int = 5,
+    detail_stats: list[tuple[str, str, str]] | None = None,
+) -> None:
+    """Render a scrollable ranking leaderboard card.
+
+    detail_stats: list of (label, column, format) to show as a sub-row.
+    """
+    if df.empty:
+        return
+
+    work = df.sort_values(rank_col)
+    has_detail = detail_stats is not None
+
+    rows_html = []
+    for i, (_, row) in enumerate(work.iterrows(), 1):
+        name = row[name_col]
+        pid = int(row[id_col])
+        rank = int(row[rank_col])
+        rank_class = "lb-rank-top lb-rank" if i <= 5 else "lb-rank"
+
+        hs = ""
+        if i <= n_headshots:
+            hs = f'<span class="lb-headshot">{headshot_html(pid, size=50)}</span>'
+
+        team = teams_lookup.get(pid, "")
+        team_html = f'<span class="lb-team">{team}</span>' if team else ""
+
+        info_html = ""
+        if info_col and info_col in row.index and pd.notna(row[info_col]):
+            info_html = f'<span class="lb-info">{row[info_col]}</span>'
+
+        val_html = _rating_val_html(row[score_col])
+
+        main_row = (
+            f'<div class="lb-row">'
+            f'<span class="{rank_class}">{rank}.</span>'
+            f'{hs}'
+            f'<span class="lb-name">{name}</span>'
+            f'{info_html}'
+            f'{team_html}'
+            f'<span class="lb-val">{val_html}</span>'
+            f'</div>'
+        )
+
+        if has_detail:
+            stat_items = []
+            for label, col_name, fmt in detail_stats:
+                if col_name in row.index:
+                    val = _fmt_detail(row[col_name], fmt)
+                    stat_items.append(
+                        f'<span>'
+                        f'<span class="lb-stat-lbl">{label}</span>'
+                        f'<span class="lb-stat-val">{val}</span>'
+                        f'</span>'
+                    )
+            stats_row = f'<div class="lb-stats-row">{"".join(stat_items)}</div>'
+            rows_html.append(f'<div class="lb-entry">{main_row}{stats_row}</div>')
+        else:
+            rows_html.append(main_row)
+
+    count_html = f'<span class="lb-subtitle">{len(work)}</span>'
+    scroll_style = f' style="max-height:{max_height}px;"' if max_height > 0 else ""
+
+    html = (
+        f'<div class="lb-card">'
+        f'<div class="lb-title-row">'
+        f'<span class="lb-title">{title}{count_html}</span>'
+        f'</div>'
+        f'<div class="lb-scroll"{scroll_style}>'
+        + "".join(rows_html)
+        + '</div></div>'
     )
+    st.markdown(html, unsafe_allow_html=True)
+
+
+# ── Batter Rankings (leaderboard cards) ────────────────────────────────────
+
+def _render_batter_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> None:
+    """Render batter rankings as leaderboard cards with positional breakdowns."""
+    search = st.text_input("Search", placeholder="Search player...", key="rank_h_search")
+    if search:
+        df = df[df["batter_name"].str.contains(search, case=False, na=False)]
+
+    if df.empty:
+        st.info("No matching batters found.")
+        return
+
+    # Overall rankings (with detail stats)
+    _render_ranking_card(
+        df, "Overall", "overall_rank", "batter_name", "batter_id",
+        "tdd_value_score", teams_lookup,
+        info_col="position", max_height=500, n_headshots=10,
+        detail_stats=BATTER_DETAIL_STATS,
+    )
+
+    # AL / NL split
+    st.markdown('<div class="rank-section">By League</div>', unsafe_allow_html=True)
+    al_ids = {pid for pid, abbr in teams_lookup.items() if abbr in _AL_TEAMS}
+    nl_ids = {pid for pid, abbr in teams_lookup.items() if abbr in _NL_TEAMS}
+
+    lg_cols = st.columns(2)
+    with lg_cols[0]:
+        al_df = df[df["batter_id"].isin(al_ids)]
+        _render_ranking_card(
+            al_df, "American League", "overall_rank", "batter_name", "batter_id",
+            "tdd_value_score", teams_lookup,
+            info_col="position", max_height=450, n_headshots=5,
+        )
+    with lg_cols[1]:
+        nl_df = df[df["batter_id"].isin(nl_ids)]
+        _render_ranking_card(
+            nl_df, "National League", "overall_rank", "batter_name", "batter_id",
+            "tdd_value_score", teams_lookup,
+            info_col="position", max_height=450, n_headshots=5,
+        )
+
+    # Positional rankings
+    st.markdown('<div class="rank-section">By Position</div>', unsafe_allow_html=True)
+
+    positions = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"]
+    for i in range(0, len(positions), 3):
+        batch = positions[i:i + 3]
+        cols = st.columns(3)
+        for col_st, pos in zip(cols, batch):
+            with col_st:
+                pos_df = df[df["position"] == pos].copy()
+                _render_ranking_card(
+                    pos_df, pos, "pos_rank", "batter_name", "batter_id",
+                    "tdd_value_score", teams_lookup,
+                    max_height=400, n_headshots=3,
+                )
+
+
+# ── Pitcher Rankings (leaderboard cards) ───────────────────────────────────
+
+def _render_pitcher_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> None:
+    """Render pitcher rankings as leaderboard cards with role breakdowns."""
+    search = st.text_input("Search", placeholder="Search player...", key="rank_p_search")
+    if search:
+        df = df[df["pitcher_name"].str.contains(search, case=False, na=False)]
+
+    if df.empty:
+        st.info("No matching pitchers found.")
+        return
+
+    # Overall rankings (with detail stats)
+    _render_ranking_card(
+        df, "Overall", "overall_rank", "pitcher_name", "pitcher_id",
+        "tdd_value_score", teams_lookup,
+        info_col="role", max_height=500, n_headshots=10,
+        detail_stats=PITCHER_DETAIL_STATS,
+    )
+
+    # AL / NL split
+    st.markdown('<div class="rank-section">By League</div>', unsafe_allow_html=True)
+    al_ids = {pid for pid, abbr in teams_lookup.items() if abbr in _AL_TEAMS}
+    nl_ids = {pid for pid, abbr in teams_lookup.items() if abbr in _NL_TEAMS}
+
+    lg_cols = st.columns(2)
+    with lg_cols[0]:
+        al_df = df[df["pitcher_id"].isin(al_ids)]
+        _render_ranking_card(
+            al_df, "American League", "overall_rank", "pitcher_name", "pitcher_id",
+            "tdd_value_score", teams_lookup,
+            info_col="role", max_height=450, n_headshots=5,
+        )
+    with lg_cols[1]:
+        nl_df = df[df["pitcher_id"].isin(nl_ids)]
+        _render_ranking_card(
+            nl_df, "National League", "overall_rank", "pitcher_name", "pitcher_id",
+            "tdd_value_score", teams_lookup,
+            info_col="role", max_height=450, n_headshots=5,
+        )
+
+    # Role rankings
+    st.markdown('<div class="rank-section">By Role</div>', unsafe_allow_html=True)
+
+    cols = st.columns(2)
+    for col_st, role in zip(cols, ["SP", "RP"]):
+        with col_st:
+            role_df = df[df["role"] == role].copy()
+            _render_ranking_card(
+                role_df, role, "role_rank", "pitcher_name", "pitcher_id",
+                "tdd_value_score", teams_lookup,
+                max_height=500, n_headshots=5,
+            )
 
 
 # ── Prospect Rankings ────────────────────────────────────────────────────────
@@ -496,32 +726,26 @@ def _render_pitching_prospect_rankings(df: pd.DataFrame) -> None:
 # ── Prospect Readiness ─────────────────────────────────────────────────────
 
 def _style_readiness_tier(val: str) -> str:
-    """Color-code readiness tier."""
     color = _READINESS_TIER_COLORS.get(val, CREAM)
     return f"color: {color}; font-weight: bold"
 
 
 def _render_prospect_readiness(df: pd.DataFrame) -> None:
-    """Render prospect readiness scores with filters (merged from prospects page)."""
-    # Filters
+    """Render prospect readiness scores with filters."""
     col_tier, col_pos, col_level, col_search = st.columns([1, 1, 1, 2])
 
     with col_tier:
         tier_options = ["All", "Elite", "Strong", "Developing", "Fringe"]
         tier_filter = st.selectbox("Readiness Tier", tier_options, key="rank_rd_tier")
-
     with col_pos:
         pos_groups = ["All"] + sorted(df["pos_group"].dropna().unique().tolist()) if "pos_group" in df.columns else ["All"]
         pos_filter = st.selectbox("Position", pos_groups, key="rank_rd_pos")
-
     with col_level:
         levels = [lv for lv in _LEVEL_ORDER if lv in df["max_level"].unique()] if "max_level" in df.columns else []
         level_filter = st.selectbox("Highest Level", ["All"] + levels, key="rank_rd_level")
-
     with col_search:
         search = st.text_input("Search player", key="rank_rd_search")
 
-    # Apply filters
     filtered = df.copy()
     if tier_filter != "All":
         filtered = filtered[filtered["readiness_tier"] == tier_filter]
@@ -534,31 +758,20 @@ def _render_prospect_readiness(df: pd.DataFrame) -> None:
             filtered["name"].str.contains(search, case=False, na=False)
         ]
 
-    # Summary metrics
     cols = st.columns(4)
     with cols[0]:
         st.markdown(metric_card("Prospects", f"{len(filtered):,}"), unsafe_allow_html=True)
     with cols[1]:
         n_elite = (filtered["readiness_tier"] == "Elite").sum() if "readiness_tier" in filtered.columns else 0
         n_strong = (filtered["readiness_tier"] == "Strong").sum() if "readiness_tier" in filtered.columns else 0
-        st.markdown(
-            metric_card("Elite + Strong", f"{n_elite + n_strong}"),
-            unsafe_allow_html=True,
-        )
+        st.markdown(metric_card("Elite + Strong", f"{n_elite + n_strong}"), unsafe_allow_html=True)
     with cols[2]:
         n_ranked = filtered["is_ranked"].sum() if "is_ranked" in filtered.columns else 0
-        st.markdown(
-            metric_card("FG Ranked", f"{int(n_ranked)}"),
-            unsafe_allow_html=True,
-        )
+        st.markdown(metric_card("FG Ranked", f"{int(n_ranked)}"), unsafe_allow_html=True)
     with cols[3]:
         avg_score = filtered["readiness_score"].mean() if len(filtered) > 0 else 0
-        st.markdown(
-            metric_card("Avg Readiness", f"{avg_score:.1%}"),
-            unsafe_allow_html=True,
-        )
+        st.markdown(metric_card("Avg Readiness", f"{avg_score:.1%}"), unsafe_allow_html=True)
 
-    # Main table
     display_map = {
         "readiness_score": "Score",
         "readiness_tier": "Tier",
@@ -602,7 +815,6 @@ def _render_prospect_readiness(df: pd.DataFrame) -> None:
         "**Blocked By** = prospects at same position ahead in the org pipeline."
     )
 
-    # Translation factors reference
     with st.expander("Translation Factor Reference"):
         ptype = st.radio(
             "Type", ["Batters", "Pitchers"],
@@ -643,69 +855,63 @@ def _render_prospect_readiness(df: pd.DataFrame) -> None:
 # ── Main page ────────────────────────────────────────────────────────────────
 
 def page_player_rankings() -> None:
-    """Render the Player Rankings page with category selector."""
+    """Render the Player Rankings page."""
+    st.markdown(_CSS, unsafe_allow_html=True)
+
+    # Title
     st.markdown(
-        '<div class="brand-header">'
-        '<div><div class="brand-title">Player Rankings</div>'
-        '<div class="brand-subtitle">'
-        'TDD composite rankings blending Bayesian projections, '
-        'observed performance, and scouting factors</div>'
-        '</div></div>',
+        '<div class="rank-header">'
+        '<div class="rank-title">PLAYER RANKINGS</div>'
+        '</div>',
         unsafe_allow_html=True,
     )
 
     category = st.selectbox(
         "Category",
-        ["Pitchers", "Batters", "Hitting Prospects", "Pitching Prospects", "Prospect Readiness"],
+        ["Batters", "Pitchers", "Hitting Prospects", "Pitching Prospects", "Prospect Readiness"],
         key="rankings_category",
+        label_visibility="collapsed",
     )
 
-    if category == "Pitchers":
-        df = load_rankings("pitchers")
-        if df.empty:
-            st.warning(
-                "No pitcher rankings data found. "
-                "Run `precompute_dashboard_data.py` to generate pitchers_rankings.parquet."
-            )
-            return
-        _render_pitcher_rankings(df)
+    # Team lookup for MLB sections
+    teams_df = load_player_teams()
+    teams_lookup: dict[int, str] = {}
+    if not teams_df.empty:
+        teams_lookup = dict(zip(
+            teams_df["player_id"].astype(int), teams_df["team_abbr"]
+        ))
 
-    elif category == "Batters":
+    if category == "Batters":
         df = load_rankings("hitters")
         if df.empty:
-            st.warning(
-                "No batter rankings data found. "
-                "Run `precompute_dashboard_data.py` to generate hitters_rankings.parquet."
-            )
+            st.warning("No batter rankings data found. Run precompute first.")
             return
-        _render_batter_rankings(df)
+        _render_batter_rankings(df, teams_lookup)
+
+    elif category == "Pitchers":
+        df = load_rankings("pitchers")
+        if df.empty:
+            st.warning("No pitcher rankings data found. Run precompute first.")
+            return
+        _render_pitcher_rankings(df, teams_lookup)
 
     elif category == "Hitting Prospects":
         df = load_rankings("prospect")
         if df.empty:
-            st.warning(
-                "No prospect rankings data found. "
-                "Run `precompute_dashboard_data.py` to generate prospect_rankings.parquet."
-            )
+            st.warning("No prospect rankings data found. Run precompute first.")
             return
         _render_prospect_rankings(df)
 
     elif category == "Pitching Prospects":
         df = load_rankings("pitching_prospect")
         if df.empty:
-            st.warning(
-                "No pitching prospect rankings data found. "
-                "Run `precompute_dashboard_data.py` to generate pitching_prospect_rankings.parquet."
-            )
+            st.warning("No pitching prospect rankings data found. Run precompute first.")
             return
         _render_pitching_prospect_rankings(df)
 
     else:  # Prospect Readiness
         df = load_prospect_readiness()
         if df.empty:
-            st.warning(
-                "No prospect readiness data found. "
-                "Run `precompute_dashboard_data.py` to generate prospect_readiness.parquet."
-            )
+            st.warning("No prospect readiness data found. Run precompute first.")
             return
         _render_prospect_readiness(df)
