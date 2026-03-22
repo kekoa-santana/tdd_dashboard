@@ -95,7 +95,11 @@ _CSS = f"""
     border: 1px solid {DARK_BORDER};
     border-radius: 10px;
     padding: 0.8rem 1rem;
-    margin-bottom: 0.6rem;
+    margin-bottom: 1.5rem;
+    max-width: 380px;
+}}
+.lb-card-wide {{
+    max-width: none;
 }}
 .lb-title-row {{
     display: flex;
@@ -155,6 +159,14 @@ _CSS = f"""
     font-weight: 600;
     flex: 1;
 }}
+.lb-name a {{
+    color: inherit;
+    text-decoration: none;
+}}
+.lb-name a:hover {{
+    color: {GOLD};
+    text-decoration: underline;
+}}
 .lb-info {{
     color: {SLATE};
     font-size: 0.72rem;
@@ -185,18 +197,8 @@ _CSS = f"""
     min-width: 1.5rem;
     text-align: right;
 }}
-.lb-entry {{
-    border-bottom: 1px solid {DARK_BORDER}15;
-    padding-bottom: 0.15rem;
-    margin-bottom: 0.1rem;
-}}
-.lb-entry:last-child {{ border-bottom: none; }}
-.lb-entry .lb-row {{ border-bottom: none; padding-bottom: 0; }}
-.lb-stats-row {{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.15rem 0.7rem;
-    padding: 0 0 0.2rem 2.2rem;
+.lb-stat-cell {{
+    margin-left: 0.6rem;
 }}
 .lb-stat-lbl {{
     color: {SLATE};
@@ -317,10 +319,14 @@ def _render_ranking_card(
     max_height: int = 0,
     n_headshots: int = 5,
     detail_stats: list[tuple[str, str, str]] | None = None,
+    wide: bool = False,
+    link_type: str = "",
 ) -> None:
     """Render a scrollable ranking leaderboard card.
 
     detail_stats: list of (label, column, format) to show as a sub-row.
+    wide: if True, card spans full width (no max-width).
+    link_type: "hitter" or "pitcher" to make names link to player profile.
     """
     if df.empty:
         return
@@ -346,40 +352,46 @@ def _render_ranking_card(
         if info_col and info_col in row.index and pd.notna(row[info_col]):
             info_html = f'<span class="lb-info">{row[info_col]}</span>'
 
+        # Clickable name linking to player profile
+        if link_type:
+            profile_url = f"?page=player_profile&player_id={pid}&player_type={link_type}"
+            name_html = f'<a href="{profile_url}">{name}</a>'
+        else:
+            name_html = name
+
         val_html = _rating_val_html(row[score_col])
 
-        main_row = (
-            f'<div class="lb-row">'
-            f'<span class="{rank_class}">{rank}.</span>'
-            f'{hs}'
-            f'<span class="lb-name">{name}</span>'
-            f'{info_html}'
-            f'{team_html}'
-            f'<span class="lb-val">{val_html}</span>'
-            f'</div>'
-        )
-
+        # Inline stats (if detail_stats provided)
+        stat_inline = ""
         if has_detail:
-            stat_items = []
             for label, col_name, fmt in detail_stats:
                 if col_name in row.index:
                     val = _fmt_detail(row[col_name], fmt)
-                    stat_items.append(
-                        f'<span>'
+                    stat_inline += (
+                        f'<span class="lb-stat-cell">'
                         f'<span class="lb-stat-lbl">{label}</span>'
                         f'<span class="lb-stat-val">{val}</span>'
                         f'</span>'
                     )
-            stats_row = f'<div class="lb-stats-row">{"".join(stat_items)}</div>'
-            rows_html.append(f'<div class="lb-entry">{main_row}{stats_row}</div>')
-        else:
-            rows_html.append(main_row)
+
+        rows_html.append(
+            f'<div class="lb-row">'
+            f'<span class="{rank_class}">{rank}.</span>'
+            f'{hs}'
+            f'<span class="lb-name">{name_html}</span>'
+            f'{info_html}'
+            f'{team_html}'
+            f'<span class="lb-val">{val_html}</span>'
+            f'{stat_inline}'
+            f'</div>'
+        )
 
     count_html = f'<span class="lb-subtitle">{len(work)}</span>'
     scroll_style = f' style="max-height:{max_height}px;"' if max_height > 0 else ""
+    card_class = "lb-card lb-card-wide" if wide else "lb-card"
 
     html = (
-        f'<div class="lb-card">'
+        f'<div class="{card_class}">'
         f'<div class="lb-title-row">'
         f'<span class="lb-title">{title}{count_html}</span>'
         f'</div>'
@@ -402,12 +414,12 @@ def _render_batter_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> N
         st.info("No matching batters found.")
         return
 
-    # Overall rankings (with detail stats)
+    # Overall rankings (with detail stats, full width)
     _render_ranking_card(
         df, "Overall", "overall_rank", "batter_name", "batter_id",
         "tdd_value_score", teams_lookup,
         info_col="position", max_height=500, n_headshots=10,
-        detail_stats=BATTER_DETAIL_STATS,
+        detail_stats=BATTER_DETAIL_STATS, wide=True, link_type="hitter",
     )
 
     # AL / NL split
@@ -422,6 +434,7 @@ def _render_batter_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> N
             al_df, "American League", "overall_rank", "batter_name", "batter_id",
             "tdd_value_score", teams_lookup,
             info_col="position", max_height=450, n_headshots=5,
+            link_type="hitter",
         )
     with lg_cols[1]:
         nl_df = df[df["batter_id"].isin(nl_ids)]
@@ -429,6 +442,7 @@ def _render_batter_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> N
             nl_df, "National League", "overall_rank", "batter_name", "batter_id",
             "tdd_value_score", teams_lookup,
             info_col="position", max_height=450, n_headshots=5,
+            link_type="hitter",
         )
 
     # Positional rankings
@@ -444,7 +458,7 @@ def _render_batter_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> N
                 _render_ranking_card(
                     pos_df, pos, "pos_rank", "batter_name", "batter_id",
                     "tdd_value_score", teams_lookup,
-                    max_height=400, n_headshots=3,
+                    max_height=400, n_headshots=3, link_type="hitter",
                 )
 
 
@@ -460,12 +474,12 @@ def _render_pitcher_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> 
         st.info("No matching pitchers found.")
         return
 
-    # Overall rankings (with detail stats)
+    # Overall rankings (with detail stats, full width)
     _render_ranking_card(
         df, "Overall", "overall_rank", "pitcher_name", "pitcher_id",
         "tdd_value_score", teams_lookup,
         info_col="role", max_height=500, n_headshots=10,
-        detail_stats=PITCHER_DETAIL_STATS,
+        detail_stats=PITCHER_DETAIL_STATS, wide=True, link_type="pitcher",
     )
 
     # AL / NL split
@@ -480,6 +494,7 @@ def _render_pitcher_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> 
             al_df, "American League", "overall_rank", "pitcher_name", "pitcher_id",
             "tdd_value_score", teams_lookup,
             info_col="role", max_height=450, n_headshots=5,
+            link_type="pitcher",
         )
     with lg_cols[1]:
         nl_df = df[df["pitcher_id"].isin(nl_ids)]
@@ -487,6 +502,7 @@ def _render_pitcher_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> 
             nl_df, "National League", "overall_rank", "pitcher_name", "pitcher_id",
             "tdd_value_score", teams_lookup,
             info_col="role", max_height=450, n_headshots=5,
+            link_type="pitcher",
         )
 
     # Role rankings
@@ -499,7 +515,7 @@ def _render_pitcher_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> 
             _render_ranking_card(
                 role_df, role, "role_rank", "pitcher_name", "pitcher_id",
                 "tdd_value_score", teams_lookup,
-                max_height=500, n_headshots=5,
+                max_height=500, n_headshots=5, link_type="pitcher",
             )
 
 
