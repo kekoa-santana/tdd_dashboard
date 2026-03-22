@@ -1,594 +1,624 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-03-21T14:00:14.045653+00:00",
+  "generated_at": "2026-03-22T14:00:13.340868+00:00",
   "producer_repo": "tdd-dashboard",
   "producer_commit": null,
   "artifacts": [
     {
       "artifact_name": "archetype_matchup_matrix.parquet",
-      "generated_at": "2026-03-21T14:00:13.580470+00:00",
+      "generated_at": "2026-03-22T14:00:12.454294+00:00",
       "row_count": 48,
       "column_hash": "fad046b68a1a00610dcfa5043aee5354568626db820f3645204a1e0691ff474b"
     },
     {
       "artifact_name": "backtest_batter_sim_backtest_predictions.parquet",
-      "generated_at": "2026-03-21T14:00:13.582355+00:00",
+      "generated_at": "2026-03-22T14:00:12.461504+00:00",
       "row_count": 3000,
       "column_hash": "1ba7033bfa546499e453d7bbb3636b8c689482c14430a253583980de6751c72e"
     },
     {
       "artifact_name": "backtest_batter_sim_backtest_summary.parquet",
-      "generated_at": "2026-03-21T14:00:13.585177+00:00",
+      "generated_at": "2026-03-22T14:00:12.468709+00:00",
       "row_count": 1,
       "column_hash": "d624316904410b7b1860a3ad563d97859f30859359745b8c2b475ea468329e66"
     },
     {
       "artifact_name": "backtest_game_k_backtest.parquet",
-      "generated_at": "2026-03-21T14:00:13.586223+00:00",
+      "generated_at": "2026-03-22T14:00:12.475313+00:00",
       "row_count": 3,
       "column_hash": "bd71a7db977931fae4c43c386982941f840286b1d65bc065e9fa91e972fd997c"
     },
     {
       "artifact_name": "backtest_game_sim_backtest_predictions.parquet",
-      "generated_at": "2026-03-21T14:00:13.588299+00:00",
+      "generated_at": "2026-03-22T14:00:12.482250+00:00",
       "row_count": 11517,
       "column_hash": "6354710d109b19d05c65f5f6837d0ba59d36c20e5f1bb6ea6e20873698493cb7"
     },
     {
       "artifact_name": "backtest_game_sim_backtest_summary.parquet",
-      "generated_at": "2026-03-21T14:00:13.592044+00:00",
+      "generated_at": "2026-03-22T14:00:12.492205+00:00",
       "row_count": 3,
       "column_hash": "f877d052056769e67f050c8317a3352e67be56ffa1c10e55fd58161c3e2417c3"
     },
     {
       "artifact_name": "backtest_game_stat_backtest.parquet",
-      "generated_at": "2026-03-21T14:00:13.594043+00:00",
+      "generated_at": "2026-03-22T14:00:12.500170+00:00",
       "row_count": 9,
       "column_hash": "331ed6af36065b98828c2a299dfe3b89a87f3625ddc9876da4893d3defe8806f"
     },
     {
       "artifact_name": "backtest_hitter_counting_backtest.parquet",
-      "generated_at": "2026-03-21T14:00:13.595138+00:00",
+      "generated_at": "2026-03-22T14:00:12.505815+00:00",
       "row_count": 16,
       "column_hash": "ced910011c784d2195de70e231eb684187669a10530541cc733af5777bf2585b"
     },
     {
       "artifact_name": "backtest_hitter_k_backtest.parquet",
-      "generated_at": "2026-03-21T14:00:13.596699+00:00",
+      "generated_at": "2026-03-22T14:00:12.511467+00:00",
       "row_count": 3,
       "column_hash": "3fadbd05622ae1c613809f87f90c88b52e6e60a266aacbcd4f7ca79e7d22e7fa"
     },
     {
       "artifact_name": "backtest_hitter_multi_stat_backtest.parquet",
-      "generated_at": "2026-03-21T14:00:13.598315+00:00",
+      "generated_at": "2026-03-22T14:00:12.516570+00:00",
       "row_count": 15,
       "column_hash": "56eedb65f6d77946645c2d43a4c4f65db7a357ee9360776cd670e5fe0c55a119"
     },
     {
       "artifact_name": "backtest_hitter_sim_backtest_summary.parquet",
-      "generated_at": "2026-03-21T14:00:13.599391+00:00",
+      "generated_at": "2026-03-22T14:00:12.523169+00:00",
       "row_count": 12,
       "column_hash": "31ce60f58d06e978c6f1760670e571b8b9a310591f940d8209d4b9f65b49273a"
     },
     {
       "artifact_name": "backtest_pitcher_counting_backtest.parquet",
-      "generated_at": "2026-03-21T14:00:13.601494+00:00",
+      "generated_at": "2026-03-22T14:00:12.529249+00:00",
       "row_count": 12,
       "column_hash": "ced910011c784d2195de70e231eb684187669a10530541cc733af5777bf2585b"
     },
     {
       "artifact_name": "backtest_pitcher_k_backtest.parquet",
-      "generated_at": "2026-03-21T14:00:13.602492+00:00",
+      "generated_at": "2026-03-22T14:00:12.534406+00:00",
       "row_count": 3,
       "column_hash": "86f9f23eb74e3163ac922497e838e7544b1e7d67ebadb236ff60856850bc14bf"
     },
     {
       "artifact_name": "backtest_pitcher_multi_stat_backtest.parquet",
-      "generated_at": "2026-03-21T14:00:13.604492+00:00",
+      "generated_at": "2026-03-22T14:00:12.539666+00:00",
       "row_count": 9,
       "column_hash": "56eedb65f6d77946645c2d43a4c4f65db7a357ee9360776cd670e5fe0c55a119"
     },
     {
       "artifact_name": "backtest_season_sim_backtest_summary.parquet",
-      "generated_at": "2026-03-21T14:00:13.605713+00:00",
+      "generated_at": "2026-03-22T14:00:12.546230+00:00",
       "row_count": 32,
       "column_hash": "31ce60f58d06e978c6f1760670e571b8b9a310591f940d8209d4b9f65b49273a"
     },
     {
       "artifact_name": "baselines_arch.parquet",
-      "generated_at": "2026-03-21T14:00:13.608112+00:00",
+      "generated_at": "2026-03-22T14:00:12.551603+00:00",
       "row_count": 16,
       "column_hash": "7a88dbbe0ca6b196d5cd8b102aad577160a353dfbaf239bfc969f0fc2549d960"
     },
     {
       "artifact_name": "batter_pitch_count_features.parquet",
-      "generated_at": "2026-03-21T14:00:13.609878+00:00",
+      "generated_at": "2026-03-22T14:00:12.558143+00:00",
       "row_count": 6283,
       "column_hash": "691d9ebc0309e972d3e680a983d51bd7441f20a04cbc378c97986c1c0a19c6ab"
     },
     {
       "artifact_name": "bf_priors.parquet",
-      "generated_at": "2026-03-21T14:00:13.610877+00:00",
+      "generated_at": "2026-03-22T14:00:12.563267+00:00",
       "row_count": 2888,
       "column_hash": "60c6893c78682280f22548cedeb91d3c68c75117a6d241f078004a80b7b92054"
     },
     {
       "artifact_name": "game_batter_ks.parquet",
-      "generated_at": "2026-03-21T14:00:13.612409+00:00",
+      "generated_at": "2026-03-22T14:00:12.564291+00:00",
       "row_count": 116388,
       "column_hash": "41eccbe349dce566eb92704b672d503fe5270cc893f214435b80505a12f22578"
     },
     {
       "artifact_name": "game_info.parquet",
-      "generated_at": "2026-03-21T14:00:13.614950+00:00",
+      "generated_at": "2026-03-22T14:00:12.572439+00:00",
       "row_count": 2430,
       "column_hash": "0947549f9ec500c42bf42b6c2d7faad54b4f16ad15412377e84e37c5b1118e6e"
     },
     {
       "artifact_name": "game_lineups.parquet",
-      "generated_at": "2026-03-21T14:00:13.616159+00:00",
+      "generated_at": "2026-03-22T14:00:12.577825+00:00",
       "row_count": 43740,
       "column_hash": "414adab7c169cfb850a0fea55c958b728d1ec7889323519d62e678cda5f7be0a"
     },
     {
       "artifact_name": "health_scores.parquet",
-      "generated_at": "2026-03-21T14:00:13.620184+00:00",
+      "generated_at": "2026-03-22T14:00:12.585495+00:00",
       "row_count": 7774,
       "column_hash": "bc8ac05991bd0ed5421fad791f71a4c2897a49f73b0fb7a1318c4c2deab15a74"
     },
     {
       "artifact_name": "hitter_aggressiveness.parquet",
-      "generated_at": "2026-03-21T14:00:13.622035+00:00",
+      "generated_at": "2026-03-22T14:00:12.587571+00:00",
       "row_count": 673,
       "column_hash": "b98e70325b15d7661882d7db923a953c1e58325fb463e9988e43436b6f0b0381"
     },
     {
       "artifact_name": "hitter_aggressiveness_all.parquet",
-      "generated_at": "2026-03-21T14:00:13.623590+00:00",
+      "generated_at": "2026-03-22T14:00:12.594184+00:00",
       "row_count": 6283,
       "column_hash": "b98e70325b15d7661882d7db923a953c1e58325fb463e9988e43436b6f0b0381"
     },
     {
       "artifact_name": "hitter_archetype_metadata.parquet",
-      "generated_at": "2026-03-21T14:00:13.625589+00:00",
+      "generated_at": "2026-03-22T14:00:12.600331+00:00",
       "row_count": 6,
       "column_hash": "c2dd9a3ac45a9856a611f258db638c04cb6431dab312cebcbab8eb9e6fd5c861"
     },
     {
       "artifact_name": "hitter_archetypes.parquet",
-      "generated_at": "2026-03-21T14:00:13.626650+00:00",
+      "generated_at": "2026-03-22T14:00:12.607469+00:00",
       "row_count": 348,
       "column_hash": "988b5df59ad84ef5c2802cfa93f1715180b4785a5fbb1552bcd54a6e4b88ac57"
     },
     {
       "artifact_name": "hitter_bb_samples.npz",
-      "generated_at": "2026-03-21T14:00:13.628876+00:00",
+      "generated_at": "2026-03-22T14:00:12.613053+00:00",
       "row_count": null,
       "column_hash": null
     },
     {
       "artifact_name": "hitter_breakout_candidates.parquet",
-      "generated_at": "2026-03-21T14:00:13.628876+00:00",
+      "generated_at": "2026-03-22T14:00:12.613053+00:00",
       "row_count": 349,
       "column_hash": "d39ca36fc550bee5e0ddfd5b17d8518df656c262501f605ef1101bfaac39fe1e"
     },
     {
       "artifact_name": "hitter_counting.parquet",
-      "generated_at": "2026-03-21T14:00:13.631388+00:00",
+      "generated_at": "2026-03-22T14:00:12.620151+00:00",
       "row_count": 348,
       "column_hash": "92ffe4ba65d382eae95ea96553703c30aa291bdf848e2776e50efcc2ab5b207d"
     },
     {
       "artifact_name": "hitter_counting_sim.parquet",
-      "generated_at": "2026-03-21T14:00:13.634050+00:00",
+      "generated_at": "2026-03-22T14:00:12.626289+00:00",
       "row_count": 537,
-      "column_hash": "105c4cae7e1f29977ff056c3a55a53c04acb4d3bb779c33c11f4d31eddb446de"
+      "column_hash": "a98f5d673c73a92bb37bb676f6eca37152b6a7950f67d5328ee6563b3d593ece"
     },
     {
       "artifact_name": "hitter_full_stats.parquet",
-      "generated_at": "2026-03-21T14:00:13.643915+00:00",
+      "generated_at": "2026-03-22T14:00:12.635475+00:00",
       "row_count": 6283,
       "column_hash": "ad8ee51a8eac2e59f7b7795b77b848a1eb6061ea1c400186528df82a47ab1bc0"
     },
     {
       "artifact_name": "hitter_hr_samples.npz",
-      "generated_at": "2026-03-21T14:00:13.649081+00:00",
+      "generated_at": "2026-03-22T14:00:12.641996+00:00",
       "row_count": null,
       "column_hash": null
     },
     {
       "artifact_name": "hitter_k_samples.npz",
-      "generated_at": "2026-03-21T14:00:13.649081+00:00",
+      "generated_at": "2026-03-22T14:00:12.641996+00:00",
       "row_count": null,
       "column_hash": null
     },
     {
       "artifact_name": "hitter_position_eligibility.parquet",
-      "generated_at": "2026-03-21T14:00:13.649081+00:00",
+      "generated_at": "2026-03-22T14:00:12.641996+00:00",
       "row_count": 1417,
       "column_hash": "b07ae9ef3adb1ae2cf87d954629799c84fdecbf005ac1e4e6a4528ace05dcf36"
     },
     {
       "artifact_name": "hitter_projections.parquet",
-      "generated_at": "2026-03-21T14:00:13.650708+00:00",
+      "generated_at": "2026-03-22T14:00:12.648125+00:00",
       "row_count": 348,
       "column_hash": "73be0f8520780946e1e57042e7a9e483d521faf259ccd45d86ee93eba8ee19b8"
     },
     {
       "artifact_name": "hitter_str.parquet",
-      "generated_at": "2026-03-21T14:00:13.654711+00:00",
+      "generated_at": "2026-03-22T14:00:12.652488+00:00",
       "row_count": 7505,
       "column_hash": "05c6e768b8bfb84a22f84d88a0aec1d3cf2ea742f4434a8f0391655ac10bfd9d"
     },
     {
       "artifact_name": "hitter_str_all.parquet",
-      "generated_at": "2026-03-21T14:00:13.656529+00:00",
+      "generated_at": "2026-03-22T14:00:12.659820+00:00",
       "row_count": 58814,
       "column_hash": "05c6e768b8bfb84a22f84d88a0aec1d3cf2ea742f4434a8f0391655ac10bfd9d"
     },
     {
       "artifact_name": "hitter_str_career.parquet",
-      "generated_at": "2026-03-21T14:00:13.664622+00:00",
+      "generated_at": "2026-03-22T14:00:12.672359+00:00",
       "row_count": 19605,
       "column_hash": "3f2dbf2f4d0a2d87391f808625319dfa5e78d9c8657041ca4501371db2999fba"
     },
     {
       "artifact_name": "hitter_traditional.parquet",
-      "generated_at": "2026-03-21T14:00:13.667681+00:00",
+      "generated_at": "2026-03-22T14:00:12.683190+00:00",
       "row_count": 673,
       "column_hash": "381da799736d15b999c81cd421743099bdd3cb5a682903c8b48c3dcb068330ca"
     },
     {
       "artifact_name": "hitter_traditional_all.parquet",
-      "generated_at": "2026-03-21T14:00:13.670931+00:00",
+      "generated_at": "2026-03-22T14:00:12.691865+00:00",
       "row_count": 6283,
       "column_hash": "381da799736d15b999c81cd421743099bdd3cb5a682903c8b48c3dcb068330ca"
     },
     {
       "artifact_name": "hitter_venues.parquet",
-      "generated_at": "2026-03-21T14:00:13.673634+00:00",
+      "generated_at": "2026-03-22T14:00:12.694964+00:00",
       "row_count": 765,
       "column_hash": "1912a5f0ebaa1b6d8a2d757432b465d6aac49dba06100d3eb5a562fac3db5756"
     },
     {
       "artifact_name": "hitter_vuln.parquet",
-      "generated_at": "2026-03-21T14:00:13.674154+00:00",
+      "generated_at": "2026-03-22T14:00:12.701732+00:00",
       "row_count": 7505,
       "column_hash": "ad039fc792b562a95e15861f970158cc92ae86da317db4c830f8de1ba5d61267"
     },
     {
       "artifact_name": "hitter_vuln_all.parquet",
-      "generated_at": "2026-03-21T14:00:13.676696+00:00",
+      "generated_at": "2026-03-22T14:00:12.710992+00:00",
       "row_count": 58814,
       "column_hash": "ad039fc792b562a95e15861f970158cc92ae86da317db4c830f8de1ba5d61267"
     },
     {
       "artifact_name": "hitter_vuln_arch.parquet",
-      "generated_at": "2026-03-21T14:00:13.684339+00:00",
+      "generated_at": "2026-03-22T14:00:12.726273+00:00",
       "row_count": 3807,
       "column_hash": "a4e27881fa27071a966ad99d40c516cb07c135f7b53998d28b45613734445da3"
     },
     {
       "artifact_name": "hitter_vuln_arch_career.parquet",
-      "generated_at": "2026-03-21T14:00:13.686332+00:00",
+      "generated_at": "2026-03-22T14:00:12.735118+00:00",
       "row_count": 11753,
       "column_hash": "ef111f95283c78f370d12c2e566892d0c522070dd014091d95e40786d56d9351"
     },
     {
       "artifact_name": "hitter_vuln_career.parquet",
-      "generated_at": "2026-03-21T14:00:13.688155+00:00",
+      "generated_at": "2026-03-22T14:00:12.742832+00:00",
       "row_count": 19605,
       "column_hash": "748f0f20ad8701ba775d66ad20c18d1db187e305db5ecd847f3bda65debd61a6"
     },
     {
       "artifact_name": "hitter_zone_grid.parquet",
-      "generated_at": "2026-03-21T14:00:13.691684+00:00",
+      "generated_at": "2026-03-22T14:00:12.747043+00:00",
       "row_count": 102723,
       "column_hash": "845f436d9ddcda4014d51516ce945c5c1e847c686d99acb3ef05a8d18c639e73"
     },
     {
       "artifact_name": "hitter_zone_grid_all.parquet",
-      "generated_at": "2026-03-21T14:00:13.703452+00:00",
+      "generated_at": "2026-03-22T14:00:12.765736+00:00",
       "row_count": 751374,
       "column_hash": "05d94a8368d1a3aafb21aad2009c5eeb635b69a2610bc1c409348d42ac2b4ffb"
     },
     {
       "artifact_name": "hitter_zone_grid_career.parquet",
-      "generated_at": "2026-03-21T14:00:13.791954+00:00",
+      "generated_at": "2026-03-22T14:00:12.857452+00:00",
       "row_count": 259595,
       "column_hash": "845f436d9ddcda4014d51516ce945c5c1e847c686d99acb3ef05a8d18c639e73"
     },
     {
       "artifact_name": "hitters_rankings.parquet",
-      "generated_at": "2026-03-21T14:00:13.828957+00:00",
+      "generated_at": "2026-03-22T14:00:12.899640+00:00",
       "row_count": 348,
       "column_hash": "4cd50f1fc96211323adace3f050deb6ff08d18a21157849dae16659851529128"
     },
     {
       "artifact_name": "lineup_priors.parquet",
-      "generated_at": "2026-03-21T14:00:13.835103+00:00",
+      "generated_at": "2026-03-22T14:00:12.905302+00:00",
       "row_count": 1601,
       "column_hash": "39549623e4e71d7c319fbd480f2b56225959c735db61120539fba0751cb9e429"
     },
     {
       "artifact_name": "milb_batter_factors.parquet",
-      "generated_at": "2026-03-21T14:00:13.836182+00:00",
-      "row_count": 120,
+      "generated_at": "2026-03-22T14:00:12.913593+00:00",
+      "row_count": 170,
       "column_hash": "4da5e1f0a734d7ae8ee51b8b8ec500c346698882dc342a646789e777f4e97ca4"
     },
     {
       "artifact_name": "milb_pitcher_factors.parquet",
-      "generated_at": "2026-03-21T14:00:13.838031+00:00",
-      "row_count": 96,
+      "generated_at": "2026-03-22T14:00:12.920216+00:00",
+      "row_count": 108,
       "column_hash": "4da5e1f0a734d7ae8ee51b8b8ec500c346698882dc342a646789e777f4e97ca4"
     },
     {
       "artifact_name": "milb_translated_batters.parquet",
-      "generated_at": "2026-03-21T14:00:13.839030+00:00",
+      "generated_at": "2026-03-22T14:00:12.927383+00:00",
       "row_count": 26650,
-      "column_hash": "7a6646ffc4e19c975e13bbe66c5451139317e01b57bce625616622e591c2feaa"
+      "column_hash": "5082d24db1e858b05e619cb6714a6551d25662c2445f3eba87f699254c9eb018"
     },
     {
       "artifact_name": "milb_translated_pitchers.parquet",
-      "generated_at": "2026-03-21T14:00:13.846811+00:00",
+      "generated_at": "2026-03-22T14:00:12.941310+00:00",
       "row_count": 30888,
-      "column_hash": "caac812859a3562c7b684649c1c0a0af1985fd6fe15293c8ed6db1222988d761"
+      "column_hash": "8af13e45512780c07dc0328cbd07e13c662bd378be82e1f63e5710fa2d8ab7fb"
     },
     {
       "artifact_name": "park_factors.parquet",
-      "generated_at": "2026-03-21T14:00:13.854960+00:00",
+      "generated_at": "2026-03-22T14:00:12.956172+00:00",
       "row_count": 60,
       "column_hash": "d2204de022e185ed8112b6d4e42d9d6a3cb1e2833b0cbaee9e292c0607f372f5"
     },
     {
       "artifact_name": "pitcher_archetype_metadata.parquet",
-      "generated_at": "2026-03-21T14:00:13.856010+00:00",
+      "generated_at": "2026-03-22T14:00:12.963981+00:00",
       "row_count": 6,
       "column_hash": "dbb909bebf4c76a0383aa180f9e732025da1f7ab8a212788775e27523da4e936"
     },
     {
       "artifact_name": "pitcher_archetypes.parquet",
-      "generated_at": "2026-03-21T14:00:13.857523+00:00",
+      "generated_at": "2026-03-22T14:00:12.972148+00:00",
       "row_count": 444,
       "column_hash": "b2d464807b728e6b7db6a16878d4093db66049aa829e5c0efbcd88ee8ece1592"
     },
     {
       "artifact_name": "pitcher_arsenal.parquet",
-      "generated_at": "2026-03-21T14:00:13.859432+00:00",
+      "generated_at": "2026-03-22T14:00:12.978958+00:00",
       "row_count": 3795,
       "column_hash": "0998f07e7aad7238aea44cfe433e4614531694f0e5f9f79b06ccce69a4640afb"
     },
     {
       "artifact_name": "pitcher_arsenal_all.parquet",
-      "generated_at": "2026-03-21T14:00:13.861337+00:00",
+      "generated_at": "2026-03-22T14:00:12.981553+00:00",
       "row_count": 27967,
       "column_hash": "0998f07e7aad7238aea44cfe433e4614531694f0e5f9f79b06ccce69a4640afb"
     },
     {
       "artifact_name": "pitcher_bb_samples.npz",
-      "generated_at": "2026-03-21T14:00:13.866539+00:00",
+      "generated_at": "2026-03-22T14:00:12.992467+00:00",
       "row_count": null,
       "column_hash": null
     },
     {
       "artifact_name": "pitcher_breakout_candidates.parquet",
-      "generated_at": "2026-03-21T14:00:13.866539+00:00",
+      "generated_at": "2026-03-22T14:00:12.992467+00:00",
       "row_count": 362,
       "column_hash": "02c673356e4c4f37be9e29f11a4943e230723693bd9e21a7dcc066607fd6f13b"
     },
     {
       "artifact_name": "pitcher_cluster_metadata.parquet",
-      "generated_at": "2026-03-21T14:00:13.869378+00:00",
+      "generated_at": "2026-03-22T14:00:13.002041+00:00",
       "row_count": 8,
       "column_hash": "f70916d6a9ecfcea09ee5b92361f87c30428c017bcdbe36b4104eb505a600e8a"
     },
     {
       "artifact_name": "pitcher_counting.parquet",
-      "generated_at": "2026-03-21T14:00:13.870941+00:00",
+      "generated_at": "2026-03-22T14:00:13.004089+00:00",
       "row_count": 353,
       "column_hash": "b7f311812a0f056009c7d4abb7f7de91c7c5d1385fb556dc7a33e76704dec145"
     },
     {
       "artifact_name": "pitcher_counting_sim.parquet",
-      "generated_at": "2026-03-21T14:00:13.874572+00:00",
+      "generated_at": "2026-03-22T14:00:13.013380+00:00",
       "row_count": 644,
-      "column_hash": "215e928583dcdc14ae49b108217a874e425c90e01a5945fb9f8ac9102b9919a8"
+      "column_hash": "dcee9f137d4f905e00ac6f24f9e806081f96b63341c59999b8e5265db87caff7"
     },
     {
       "artifact_name": "pitcher_efficiency.parquet",
-      "generated_at": "2026-03-21T14:00:13.881572+00:00",
+      "generated_at": "2026-03-22T14:00:13.022029+00:00",
       "row_count": 873,
       "column_hash": "bddd44e19b35f7930fd49818e8bb4df51b4a1b99f0bfa27259ad0bf18bde6ac7"
     },
     {
       "artifact_name": "pitcher_efficiency_all.parquet",
-      "generated_at": "2026-03-21T14:00:13.883063+00:00",
+      "generated_at": "2026-03-22T14:00:13.029744+00:00",
       "row_count": 6736,
       "column_hash": "bddd44e19b35f7930fd49818e8bb4df51b4a1b99f0bfa27259ad0bf18bde6ac7"
     },
     {
       "artifact_name": "pitcher_exit_tendencies.parquet",
-      "generated_at": "2026-03-21T14:00:13.885753+00:00",
+      "generated_at": "2026-03-22T14:00:13.037722+00:00",
       "row_count": 2896,
       "column_hash": "3f61292619651cfe48b0bb06b2893e0055b68fe21301eef7f2bed86e5e1167af"
     },
     {
       "artifact_name": "pitcher_full_stats.parquet",
-      "generated_at": "2026-03-21T14:00:13.887290+00:00",
+      "generated_at": "2026-03-22T14:00:13.044445+00:00",
       "row_count": 6736,
       "column_hash": "0957acd2ab2e261092b0761288252aa73ee430301f0aa76d329653dedc207101"
     },
     {
       "artifact_name": "pitcher_game_logs.parquet",
-      "generated_at": "2026-03-21T14:00:13.892502+00:00",
+      "generated_at": "2026-03-22T14:00:13.050146+00:00",
       "row_count": 20870,
       "column_hash": "61b4053ab6bdbfa939b62f56870d9728b31153e3d0f09a387f0cbe730c3ee164"
     },
     {
       "artifact_name": "pitcher_hr_samples.npz",
-      "generated_at": "2026-03-21T14:00:13.896284+00:00",
+      "generated_at": "2026-03-22T14:00:13.060444+00:00",
       "row_count": null,
       "column_hash": null
     },
     {
       "artifact_name": "pitcher_k_samples.npz",
-      "generated_at": "2026-03-21T14:00:13.896284+00:00",
+      "generated_at": "2026-03-22T14:00:13.060444+00:00",
       "row_count": null,
       "column_hash": null
     },
     {
       "artifact_name": "pitcher_location_grid.parquet",
-      "generated_at": "2026-03-21T14:00:13.896284+00:00",
+      "generated_at": "2026-03-22T14:00:13.060444+00:00",
       "row_count": 78312,
       "column_hash": "d1c0cc968ecd6066366f12ff84d7364a856baa2d5863d41a24f5410843afe0bf"
     },
     {
       "artifact_name": "pitcher_location_grid_all.parquet",
-      "generated_at": "2026-03-21T14:00:13.905679+00:00",
+      "generated_at": "2026-03-22T14:00:13.075909+00:00",
       "row_count": 538910,
       "column_hash": "089ebf8e268f768f629e37bf1dc8fff504f00bacc393771921cf2afc665baadb"
     },
     {
       "artifact_name": "pitcher_offerings.parquet",
-      "generated_at": "2026-03-21T14:00:13.961262+00:00",
+      "generated_at": "2026-03-22T14:00:13.137783+00:00",
       "row_count": 3785,
       "column_hash": "3ba7a40e9dc67ccf3d705ea996cfe1e370f5fa3ce842c732658b4e759f135aea"
     },
     {
       "artifact_name": "pitcher_pitch_count_features.parquet",
-      "generated_at": "2026-03-21T14:00:13.968614+00:00",
+      "generated_at": "2026-03-22T14:00:13.153023+00:00",
       "row_count": 6736,
       "column_hash": "22ba140ad9c382c4ecea9254c3be9f38bedbaace6a6f54003382dd694cacf10e"
     },
     {
       "artifact_name": "pitcher_projections.parquet",
-      "generated_at": "2026-03-21T14:00:13.970158+00:00",
+      "generated_at": "2026-03-22T14:00:13.160489+00:00",
       "row_count": 353,
       "column_hash": "674674209a3ad9eb6b041a5609f5cdc7b4f35e4275023b4db2f64332d9b32909"
     },
     {
       "artifact_name": "pitcher_roles.parquet",
-      "generated_at": "2026-03-21T14:00:13.973251+00:00",
+      "generated_at": "2026-03-22T14:00:13.164078+00:00",
       "row_count": 397,
       "column_hash": "265776949cde71d8618f0a4b30e3a14e8f002a23d2d7575cafc960d66a9455a4"
     },
     {
       "artifact_name": "pitcher_traditional.parquet",
-      "generated_at": "2026-03-21T14:00:13.974280+00:00",
+      "generated_at": "2026-03-22T14:00:13.165106+00:00",
       "row_count": 873,
       "column_hash": "3904becd7c6a9d13f9d044cb89d95e612612acae2def06312f2dbd8cdf55a9fd"
     },
     {
       "artifact_name": "pitcher_traditional_all.parquet",
-      "generated_at": "2026-03-21T14:00:13.977375+00:00",
+      "generated_at": "2026-03-22T14:00:13.173826+00:00",
       "row_count": 6736,
       "column_hash": "3904becd7c6a9d13f9d044cb89d95e612612acae2def06312f2dbd8cdf55a9fd"
     },
     {
       "artifact_name": "pitchers_rankings.parquet",
-      "generated_at": "2026-03-21T14:00:13.980565+00:00",
+      "generated_at": "2026-03-22T14:00:13.177658+00:00",
       "row_count": 353,
       "column_hash": "6853436e50293546e21f48fc7bfbe8794e379eab016fe1bbda365565207657cb"
     },
     {
       "artifact_name": "pitching_prospect_rankings.parquet",
-      "generated_at": "2026-03-21T14:00:13.984114+00:00",
+      "generated_at": "2026-03-22T14:00:13.181748+00:00",
       "row_count": 2774,
       "column_hash": "57700c6a1b1e8824af1fdaf9dc651b7c3bd26785801c59484c3dad257a7d21f4"
     },
     {
       "artifact_name": "player_teams.parquet",
-      "generated_at": "2026-03-21T14:00:13.988552+00:00",
+      "generated_at": "2026-03-22T14:00:13.186053+00:00",
       "row_count": 1470,
       "column_hash": "dcce13b2e607a6ed9179ab129fa793c9865b676c54e8a91762f5aedbf82559f0"
     },
     {
       "artifact_name": "preseason_injuries.parquet",
-      "generated_at": "2026-03-21T14:00:13.995908+00:00",
+      "generated_at": "2026-03-22T14:00:13.194343+00:00",
       "row_count": 123,
       "column_hash": "49c70a657380a306bb4b8591feeff05118d3e2eda78efcbf4c5603fa6d283a6a"
     },
     {
       "artifact_name": "probable_starters.parquet",
-      "generated_at": "2026-03-21T14:00:13.997453+00:00",
-      "row_count": 268,
-      "column_hash": "70a17e4cc239f8910ae36c9689475c3d997934e0ec90fd933e8780a2edbbf346"
+      "generated_at": "2026-03-22T14:00:13.196035+00:00",
+      "row_count": 270,
+      "column_hash": "85cab77bf0ee5335a9a4b768fd2eece90b2776a3b2fe8fd15ceaa4ed894dabfc"
     },
     {
       "artifact_name": "prospect_comps_batters.parquet",
-      "generated_at": "2026-03-21T14:00:13.998488+00:00",
+      "generated_at": "2026-03-22T14:00:13.202457+00:00",
       "row_count": 9885,
       "column_hash": "04d7dc16606b7a26b7f85c58a3377975d9a32112122c822653aab6f571255e88"
     },
     {
       "artifact_name": "prospect_comps_pitchers.parquet",
-      "generated_at": "2026-03-21T14:00:14.001706+00:00",
+      "generated_at": "2026-03-22T14:00:13.213778+00:00",
       "row_count": 13870,
       "column_hash": "7c85cdbc9e5bc52c4e8eedd955dc14065c56962ab24a4493905124453e86d5ef"
     },
     {
       "artifact_name": "prospect_rankings.parquet",
-      "generated_at": "2026-03-21T14:00:14.006341+00:00",
+      "generated_at": "2026-03-22T14:00:13.225170+00:00",
       "row_count": 1977,
-      "column_hash": "52623f0122be8fc0bf3fdda16a80c5068bf04f6afa3b6414294d8298e89e620f"
+      "column_hash": "2c73ae6f4f88d2d028cc1a2f1007ab2ae2e7f14ba55cfe6808666b103307d8f6"
     },
     {
       "artifact_name": "prospect_readiness.parquet",
-      "generated_at": "2026-03-21T14:00:14.010221+00:00",
+      "generated_at": "2026-03-22T14:00:13.228277+00:00",
       "row_count": 1977,
       "column_hash": "82264ae1379649a36939bb8268c713c94c1a4155d5186f4793e4c89a3f883ee5"
     },
     {
       "artifact_name": "reliever_rankings.parquet",
-      "generated_at": "2026-03-21T14:00:14.012264+00:00",
+      "generated_at": "2026-03-22T14:00:13.238218+00:00",
       "row_count": 386,
       "column_hash": "51bd7706fce14226edffdb17ff85c18c27601bb0d127bbe651a8f4aa1f10dc72"
     },
     {
       "artifact_name": "roster.parquet",
-      "generated_at": "2026-03-21T14:00:14.015303+00:00",
+      "generated_at": "2026-03-22T14:00:13.246780+00:00",
       "row_count": 1849,
       "column_hash": "8aeed5bd41f584052e5f7063d8189c9f1ca037e7f2ff995dec18ec4c2b9dc657"
     },
     {
       "artifact_name": "team_bullpen_rates.parquet",
-      "generated_at": "2026-03-21T14:00:14.023067+00:00",
+      "generated_at": "2026-03-22T14:00:13.254155+00:00",
       "row_count": 254,
       "column_hash": "e4c6fb5b194a42d4059df8f0c5364b076541ee053634acb99f779fc256e27260"
     },
     {
+      "artifact_name": "team_elo.parquet",
+      "generated_at": "2026-03-22T14:00:13.261461+00:00",
+      "row_count": 30,
+      "column_hash": "3741b808ecc76cf1ece692efc9b07467893739f142aa0c38ad6651a1728c4648"
+    },
+    {
+      "artifact_name": "team_elo_history.parquet",
+      "generated_at": "2026-03-22T14:00:13.267521+00:00",
+      "row_count": 14840,
+      "column_hash": "3ad5f4ff078e76034e4954a5139979bee0f4aaa473d58263904e074993634f71"
+    },
+    {
+      "artifact_name": "team_elo_preseason.parquet",
+      "generated_at": "2026-03-22T14:00:13.277485+00:00",
+      "row_count": 30,
+      "column_hash": "3741b808ecc76cf1ece692efc9b07467893739f142aa0c38ad6651a1728c4648"
+    },
+    {
+      "artifact_name": "team_profiles.parquet",
+      "generated_at": "2026-03-22T14:00:13.285344+00:00",
+      "row_count": 30,
+      "column_hash": "110af1de387ebb963169ea2e14d1eae829e9b5d47ce7981871c0b8e8dc764ba8"
+    },
+    {
+      "artifact_name": "team_rankings.parquet",
+      "generated_at": "2026-03-22T14:00:13.293649+00:00",
+      "row_count": 30,
+      "column_hash": "4c1e80308713cfab5e64a38c13548660c5db959dde06ebf6747bb73b5f91d9d5"
+    },
+    {
       "artifact_name": "todays_games.parquet",
-      "generated_at": "2026-03-21T14:00:14.023583+00:00",
-      "row_count": 15,
+      "generated_at": "2026-03-22T14:00:13.300907+00:00",
+      "row_count": 14,
       "column_hash": "c0525fc1e91d25f9e45234eaef52ff40a97c0f0ae542f501d9a6f1dcc25859f0"
     },
     {
       "artifact_name": "todays_lineups.parquet",
-      "generated_at": "2026-03-21T14:00:14.030612+00:00",
-      "row_count": 90,
+      "generated_at": "2026-03-22T14:00:13.307553+00:00",
+      "row_count": 81,
       "column_hash": "82baa22c3db0c49277af8c0e1a308931195d7776ab5af7fb7fcd21bce59232e6"
     },
     {
       "artifact_name": "todays_sims.parquet",
-      "generated_at": "2026-03-21T14:00:14.035615+00:00",
-      "row_count": 22,
+      "generated_at": "2026-03-22T14:00:13.313121+00:00",
+      "row_count": 25,
       "column_hash": "70c0e05dfa7470b065b4952db5bbc3447e12069021a41b1c5099fa2fbaaf881f"
     },
     {
       "artifact_name": "tto_profiles.parquet",
-      "generated_at": "2026-03-21T14:00:14.040830+00:00",
+      "generated_at": "2026-03-22T14:00:13.320181+00:00",
       "row_count": 4335,
       "column_hash": "26b9d7ea4ec4b05ad31779d21569ac7469022c15f3c52bb2d1089c348a1a29fa"
     },
     {
       "artifact_name": "umpire_tendencies.parquet",
-      "generated_at": "2026-03-21T14:00:14.041831+00:00",
+      "generated_at": "2026-03-22T14:00:13.326884+00:00",
       "row_count": 102,
       "column_hash": "9f2afe910c723f9d0114f66d16c8e125ecfd915aaf53e80d41abd1e0b6464b0d"
     },
     {
       "artifact_name": "weather_effects.parquet",
-      "generated_at": "2026-03-21T14:00:14.044654+00:00",
+      "generated_at": "2026-03-22T14:00:13.334175+00:00",
       "row_count": 15,
       "column_hash": "81b86a50201ac748b927c8a85ddc945c666cdc06924b30d3da48b18af3c59d81"
     }
