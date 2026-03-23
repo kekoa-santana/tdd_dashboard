@@ -5,9 +5,10 @@ REM  Run this ONCE as Administrator to set up automated updates.
 REM
 REM  Creates two tasks:
 REM    1. "TDD Morning Update" — 7:00 AM PST (10 AM ET) daily
-REM       Full projections. Runs ASAP if PC was off at 7 AM.
+REM       Full pipeline: ETL (yesterday's games) + projections + bookkeeping.
+REM       Runs ASAP if PC was off at 7 AM. 1-hour timeout.
 REM    2. "TDD Hourly Update"  — every hour 8 AM–4 PM PST
-REM       Schedule/lineup/sims refresh only.
+REM       Schedule/lineup/sims refresh only (no ETL, no projections).
 REM       Also runs ASAP on wake if missed.
 REM
 REM  To remove: run  remove_scheduled_tasks.bat
@@ -25,7 +26,7 @@ REM ── Generate XML for Morning Update ──
 echo ^<?xml version="1.0" encoding="UTF-16"?^>
 echo ^<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"^>
 echo   ^<RegistrationInfo^>
-echo     ^<Description^>TDD Dashboard — full projection update (daily at 7 AM PST^)^</Description^>
+echo     ^<Description^>TDD Dashboard — full pipeline: ETL + projections + bookkeeping (daily at 7 AM PST^)^</Description^>
 echo   ^</RegistrationInfo^>
 echo   ^<Triggers^>
 echo     ^<CalendarTrigger^>
@@ -45,7 +46,7 @@ echo     ^<StartWhenAvailable^>true^</StartWhenAvailable^>
 echo     ^<RunOnlyIfNetworkAvailable^>true^</RunOnlyIfNetworkAvailable^>
 echo     ^<AllowStartOnDemand^>true^</AllowStartOnDemand^>
 echo     ^<Enabled^>true^</Enabled^>
-echo     ^<ExecutionTimeLimit^>PT30M^</ExecutionTimeLimit^>
+echo     ^<ExecutionTimeLimit^>PT1H^</ExecutionTimeLimit^>
 echo   ^</Settings^>
 echo   ^<Actions Context="Author"^>
 echo     ^<Exec^>
@@ -58,7 +59,7 @@ echo ^</Task^>
 schtasks /create /tn "TDD Morning Update" /xml "%TASK_DIR%\morning_update.xml" /f
 
 if %ERRORLEVEL% EQU 0 (
-    echo [OK] Created "TDD Morning Update" - 7:00 AM PST daily, catches up on wake
+    echo [OK] Created "TDD Morning Update" - 7:00 AM PST daily, 1hr timeout, catches up on wake
 ) else (
     echo [FAIL] Could not create morning task. Run as Administrator.
 )

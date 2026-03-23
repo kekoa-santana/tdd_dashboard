@@ -474,3 +474,89 @@ def create_hitter_vuln_fig(
     add_watermark(fig)
     fig.tight_layout()
     return fig
+
+
+# Brand-adjacent palette for archetype slices (supports up to 8 archetypes)
+_ARCHETYPE_COLORS = [
+    "#C8A96E",  # gold
+    "#D4562A",  # ember
+    "#6BA38E",  # sage
+    "#7B8FA6",  # slate
+    "#E8D5B0",  # light gold
+    "#A67B5B",  # brown
+    "#8B6FA6",  # purple
+    "#5BA3A3",  # teal
+]
+
+
+def create_archetype_donut_fig(
+    arch_counts: dict[str, int],
+    title: str = "",
+) -> Figure:
+    """Lineup archetype composition as a donut chart.
+
+    Parameters
+    ----------
+    arch_counts : dict[str, int]
+        Mapping of archetype name to count (e.g. {"Patient Power": 2, ...}).
+    title : str, optional
+        Unused (caller adds its own header); kept for API symmetry.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    if not arch_counts:
+        fig = Figure(figsize=(4, 4))
+        fig.patch.set_facecolor(DARK)
+        return fig
+
+    # Sort descending by count for consistent visual ordering
+    sorted_items = sorted(arch_counts.items(), key=lambda x: -x[1])
+    names = [name for name, _ in sorted_items]
+    counts = [count for _, count in sorted_items]
+    total = sum(counts)
+    colors = _ARCHETYPE_COLORS[: len(names)]
+
+    fig = Figure(figsize=(4, 4))
+    ax = fig.subplots()
+    fig.patch.set_facecolor(DARK)
+    ax.set_facecolor(DARK)
+
+    wedges, _ = ax.pie(
+        counts,
+        colors=colors,
+        startangle=90,
+        wedgeprops=dict(width=0.38, edgecolor=DARK, linewidth=1.5),
+    )
+
+    # Annotate each wedge outside the donut
+    for wedge, label, count, color in zip(wedges, names, counts, colors):
+        ang = (wedge.theta2 + wedge.theta1) / 2
+        x = np.cos(np.deg2rad(ang))
+        y = np.sin(np.deg2rad(ang))
+        ha = "left" if x >= 0 else "right"
+        ax.annotate(
+            f"{count}x {label}",
+            xy=(0.7 * x, 0.7 * y),
+            xytext=(1.15 * x, 1.15 * y),
+            fontsize=8,
+            color=color,
+            fontweight="600",
+            ha=ha,
+            va="center",
+            arrowprops=dict(arrowstyle="-", color=SLATE, lw=0.6),
+        )
+
+    # Center text: total count
+    ax.text(
+        0, 0.06, str(total),
+        ha="center", va="center", fontsize=16, fontweight="bold", color=GOLD,
+    )
+    ax.text(
+        0, -0.12, "hitters",
+        ha="center", va="center", fontsize=8, color=SLATE,
+    )
+
+    fig.tight_layout()
+    return fig
