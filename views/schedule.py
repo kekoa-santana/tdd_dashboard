@@ -31,7 +31,7 @@ from services.data_loader import (
 from utils.helpers import get_team_lookup
 from components.metric_cards import metric_card
 from components.charts import create_game_stat_fig
-from components.diamond_rating import diamond_rating_html_composite
+from components.diamond_rating import diamond_rating_html
 from components.team_logo import team_logo_html
 from components.headshot import headshot_html
 
@@ -146,7 +146,6 @@ def _build_projection_lookup() -> dict:
             "pitcher_name": row.get("pitcher_name", ""),
             "projected_bb_rate": row.get("projected_bb_rate"),
             "projected_hr_per_bf": row.get("projected_hr_per_bf"),
-            "composite_score": row.get("composite_score"),
         }
     return lookup
 
@@ -176,14 +175,27 @@ def _render_schedule_cards(
         for _, _r in _p_arch.iterrows():
             _p_arch_lookup[int(_r["pitcher_id"])] = _r["archetype_name"]
 
-    # Hitter projection lookup: batter_id → {k_rate, bb_rate, hr, composite_score, ...}
+    # Diamond rating lookup from rankings (tdd_value_score → accurate 0-5 diamonds)
+    from services.data_loader import load_rankings
+    _h_rankings = load_rankings("hitters")
+    _p_rankings = load_rankings("pitchers")
+    _diamond_lookup: dict[int, float] = {}
+    if not _h_rankings.empty and "tdd_value_score" in _h_rankings.columns:
+        for _, _r in _h_rankings.iterrows():
+            _diamond_lookup[int(_r["batter_id"])] = _r["tdd_value_score"]
+    if not _p_rankings.empty and "tdd_value_score" in _p_rankings.columns:
+        for _, _r in _p_rankings.iterrows():
+            _diamond_lookup[int(_r["pitcher_id"])] = _r["tdd_value_score"]
+
+    # Hitter projection lookup: batter_id → {k_rate, bb_rate, hr, ...}
     _h_stat_lookup: dict[int, dict] = {}
     if not _h_proj.empty:
         for _, _r in _h_proj.iterrows():
-            _h_stat_lookup[int(_r["batter_id"])] = {
+            bid = int(_r["batter_id"])
+            _h_stat_lookup[bid] = {
                 "k_rate": _r.get("projected_k_rate"),
                 "bb_rate": _r.get("projected_bb_rate"),
-                "composite_score": _r.get("composite_score"),
+                "tdd_value_score": _diamond_lookup.get(bid),
             }
     if not _h_count.empty and "batter_id" in _h_count.columns:
         for _, _r in _h_count.iterrows():
@@ -199,7 +211,8 @@ def _render_schedule_cards(
             else:
                 _h_stat_lookup[bid] = {
                     "k_rate": None, "bb_rate": None,
-                    "composite_score": None, **counting,
+                    "tdd_value_score": _diamond_lookup.get(bid),
+                    **counting,
                 }
 
     # Position lookup from roster
@@ -234,6 +247,9 @@ def _render_schedule_cards(
 
     # Always build projection lookup (used by cards + drilldown)
     proj_lookup = _build_projection_lookup()
+    # Inject accurate tdd_value_score from rankings into pitcher proj lookup
+    for pid, pinfo in proj_lookup.items():
+        pinfo["tdd_value_score"] = _diamond_lookup.get(pid)
 
     if schedule.empty:
         game_date = meta.get("game_date", "")
@@ -366,9 +382,10 @@ def _render_schedule_cards(
             f'{" · ".join(ctx_parts)}</div>'
         ) if ctx_parts else ""
 
+        # Game card with logos (standalone, no bottom radius so expander attaches)
         card_html = (
             f'<div style="background:{DARK_CARD}; border:1px solid {DARK_BORDER}; '
-            f'border-radius:10px; padding:1rem 1.2rem; margin-bottom:0.5rem;">'
+            f'border-radius:10px 10px 0 0; padding:1rem 1.2rem; margin-bottom:0;">'
             # Top row: logos + teams + time
             f'<div style="display:flex; align-items:center; gap:0.6rem;">'
             f'{away_logo}'
@@ -390,7 +407,7 @@ def _render_schedule_cards(
         )
         st.markdown(card_html, unsafe_allow_html=True)
 
-        with st.expander(f"Game Details — {away_abbr} @ {home_abbr}"):
+        with st.expander("View Matchups & Projections"):
             _render_game_drilldown(
                 game, lineups, _h_arch_lookup, _p_arch_lookup, _h_stat_lookup,
                 _k_samples_dict, _bf_priors, _arsenal_df, _vuln_df,
@@ -648,10 +665,10 @@ def _render_hitter_projections_tab(
             stats = h_stat_lookup.get(bid, {}) if bid else {}
             arch = h_arch_lookup.get(bid, "") if bid else ""
 
-            composite = stats.get("composite_score")
+            composite = stats.get("tdd_value_score")
             diamond_html = ""
             if pd.notna(composite):
-                diamond_html = diamond_rating_html_composite(composite, size="sm")
+                diamond_html = diamond_rating_html(composite, size="sm")
 
             arch_html = (
                 f'<span style="color:{SLATE}; font-size:0.68rem; '
@@ -767,8 +784,8 @@ def _render_hitter_projections_tab(
 
         # Pitcher at bottom (MLB style)
         if pid:
-            p_composite = p_proj.get("composite_score")
-            p_diamond = diamond_rating_html_composite(p_composite, size="sm") if pd.notna(p_composite) else ""
+            p_composite = p_proj.get("tdd_value_score")
+            p_diamond = diamond_rating_html(p_composite, size="sm") if pd.notna(p_composite) else ""
             p_arch_html = (
                 f'<span style="color:{SLATE}; font-size:0.68rem; '
                 f'background:rgba(123,143,166,0.12); padding:1px 5px; '
@@ -885,10 +902,10 @@ def _render_matchup_tab(
 
             # Diamond rating
             stats = h_stat_lookup.get(bid, {}) if bid else {}
-            composite = stats.get("composite_score")
+            composite = stats.get("tdd_value_score")
             diamond_html = ""
             if pd.notna(composite):
-                diamond_html = diamond_rating_html_composite(composite, size="sm")
+                diamond_html = diamond_rating_html(composite, size="sm")
 
             # Matchup advantage
             advantage_html = ""
@@ -947,8 +964,8 @@ def _render_matchup_tab(
 
         # Pitcher at bottom (MLB style)
         if pid:
-            p_composite = p_proj.get("composite_score")
-            p_diamond = diamond_rating_html_composite(p_composite, size="sm") if pd.notna(p_composite) else ""
+            p_composite = p_proj.get("tdd_value_score")
+            p_diamond = diamond_rating_html(p_composite, size="sm") if pd.notna(p_composite) else ""
             p_arch_html = (
                 f'<span style="color:{SLATE}; font-size:0.68rem; '
                 f'background:rgba(123,143,166,0.12); padding:1px 5px; '
