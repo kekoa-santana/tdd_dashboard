@@ -87,7 +87,7 @@ def build_hitter_profile_table(vuln_df: pd.DataFrame) -> str:
                 f'</div>'
             )
         else:
-            whiff_cell = f'<span style="color:{SLATE};">--</span>'
+            whiff_cell = f'<span style="color:var(--tdd-slate);">--</span>'
 
         cstr = row.get("called_str_rate", np.nan)
         if pd.notna(cstr):
@@ -99,7 +99,7 @@ def build_hitter_profile_table(vuln_df: pd.DataFrame) -> str:
                 f'</div>'
             )
         else:
-            cstr_cell = f'<span style="color:{SLATE};">--</span>'
+            cstr_cell = f'<span style="color:var(--tdd-slate);">--</span>'
 
         chase = row.get("chase_rate_raw", np.nan)
         if pd.notna(chase):
@@ -111,7 +111,7 @@ def build_hitter_profile_table(vuln_df: pd.DataFrame) -> str:
                 f'</div>'
             )
         else:
-            chase_cell = f'<span style="color:{SLATE};">--</span>'
+            chase_cell = f'<span style="color:var(--tdd-slate);">--</span>'
 
         xwoba = row.get("xwoba_contact", np.nan)
         if pd.notna(xwoba) and xwoba > 0 and xwoba < 2.0:
@@ -123,7 +123,7 @@ def build_hitter_profile_table(vuln_df: pd.DataFrame) -> str:
                 f'</div>'
             )
         else:
-            xwoba_cell = f'<span style="color:{SLATE};">--</span>'
+            xwoba_cell = f'<span style="color:var(--tdd-slate);">--</span>'
 
         rows_html += (
             f'<tr>'
@@ -182,7 +182,6 @@ def build_pitcher_profile_table(arsenal_df: pd.DataFrame) -> str:
         lg_whiff = lg.get("whiff_rate", 0.25)
         lg_csw = lg.get("csw_pct", 0.29)
 
-        usage = row.get("usage_pct", 0)
         velo = row.get("avg_velo", np.nan)
 
         whiff = row.get("whiff_rate", np.nan)
@@ -195,7 +194,7 @@ def build_pitcher_profile_table(arsenal_df: pd.DataFrame) -> str:
                 f'</div>'
             )
         else:
-            whiff_cell = f'<span style="color:{SLATE};">--</span>'
+            whiff_cell = f'<span style="color:var(--tdd-slate);">--</span>'
 
         csw = row.get("csw_pct", np.nan)
         if pd.notna(csw):
@@ -207,7 +206,7 @@ def build_pitcher_profile_table(arsenal_df: pd.DataFrame) -> str:
                 f'</div>'
             )
         else:
-            csw_cell = f'<span style="color:{SLATE};">--</span>'
+            csw_cell = f'<span style="color:var(--tdd-slate);">--</span>'
 
         xwoba = row.get("xwoba_against", np.nan)
         if pd.notna(xwoba):
@@ -219,10 +218,9 @@ def build_pitcher_profile_table(arsenal_df: pd.DataFrame) -> str:
                 f'</div>'
             )
         else:
-            xwoba_cell = f'<span style="color:{SLATE};">--</span>'
+            xwoba_cell = f'<span style="color:var(--tdd-slate);">--</span>'
 
         velo_str = f'{velo:.1f}' if pd.notna(velo) else '--'
-        usage_str = f'{usage*100:.0f}%'
 
         rows_html += (
             f'<tr>'
@@ -230,8 +228,7 @@ def build_pitcher_profile_table(arsenal_df: pd.DataFrame) -> str:
             f'<td>{whiff_cell}</td>'
             f'<td>{csw_cell}</td>'
             f'<td>{xwoba_cell}</td>'
-            f'<td style="color:{CREAM}; font-size:0.82rem; font-weight:600;">{velo_str}</td>'
-            f'<td style="color:{CREAM}; font-size:0.82rem; font-weight:600;">{usage_str}</td>'
+            f'<td class="tdd-stat-value">{velo_str}</td>'
             f'</tr>'
         )
 
@@ -240,7 +237,7 @@ def build_pitcher_profile_table(arsenal_df: pd.DataFrame) -> str:
         f'<table class="pitch-table">'
         f'<thead><tr>'
         f'<th>Pitch</th><th>Whiff%</th><th>CSW%</th>'
-        f'<th>xwOBA Ag</th><th>Velo</th><th>Usage</th>'
+        f'<th>xwOBA Ag</th><th>Velo</th>'
         f'</tr></thead>'
         f'<tbody>{rows_html}</tbody>'
         f'</table>'
@@ -340,7 +337,7 @@ def build_matchup_table(
                 f'</div>'
             )
         else:
-            pw_cell = f'<span style="color:{SLATE};">--</span>'
+            pw_cell = f'<span style="color:var(--tdd-slate);">--</span>'
 
         h_whiff = h_whiffs[idx]
         if pd.notna(h_whiff):
@@ -352,7 +349,7 @@ def build_matchup_table(
                 f'</div>'
             )
         else:
-            hw_cell = f'<span style="color:{SLATE};">--</span>'
+            hw_cell = f'<span style="color:var(--tdd-slate);">--</span>'
 
         h_chase = h_chases[idx]
         if pd.notna(h_chase):
@@ -364,7 +361,7 @@ def build_matchup_table(
                 f'</div>'
             )
         else:
-            hc_cell = f'<span style="color:{SLATE};">--</span>'
+            hc_cell = f'<span style="color:var(--tdd-slate);">--</span>'
 
         h_xwoba = h_xwobas[idx]
         if pd.notna(h_xwoba) and 0 < h_xwoba < 2.0:
@@ -376,7 +373,7 @@ def build_matchup_table(
                 f'</div>'
             )
         else:
-            hx_cell = f'<span style="color:{SLATE};">--</span>'
+            hx_cell = f'<span style="color:var(--tdd-slate);">--</span>'
 
         lg_xwoba = lg.get("xwoba_contact", 0.320)
         lg_hh = lg.get("hard_hit_rate", 0.33)
@@ -405,7 +402,7 @@ def build_matchup_table(
         rows_html += (
             f'<tr>'
             f'<td><span class="pt-name" style="color:{family_color};">{pt_name}</span></td>'
-            f'<td style="color:{SLATE}; font-size:0.82rem;">{usage_str}</td>'
+            f'<td class="tdd-stat-label">{usage_str}</td>'
             f'<td>{pw_cell}</td>'
             f'<td>{hw_cell}</td>'
             f'<td>{hc_cell}</td>'

@@ -1,9 +1,25 @@
-"""Diamond Rating — TDD's 0-5 diamond scale for player quality."""
+"""Diamond Rating — TDD's 0-10 diamond scale for player quality.
+
+The diamond rating is pre-computed in the rankings parquets via the 20-80
+scouting grade system (src/models/scouting_grades.py). The ``diamond_rating``
+column is the single source of truth. When not available, falls back to
+converting ``tdd_value_score`` (0-1) to the 0-10 scale.
+
+Scale: 0-10 (continuous, 1 decimal)
+  8.0+ = Elite (all tools 60+ grade)
+  6.5+ = Above Average (plus tools)
+  5.0  = MLB Average (all 50-grade tools)
+  3.5+ = Below Average
+  <3.5 = Developing / Fringe
+"""
 from __future__ import annotations
 
 
 def score_to_diamonds(score: float) -> float:
-    """Convert TDD composite score (0-1) to diamond rating (0-5).
+    """Convert TDD composite score (0-1) to diamond rating (0-10).
+
+    Fallback for when pre-computed ``diamond_rating`` column is not available.
+    Uses piecewise linear mapping calibrated to the scouting grade scale.
 
     Args:
         score: A 0-1 normalized score (e.g. tdd_value_score, tdd_prospect_score,
@@ -11,15 +27,15 @@ def score_to_diamonds(score: float) -> float:
                ``normalize_composite()`` first).
     """
     if score < 0.20:
-        return 1.0 + (score / 0.20) * 0.0  # 1.0 floor
+        return 2.0 + (score / 0.20) * 1.0        # 2.0-3.0
     elif score < 0.40:
-        return 1.0 + ((score - 0.20) / 0.20) * 1.0  # 1.0-2.0
+        return 3.0 + ((score - 0.20) / 0.20) * 2.0  # 3.0-5.0
     elif score < 0.55:
-        return 2.0 + ((score - 0.40) / 0.15) * 1.0  # 2.0-3.0
+        return 5.0 + ((score - 0.40) / 0.15) * 1.5  # 5.0-6.5
     elif score < 0.70:
-        return 3.0 + ((score - 0.55) / 0.15) * 1.0  # 3.0-4.0
+        return 6.5 + ((score - 0.55) / 0.15) * 1.0  # 6.5-7.5
     else:
-        return 4.0 + ((score - 0.70) / 0.30) * 1.0  # 4.0-5.0
+        return 7.5 + ((score - 0.70) / 0.30) * 2.5  # 7.5-10.0
 
 
 def normalize_composite(value: float, low: float = -1.0, high: float = 1.2) -> float:
@@ -39,13 +55,13 @@ def normalize_composite(value: float, low: float = -1.0, high: float = 1.2) -> f
 
 
 def diamond_tier(rating: float) -> str:
-    """Return tier label for a diamond rating."""
-    if rating >= 4.5:
+    """Return tier label for a diamond rating (0-10 scale)."""
+    if rating >= 8.0:
         return "Elite"
-    elif rating >= 3.5:
+    elif rating >= 6.5:
         return "Above Average"
-    elif rating >= 2.5:
+    elif rating >= 5.0:
         return "Average"
-    elif rating >= 1.5:
+    elif rating >= 3.5:
         return "Below Average"
     return "Developing"

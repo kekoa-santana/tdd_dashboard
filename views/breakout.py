@@ -73,89 +73,91 @@ _POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"]
 
 # ── CSS ──────────────────────────────────────────────────────────────────
 
-_BREAKOUT_CSS = f"""
+_BREAKOUT_CSS = """
 <style>
-.breakout-card {{
-    background: {DARK_CARD};
-    border: 1px solid {DARK_BORDER};
-    border-radius: 8px;
-    padding: 0.9rem 1rem;
+.breakout-card {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--tdd-dark-border);
+    border-radius: 0;
+    padding: 0.9rem 0;
     margin-bottom: 0.5rem;
     min-height: 200px;
-}}
-.breakout-card-header {{
+}
+.breakout-card-header {
     display: flex;
     align-items: flex-start;
     gap: 0.6rem;
     margin-bottom: 0.4rem;
-}}
-.breakout-card-name {{
-    color: {CREAM};
+}
+.breakout-card-name {
+    color: var(--tdd-cream);
     font-size: 0.95rem;
     font-weight: 700;
     line-height: 1.2;
-}}
-.breakout-card-meta {{
-    color: {SLATE};
+}
+.breakout-card-meta {
+    color: var(--tdd-slate);
     font-size: 0.78rem;
     font-weight: 400;
-}}
-.breakout-card-badge {{
+}
+.breakout-card-badge {
     display: inline-block;
     padding: 0.1rem 0.45rem;
     border-radius: 3px;
     font-size: 0.68rem;
     font-weight: 700;
     letter-spacing: 0.3px;
-}}
-.breakout-card-narrative {{
-    color: {SLATE};
+}
+.breakout-card-narrative {
+    color: var(--tdd-slate);
     font-size: 0.76rem;
     line-height: 1.35;
     margin: 0.35rem 0;
-}}
-.breakout-card-stats {{
+}
+.breakout-card-stats {
     display: flex;
     flex-wrap: wrap;
     gap: 0.25rem;
     margin-top: 0.35rem;
-}}
-.breakout-stat {{
-    background: {DARK_BORDER};
+}
+.breakout-stat {
+    background: var(--tdd-dark-border);
     border-radius: 3px;
     padding: 0.12rem 0.35rem;
     font-size: 0.68rem;
     white-space: nowrap;
-}}
-.breakout-stat-label {{
-    color: {SLATE};
+}
+.breakout-stat-label {
+    color: var(--tdd-slate);
     margin-right: 0.15rem;
-}}
-.breakout-stat-value {{
-    color: {CREAM};
+}
+.breakout-stat-value {
+    color: var(--tdd-cream);
     font-weight: 600;
-}}
-.breakout-hole {{
-    color: {GOLD};
+}
+.breakout-hole {
+    color: var(--tdd-gold);
     font-size: 0.72rem;
     margin-top: 0.3rem;
     font-style: italic;
-}}
-.breakout-compact {{
-    background: {DARK_CARD};
-    border: 1px solid {DARK_BORDER};
-    border-radius: 6px;
-    padding: 0.6rem;
+}
+.breakout-compact {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--tdd-dark-border);
+    border-radius: 0;
+    padding: 0.6rem 0;
     text-align: center;
     min-height: 130px;
-}}
-.breakout-compact-pos {{
-    color: {GOLD};
+}
+.breakout-compact-pos {
+    color: var(--tdd-gold);
     font-size: 0.8rem;
     font-weight: 700;
     letter-spacing: 0.5px;
     margin-bottom: 0.3rem;
-}}
+}
 </style>
 """
 
@@ -255,7 +257,7 @@ def _build_card_html(
     if pos:
         meta_parts.append(pos)
     if team:
-        meta_parts.append(team)
+        meta_parts.append(f'<span data-team="{team}">{team}</span>')
     meta_str = " \u00b7 ".join(meta_parts)
 
     # Archetype badge
@@ -307,7 +309,7 @@ def _build_card_html(
         f'{headshot}'
         f'<div>'
         f'<div class="breakout-card-name">'
-        f'<span class="breakout-card-meta" style="color:{GOLD};">{rank}.</span> '
+        f'<span class="breakout-card-meta" style="color:var(--tdd-gold);">{rank}.</span> '
         f'{name} <span class="breakout-card-meta">{meta_str}</span></div>'
         f'<div style="display:flex; align-items:center; gap:0.4rem; '
         f'margin-top:0.2rem; flex-wrap:wrap;">'
@@ -341,7 +343,7 @@ def _build_compact_card_html(
     headshot = headshot_html(pid, size=35)
     rating_html = diamond_rating_html(score, size="sm")
 
-    meta = team or ""
+    meta = f'<span data-team="{team}">{team}</span>' if team else ""
     if age:
         meta = f"{meta} \u00b7 {age}" if meta else str(age)
 
@@ -380,8 +382,7 @@ def _render_top_cards(
 ) -> None:
     """Render top N breakout candidates as 2-wide card grid."""
     st.markdown(
-        f'<div class="section-header" style="font-size:1rem; '
-        f'margin-bottom:0.5rem;">{title}</div>',
+        f'<div class="tdd-section-hdr">{title}</div>',
         unsafe_allow_html=True,
     )
 
@@ -411,8 +412,8 @@ def _render_position_bests(
 ) -> None:
     """Render best breakout candidate per position (hitters only)."""
     st.markdown(
-        '<div class="section-header" style="font-size:1rem; margin-top:1rem; '
-        'margin-bottom:0.5rem;">Best Breakout Candidate by Position</div>',
+        '<div class="tdd-section-hdr" style="margin-top:1rem;">'
+        'Best Breakout Candidate by Position</div>',
         unsafe_allow_html=True,
     )
 

@@ -1,12 +1,438 @@
 /* TDD Dashboard — Brand Styles
-   CSS custom properties (--tdd-*) are injected by app.py at runtime. */
+   CSS custom properties (--tdd-*) are injected by app.py at runtime.
+   Sizing tokens (--tdd-logo-*, --tdd-headshot-*, --tdd-fs-*) are also
+   in :root — change them once to resize globally.
+   ALL pure CSS lives here. app.py only injects :root color variables. */
+
+/* ================================================================
+   Streamlit overrides — hide defaults, apply palette
+   ================================================================ */
+
+/* Sizing tokens — static, no Python dependency */
+:root {
+    /* Logos & headshots */
+    --tdd-logo-sm: 24px;
+    --tdd-logo-md: 36px;
+    --tdd-logo-lg: 100px;
+    --tdd-headshot-sm: 32px;
+    --tdd-headshot-md: 50px;
+    --tdd-headshot-lg: 80px;
+
+    /* Typography — contextual font sizes */
+    --tdd-fs-team-abbr: 1.2rem;
+    --tdd-fs-player-name: 0.88rem;
+    --tdd-fs-player-name-lg: 1rem;
+    --tdd-fs-stat-value: 0.85rem;
+    --tdd-fs-stat-label: 0.72rem;
+    --tdd-fs-meta: 0.82rem;
+    --tdd-fs-badge: 0.68rem;
+    --tdd-fs-section-header: 1rem;
+    --tdd-fs-context: 0.78rem;
+}
+
+/* Hide Streamlit's default chrome */
+[data-testid="stSidebar"] { display: none; }
+[data-testid="stSidebarCollapsedControl"] { display: none; }
+[data-testid="stToolbar"] { display: none; }
+[data-testid="stDecoration"] { display: none; }
+header[data-testid="stHeader"] { display: none; }
+
+/* Palette-aware Streamlit overrides (use CSS vars so palette switcher works) */
+.stApp, [data-testid="stAppViewContainer"] {
+    background-color: var(--tdd-dark) !important;
+    color: var(--tdd-cream) !important;
+}
+.stSelectbox label, .stRadio label, .stCheckbox label,
+.stTextInput label, .stNumberInput label {
+    color: var(--tdd-cream) !important;
+}
+.stMarkdown, .stMarkdown p {
+    color: var(--tdd-cream);
+}
+hr {
+    border-color: var(--tdd-dark-border) !important;
+}
+
+/* Transparent selectbox / input backgrounds */
+.stSelectbox div[data-baseweb="select"] > div,
+.stMultiSelect div[data-baseweb="select"] > div {
+    background-color: transparent !important;
+    border-color: var(--tdd-dark-border) !important;
+}
+
+/* Push page content below the fixed topbar */
+.block-container {
+    padding-top: 3.5rem !important;
+}
+
+/* ================================================================
+   Sticky topbar — full-width fixed navigation bar
+   ================================================================ */
+
+.topbar-wrap {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 9999;
+    background: var(--tdd-cream);
+    border-bottom: none;
+}
+.topbar {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 1rem;
+    flex-wrap: wrap;
+    max-width: 100%;
+}
+.topbar-logo {
+    height: 36px;
+    width: auto;
+    margin-right: 0.4rem;
+    vertical-align: middle;
+}
+.topbar-brand-text {
+    color: var(--tdd-dark);
+    font-size: 0.85rem;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-right: 1rem;
+    white-space: nowrap;
+}
+
+/* Nav buttons — inverted (light bar, dark text) */
+.topbar a.topbar-btn {
+    color: var(--tdd-dark) !important;
+    font-size: 0.9rem !important;
+    font-weight: 600 !important;
+    padding: 0.3rem 0.55rem !important;
+    border-radius: 4px !important;
+    text-decoration: none !important;
+    white-space: nowrap !important;
+    transition: color 0.15s, background 0.15s !important;
+    display: inline-block !important;
+    opacity: 0.55;
+}
+.topbar a.topbar-btn:hover {
+    opacity: 1 !important;
+    background: rgba(0,0,0,0.07) !important;
+    text-decoration: none !important;
+}
+.topbar a.topbar-btn-active {
+    color: var(--tdd-dark) !important;
+    opacity: 1 !important;
+    background: rgba(0,0,0,0.1) !important;
+}
+.topbar-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+/* Dropdown menus */
+.topbar-dropdown {
+    position: relative;
+    display: inline-block;
+    padding-bottom: 0.4rem;
+    margin-bottom: -0.4rem;
+}
+.topbar-dropdown > .topbar-btn {
+    cursor: pointer;
+    color: var(--tdd-dark);
+    opacity: 0.55;
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 0.3rem 0.55rem;
+    border-radius: 4px;
+    transition: opacity 0.15s;
+}
+.topbar-dropdown:hover > .topbar-btn {
+    opacity: 1;
+}
+.topbar-arrow {
+    font-size: 0.8em;
+    margin-right: 6px;
+    opacity: 0.6;
+    color: var(--tdd-dark);
+}
+.topbar-dd-menu {
+    visibility: hidden;
+    opacity: 0;
+    transition: visibility 0s 0.3s, opacity 0.15s;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    background: var(--tdd-cream);
+    border: 1px solid rgba(0,0,0,0.1);
+    border-radius: 6px;
+    padding: 0.3rem 0;
+    min-width: 170px;
+    z-index: 10000;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    margin-top: 0.2rem;
+}
+.topbar-dropdown:hover .topbar-dd-menu {
+    visibility: visible;
+    opacity: 1;
+    transition: visibility 0s, opacity 0.15s;
+}
+.topbar-dd-menu a.topbar-dd-item {
+    display: block !important;
+    padding: 0.4rem 1rem !important;
+    color: var(--tdd-dark) !important;
+    opacity: 0.6;
+    font-size: 0.8rem !important;
+    font-weight: 500 !important;
+    text-decoration: none !important;
+    white-space: nowrap !important;
+    transition: opacity 0.15s, background 0.15s !important;
+}
+.topbar-dd-menu a.topbar-dd-item:hover {
+    opacity: 1 !important;
+    background: rgba(0,0,0,0.06) !important;
+}
+.topbar-dd-menu a.topbar-dd-active {
+    color: var(--tdd-dark) !important;
+    opacity: 1;
+    font-weight: 700 !important;
+}
+
+/* Social links */
+.topbar-socials {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+.topbar-socials a.topbar-social {
+    color: var(--tdd-dark) !important;
+    opacity: 0.45;
+    font-size: 0.85rem !important;
+    text-decoration: none !important;
+    transition: opacity 0.15s !important;
+    display: inline-block !important;
+}
+.topbar-socials a.topbar-social:hover {
+    opacity: 1 !important;
+    color: var(--tdd-dark) !important;
+    text-decoration: none !important;
+}
+
+/* ================================================================
+   Global element classes — use these instead of inline styles
+   ================================================================ */
+
+/* Team abbreviation (e.g. "PHI", "TB") */
+.tdd-team-abbr {
+    color: var(--tdd-cream);
+    font-size: var(--tdd-fs-team-abbr);
+    font-weight: 800;
+}
+
+/* Team primary colors — use data-team attribute on .tdd-team-abbr */
+.tdd-team-abbr[data-team="ARI"] { color: #A71930; }
+.tdd-team-abbr[data-team="ATL"] { color: #CE1141; }
+.tdd-team-abbr[data-team="BAL"] { color: #DF4601; }
+.tdd-team-abbr[data-team="BOS"] { color: #BD3039; }
+.tdd-team-abbr[data-team="CHC"] { color: #0E3386; }
+.tdd-team-abbr[data-team="CWS"] { color: #C4CED4; }
+.tdd-team-abbr[data-team="CIN"] { color: #C6011F; }
+.tdd-team-abbr[data-team="CLE"] { color: #E31937; }
+.tdd-team-abbr[data-team="COL"] { color: #C4CED4; }
+.tdd-team-abbr[data-team="DET"] { color: #FA4616; }
+.tdd-team-abbr[data-team="HOU"] { color: #EB6E1F; }
+.tdd-team-abbr[data-team="KC"]  { color: #4B9CD3; }
+.tdd-team-abbr[data-team="LAA"] { color: #BA0021; }
+.tdd-team-abbr[data-team="LAD"] { color: #005A9C; }
+.tdd-team-abbr[data-team="MIA"] { color: #00A3E0; }
+.tdd-team-abbr[data-team="MIL"] { color: #FFC52F; }
+.tdd-team-abbr[data-team="MIN"] { color: #D31145; }
+.tdd-team-abbr[data-team="NYM"] { color: #FF5910; }
+.tdd-team-abbr[data-team="NYY"] { color: #C4CED4; }
+.tdd-team-abbr[data-team="OAK"] { color: #EFB21E; }
+.tdd-team-abbr[data-team="PHI"] { color: #E81828; }
+.tdd-team-abbr[data-team="PIT"] { color: #FDB827; }
+.tdd-team-abbr[data-team="SD"]  { color: #FFC425; }
+.tdd-team-abbr[data-team="SF"]  { color: #FD5A1E; }
+.tdd-team-abbr[data-team="SEA"] { color: #005C5C; }
+.tdd-team-abbr[data-team="STL"] { color: #C41E3A; }
+.tdd-team-abbr[data-team="TB"]  { color: #8FBCE6; }
+.tdd-team-abbr[data-team="TEX"] { color: #003278; }
+.tdd-team-abbr[data-team="TOR"] { color: #134A8E; }
+.tdd-team-abbr[data-team="WSH"] { color: #AB0003; }
+
+/* Team color — lightweight (secondary labels / meta text).
+   Use data-team alone when you only want the color override
+   without the large font-size / font-weight of .tdd-team-abbr. */
+[data-team="ARI"] { color: #A71930; }
+[data-team="ATL"] { color: #CE1141; }
+[data-team="BAL"] { color: #DF4601; }
+[data-team="BOS"] { color: #BD3039; }
+[data-team="CHC"] { color: #0E3386; }
+[data-team="CWS"] { color: #C4CED4; }
+[data-team="CIN"] { color: #C6011F; }
+[data-team="CLE"] { color: #E31937; }
+[data-team="COL"] { color: #C4CED4; }
+[data-team="DET"] { color: #FA4616; }
+[data-team="HOU"] { color: #EB6E1F; }
+[data-team="KC"]  { color: #4B9CD3; }
+[data-team="LAA"] { color: #BA0021; }
+[data-team="LAD"] { color: #005A9C; }
+[data-team="MIA"] { color: #00A3E0; }
+[data-team="MIL"] { color: #FFC52F; }
+[data-team="MIN"] { color: #D31145; }
+[data-team="NYM"] { color: #FF5910; }
+[data-team="NYY"] { color: #C4CED4; }
+[data-team="OAK"] { color: #EFB21E; }
+[data-team="PHI"] { color: #E81828; }
+[data-team="PIT"] { color: #FDB827; }
+[data-team="SD"]  { color: #FFC425; }
+[data-team="SF"]  { color: #FD5A1E; }
+[data-team="SEA"] { color: #005C5C; }
+[data-team="STL"] { color: #C41E3A; }
+[data-team="TB"]  { color: #8FBCE6; }
+[data-team="TEX"] { color: #003278; }
+[data-team="TOR"] { color: #134A8E; }
+[data-team="WSH"] { color: #AB0003; }
+
+/* Player name — standard (lineup rows, cards) */
+.tdd-player-name {
+    color: var(--tdd-cream);
+    font-size: var(--tdd-fs-player-name);
+    font-weight: 600;
+}
+
+/* Player name — large (profile headers, matchup headers) */
+.tdd-player-name-lg {
+    color: var(--tdd-cream);
+    font-size: var(--tdd-fs-player-name-lg);
+    font-weight: 700;
+}
+
+/* Stat value (K%, BB%, projected counts) */
+.tdd-stat-value {
+    color: var(--tdd-cream);
+    font-size: var(--tdd-fs-stat-value);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Stat label / secondary text */
+.tdd-stat-label {
+    color: var(--tdd-slate);
+    font-size: var(--tdd-fs-stat-label);
+}
+
+/* Meta / context text (timestamps, venue, umpire) */
+.tdd-meta {
+    color: var(--tdd-slate);
+    font-size: var(--tdd-fs-meta);
+}
+
+/* Badge / pill (archetype, position) */
+.tdd-badge {
+    color: var(--tdd-slate);
+    font-size: var(--tdd-fs-badge);
+    background: rgba(123, 143, 166, 0.12);
+    padding: 1px 5px;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+
+/* Section header (gold, bold) */
+.tdd-section-hdr {
+    color: var(--tdd-gold);
+    font-size: var(--tdd-fs-section-header);
+    font-weight: 700;
+    margin: 0.8rem 0 0.4rem;
+}
+
+/* Context / secondary info line */
+.tdd-context {
+    color: var(--tdd-slate);
+    font-size: var(--tdd-fs-context);
+}
+
+/* Team logo — applies to img tags inside logo wrappers */
+.tdd-logo-sm { width: var(--tdd-logo-sm); height: var(--tdd-logo-sm); }
+.tdd-logo-md { width: var(--tdd-logo-md); height: var(--tdd-logo-md); }
+.tdd-logo-lg { width: var(--tdd-logo-lg); height: var(--tdd-logo-lg); }
+.tdd-logo-sm, .tdd-logo-md, .tdd-logo-lg {
+    border-radius: 4px;
+    background-color: var(--tdd-dark-card);
+    display: inline-block;
+    vertical-align: middle;
+    object-fit: contain;
+}
+
+/* Headshot — applies to img tags */
+.tdd-headshot-sm { width: var(--tdd-headshot-sm); }
+.tdd-headshot-md { width: var(--tdd-headshot-md); }
+.tdd-headshot-lg { width: var(--tdd-headshot-lg); }
+.tdd-headshot-sm, .tdd-headshot-md, .tdd-headshot-lg {
+    border-radius: 6px;
+    background-color: var(--tdd-dark-card);
+    display: inline-block;
+    vertical-align: middle;
+}
+
+/* Edge / advantage label */
+.tdd-edge-label {
+    font-size: var(--tdd-fs-stat-value);
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+}
+
+/* Game card container */
+.tdd-game-card {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--tdd-dark-border);
+    border-radius: 0;
+    padding: 1rem 0;
+    margin-bottom: 0;
+}
+
+/* Expander — no border */
+[data-testid="stExpander"] {
+    border: none;
+}
+
+/* Lineup row */
+.tdd-lineup-row {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.3rem 0.6rem;
+    border-bottom: 1px solid rgba(42, 46, 58, 0.13);
+}
+
+/* ================================================================ */
+
+/* Leaderboard cards — shared across projections, rankings, stats */
+.lb-card {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--tdd-dark-border);
+    border-radius: 0;
+    padding: 0.8rem 0;
+    margin-bottom: 1.5rem;
+    max-width: 380px;
+}
+.lb-card-wide {
+    max-width: none;
+}
 
 /* Brand header */
 .brand-header {
-    background: var(--tdd-dark-card);
-    border: 1px solid var(--tdd-dark-border);
-    padding: 1.2rem 1.8rem;
-    border-radius: 10px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--tdd-dark-border);
+    padding: 1.2rem 0;
+    border-radius: 0;
     margin-bottom: 1.5rem;
     display: flex;
     align-items: center;
@@ -24,12 +450,12 @@
     margin-top: 2px;
 }
 
-/* Metric cards */
+/* Metric cards — borderless, numbers speak for themselves */
 .metric-card {
-    background: var(--tdd-dark-card);
-    border: 1px solid var(--tdd-dark-border);
-    border-radius: 10px;
-    padding: 1rem 1.2rem;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 1rem 0.5rem;
     text-align: center;
     margin-bottom: 0.5rem;
 }
@@ -59,12 +485,13 @@
     letter-spacing: 0.5px;
 }
 
-/* Insight cards */
+/* Insight cards — left accent border, editorial style */
 .insight-card {
-    background: var(--tdd-dark-card);
-    border: 1px solid var(--tdd-dark-border);
-    border-radius: 10px;
-    padding: 1.2rem 1.5rem;
+    background: transparent;
+    border: none;
+    border-left: 3px solid var(--tdd-gold);
+    border-radius: 0;
+    padding: 0.8rem 1.2rem;
     margin-bottom: 1rem;
 }
 .insight-title {

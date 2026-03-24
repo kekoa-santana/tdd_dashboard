@@ -9,9 +9,10 @@ EXPANDABLE_CARD_CSS = """
 <style>
 /* Expandable card — <details>/<summary> pattern */
 .exp-card {
-    background: var(--tdd-dark-card);
-    border: 1px solid var(--tdd-dark-border);
-    border-radius: 10px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--tdd-dark-border);
+    border-radius: 0;
     margin-bottom: 0.35rem;
     overflow: hidden;
 }

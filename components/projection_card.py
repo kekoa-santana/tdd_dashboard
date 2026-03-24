@@ -148,9 +148,8 @@ def render_projection_card(
         role = row["role"]
         if pd.notna(role):
             role_badge = (
-                f'<span style="background:{DARK_BORDER}; color:{CREAM}; '
-                f'padding:2px 8px; border-radius:4px; font-size:0.75rem; '
-                f'margin-left:8px;">{role}</span>'
+                f'<span class="tdd-badge" style="background:var(--tdd-dark-border); '
+                f'color:var(--tdd-cream); margin-left:8px;">{role}</span>'
             )
 
     # ------------------------------------------------------------------
@@ -183,10 +182,10 @@ def render_projection_card(
         s_color = _TIER_COLORS.get(s_tier, SLATE)
         stat_rows_html += (
             f'<tr>'
-            f'<td style="padding:4px 10px; color:{CREAM}; font-size:0.85rem;">{label}</td>'
-            f'<td style="padding:4px 10px; color:{s_color}; font-weight:600; '
-            f'font-size:0.95rem; text-align:right;">{mean_str}</td>'
-            f'<td style="padding:4px 10px; color:{SLATE}; font-size:0.78rem; '
+            f'<td class="tdd-stat-label" style="padding:4px 10px; color:var(--tdd-cream);">{label}</td>'
+            f'<td class="tdd-stat-value" style="padding:4px 10px; color:{s_color}; '
+            f'text-align:right;">{mean_str}</td>'
+            f'<td class="tdd-stat-label" style="padding:4px 10px; '
             f'text-align:right;">{range_str}</td>'
             f'</tr>'
         )
@@ -196,9 +195,8 @@ def render_projection_card(
     if low_stats:
         low_list = ", ".join(low_stats)
         low_html = (
-            f'<div style="margin-top:8px; padding:6px 10px; '
-            f'background:rgba(123,143,166,0.08); border-radius:4px; '
-            f'font-size:0.78rem; color:{SLATE};">'
+            f'<div class="tdd-meta" style="margin-top:8px; padding:6px 10px; '
+            f'background:rgba(123,143,166,0.08); border-radius:4px;">'
             f'&#9888; High uncertainty: {low_list}'
             f'</div>'
         )
@@ -207,8 +205,7 @@ def render_projection_card(
     # Confidence badge
     # ------------------------------------------------------------------
     conf_badge = (
-        f'<span style="background:{tier_bg}; color:{tier_color}; '
-        f'padding:2px 10px; border-radius:4px; font-size:0.75rem; '
+        f'<span class="tdd-badge" style="background:{tier_bg}; color:{tier_color}; '
         f'font-weight:600; letter-spacing:0.5px;">'
         f'{tier} ({score:.0%})</span>'
     )
@@ -218,17 +215,18 @@ def render_projection_card(
     # ------------------------------------------------------------------
     card_html = f"""
     <div style="
-        background:{DARK_CARD};
-        border:1px solid {DARK_BORDER};
-        border-radius:10px;
-        padding:18px 20px 14px 20px;
+        background:transparent;
+        border:none;
+        border-bottom:1px solid var(--tdd-dark-border);
+        border-radius:0;
+        padding:18px 0 14px 0;
         margin-bottom:12px;
     ">
         <!-- Header: name + confidence badge -->
         <div style="display:flex; align-items:center; justify-content:space-between;
                     margin-bottom:10px;">
             <div>
-                <span style="color:{CREAM}; font-size:1.1rem; font-weight:700;">
+                <span class="tdd-player-name-lg">
                     {player_name}
                 </span>
                 {role_badge}
@@ -240,7 +238,7 @@ def render_projection_card(
         <div style="text-align:center; margin:12px 0 16px 0;">
             <div style="color:{tier_color}; font-size:2.2rem; font-weight:700;
                         line-height:1;">{pm_str}</div>
-            <div style="color:{SLATE}; font-size:0.82rem; margin-top:2px;">
+            <div class="tdd-meta" style="margin-top:2px;">
                 Projected {pm_label}
             </div>
         </div>
@@ -248,12 +246,12 @@ def render_projection_card(
         <!-- Counting stats table -->
         <table style="width:100%; border-collapse:collapse;">
             <thead>
-                <tr style="border-bottom:1px solid {DARK_BORDER};">
-                    <th style="padding:4px 10px; color:{SLATE}; font-size:0.75rem;
+                <tr style="border-bottom:1px solid var(--tdd-dark-border);">
+                    <th class="tdd-stat-label" style="padding:4px 10px;
                               text-align:left; font-weight:400;">Stat</th>
-                    <th style="padding:4px 10px; color:{SLATE}; font-size:0.75rem;
+                    <th class="tdd-stat-label" style="padding:4px 10px;
                               text-align:right; font-weight:400;">Proj.</th>
-                    <th style="padding:4px 10px; color:{SLATE}; font-size:0.75rem;
+                    <th class="tdd-stat-label" style="padding:4px 10px;
                               text-align:right; font-weight:400;">Range</th>
                 </tr>
             </thead>

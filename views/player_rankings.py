@@ -72,197 +72,186 @@ def _style_health(val: str) -> str:
 
 # ── CSS ─────────────────────────────────────────────────────────────────────
 
-_CSS = f"""
+_CSS = """
 <style>
-.rank-header {{
+.rank-header {
     text-align: center;
     margin-bottom: 0.8rem;
-}}
-.rank-title {{
-    color: {CREAM};
+}
+.rank-title {
+    color: var(--tdd-cream);
     font-size: 1.7rem;
     font-weight: 800;
     letter-spacing: 1.5px;
-}}
-.rank-section {{
-    color: {GOLD};
+}
+.rank-section {
+    color: var(--tdd-gold);
     font-size: 1.1rem;
     font-weight: 700;
     letter-spacing: 0.5px;
     margin: 1.2rem 0 0.6rem 0;
     padding-bottom: 0.3rem;
-    border-bottom: 1px solid {DARK_BORDER};
-}}
-.lb-card {{
-    background: {DARK_CARD};
-    border: 1px solid {DARK_BORDER};
-    border-radius: 10px;
-    padding: 0.8rem 1rem;
-    margin-bottom: 1.5rem;
-    max-width: 380px;
-}}
-.lb-card-wide {{
-    max-width: none;
-}}
-.lb-title-row {{
+    border-bottom: 1px solid var(--tdd-dark-border);
+}
+.lb-title-row {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
     margin-bottom: 0.5rem;
     padding-bottom: 0.4rem;
-    border-bottom: 1px solid {DARK_BORDER};
-}}
-.lb-title {{
-    color: {GOLD};
+    border-bottom: 1px solid var(--tdd-dark-border);
+}
+.lb-title {
+    color: var(--tdd-gold);
     font-size: 1.0rem;
     font-weight: 700;
     letter-spacing: 0.5px;
-}}
-.lb-subtitle {{
-    color: {SLATE};
+}
+.lb-subtitle {
+    color: var(--tdd-slate);
     font-size: 0.70rem;
     font-weight: 400;
     margin-left: 0.4rem;
-}}
-.lb-scroll {{
+}
+.lb-scroll {
     overflow-y: auto;
-}}
-.lb-scroll::-webkit-scrollbar {{
+}
+.lb-scroll::-webkit-scrollbar {
     width: 6px;
-}}
-.lb-scroll::-webkit-scrollbar-track {{
+}
+.lb-scroll::-webkit-scrollbar-track {
     background: transparent;
-}}
-.lb-scroll::-webkit-scrollbar-thumb {{
+}
+.lb-scroll::-webkit-scrollbar-thumb {
     background: rgba(200,169,110,0.3);
     border-radius: 3px;
-}}
-.lb-row {{
+}
+.lb-row {
     display: flex;
     align-items: center;
     padding: 0.28rem 0;
-    border-bottom: 1px solid {DARK_BORDER}15;
-}}
-.lb-row:last-child {{ border-bottom: none; }}
-.lb-rank {{
-    color: {SLATE};
+    border-bottom: 1px solid var(--tdd-dark-border-faint);
+}
+.lb-row:last-child { border-bottom: none; }
+.lb-rank {
+    color: var(--tdd-slate);
     font-size: 0.82rem;
     min-width: 1.6rem;
     text-align: right;
     margin-right: 0.5rem;
-}}
-.lb-rank-top {{ color: {GOLD}; font-weight: 700; }}
-.lb-headshot {{
+}
+.lb-rank-top { color: var(--tdd-gold); font-weight: 700; }
+.lb-headshot {
     margin-left: 0.5rem;
     margin-right: 0.5rem;
-}}
-.lb-name {{
-    color: {CREAM};
+}
+.lb-name {
+    color: var(--tdd-cream);
     font-size: 0.95rem;
     font-weight: 600;
     flex: 1;
-}}
-.lb-name a {{
+}
+.lb-name a {
     color: inherit;
     text-decoration: none;
-}}
-.lb-name a:hover {{
-    color: {GOLD};
+}
+.lb-name a:hover {
+    color: var(--tdd-gold);
     text-decoration: underline;
-}}
-.lb-info {{
-    color: {SLATE};
+}
+.lb-info {
+    color: var(--tdd-slate);
     font-size: 0.72rem;
     background: rgba(123,143,166,0.12);
     padding: 1px 6px;
     border-radius: 3px;
     margin-right: 0.5rem;
-}}
-.lb-team {{
-    color: {SLATE};
+}
+.lb-team {
+    color: var(--tdd-slate);
     font-size: 0.80rem;
     margin-right: 0.5rem;
-}}
-.lb-val {{
+}
+.lb-val {
     display: flex;
     align-items: center;
     min-width: 5rem;
     justify-content: flex-end;
-}}
-.lb-diamonds {{
+}
+.lb-diamonds {
     letter-spacing: 1px;
     font-size: 0.7rem;
-}}
-.lb-rating-num {{
+}
+.lb-rating-num {
     font-weight: 700;
     font-size: 0.9rem;
     margin-left: 3px;
     min-width: 1.5rem;
     text-align: right;
-}}
-.lb-stat-cell {{
+}
+.lb-stat-cell {
     margin-left: 0.6rem;
-}}
-.lb-stat-lbl {{
-    color: {SLATE};
+}
+.lb-stat-lbl {
+    color: var(--tdd-slate);
     font-size: 0.62rem;
     margin-right: 2px;
-}}
-.lb-stat-val {{
-    color: {CREAM};
+}
+.lb-stat-val {
+    color: var(--tdd-cream);
     font-size: 0.72rem;
     font-weight: 600;
-}}
+}
 
-.stSelectbox div[data-baseweb="select"] > div {{
+.stSelectbox div[data-baseweb="select"] > div {
     background-color: transparent !important;
     border: none !important;
     box-shadow: none !important;
     padding-left: 0 !important;
-}}
-.stSelectbox div[data-baseweb="select"] {{
+}
+.stSelectbox div[data-baseweb="select"] {
     font-size: 1.2rem !important;
     font-weight: 800 !important;
-    color: #C8A96E !important;
+    color: var(--tdd-gold) !important;
     cursor: pointer !important;
-}}
-.stSelectbox div[data-baseweb="select"] > div:hover {{
+}
+.stSelectbox div[data-baseweb="select"] > div:hover {
     background-color: transparent !important;
-}}
+}
 
 /* ── hover tooltip for compact cards ──────────────── */
-.lb-row-tip {{
+.lb-row-tip {
     position: relative;
-}}
-.lb-row-tip .lb-tooltip {{
+}
+.lb-row-tip .lb-tooltip {
     display: none;
     position: absolute;
     bottom: 100%;
     left: 50%;
     transform: translateX(-50%);
-    background: {DARK_CARD};
-    border: 1px solid {GOLD}44;
+    background: var(--tdd-dark-card);
+    border: 1px solid var(--tdd-dark-border);
     border-radius: 8px;
     padding: 0.5rem 0.7rem;
     white-space: nowrap;
     z-index: 100;
     box-shadow: 0 4px 12px rgba(0,0,0,0.5);
     pointer-events: none;
-}}
-.lb-row-tip:hover .lb-tooltip {{
+}
+.lb-row-tip:hover .lb-tooltip {
     display: flex;
     gap: 0.7rem;
-}}
+}
 .lb-tip-stat {{
     text-align: center;
 }}
 .lb-tip-val {{
-    color: {CREAM};
+    color: var(--tdd-cream);
     font-size: 0.85rem;
     font-weight: 700;
 }}
 .lb-tip-lbl {{
-    color: {SLATE};
+    color: var(--tdd-slate);
     font-size: 0.62rem;
 }}
 /* First-row tooltip: show below instead of above */
@@ -279,18 +268,22 @@ _CSS = f"""
 def _diamonds_html(rating: float) -> str:
     """Build filled/empty diamond symbols for a 0-5 rating."""
     parts = []
-    for i in range(5):
+    for i in range(10):
         if i < int(rating) or (i == int(rating) and rating - int(rating) >= 0.5):
-            parts.append(f'<span style="color:{GOLD}">&#9670;</span>')
+            parts.append(f'<span style="color:var(--tdd-gold)">&#9670;</span>')
         else:
-            parts.append(f'<span style="color:{SLATE}; opacity:0.35">&#9671;</span>')
+            parts.append(f'<span style="color:var(--tdd-slate); opacity:0.35">&#9671;</span>')
     return "".join(parts)
 
 
-def _rating_val_html(score: float) -> str:
-    """Format diamond rating as diamond symbols + numeric value for card rows."""
-    rating = score_to_diamonds(score)
-    color = GOLD if rating >= 4.0 else SAGE if rating >= 3.0 else SLATE
+def _rating_val_html(score: float, precomputed_rating: float | None = None) -> str:
+    """Format diamond rating as diamond symbols + numeric value for card rows.
+
+    Uses pre-computed diamond_rating from scouting grades when available,
+    falls back to converting tdd_value_score via score_to_diamonds.
+    """
+    rating = precomputed_rating if precomputed_rating is not None else score_to_diamonds(score)
+    color = GOLD if rating >= 7.5 else SAGE if rating >= 5.0 else SLATE
     return (
         f'<span class="lb-diamonds">{_diamonds_html(rating)}</span>'
         f'<span class="lb-rating-num" style="color:{color}">{rating:.1f}</span>'
@@ -381,14 +374,19 @@ def _render_ranking_card(
     if df.empty:
         return
 
-    work = df.sort_values(rank_col)
+    # Sort by diamond_rating (descending) when available — this is the TDD
+    # scouting grade and should be the display order. Fall back to rank_col.
+    if "diamond_rating" in df.columns and df["diamond_rating"].notna().any():
+        work = df.sort_values("diamond_rating", ascending=False)
+    else:
+        work = df.sort_values(rank_col)
     has_detail = detail_stats is not None
 
     rows_html = []
     for i, (_, row) in enumerate(work.iterrows(), 1):
         name = row[name_col]
         pid = int(row[id_col])
-        rank = int(row[rank_col])
+        rank = i  # display rank matches sort order
         rank_class = "lb-rank-top lb-rank" if i <= 5 else "lb-rank"
 
         hs = ""
@@ -396,13 +394,14 @@ def _render_ranking_card(
             hs = f'<span class="lb-headshot">{headshot_html(pid, size=50)}</span>'
 
         team = teams_lookup.get(pid, "")
-        team_html = f'<span class="lb-team">{team}</span>' if team else ""
+        team_html = f'<span class="lb-team" data-team="{team}">{team}</span>' if team else ""
 
         info_html = ""
         if info_col and info_col in row.index and pd.notna(row[info_col]):
             info_html = f'<span class="lb-info">{row[info_col]}</span>'
 
-        val_html = _rating_val_html(row[score_col])
+        precomputed = row.get("diamond_rating") if "diamond_rating" in row.index else None
+        val_html = _rating_val_html(row[score_col], precomputed_rating=precomputed)
 
         # Inline stats (if detail_stats provided)
         stat_inline = ""
@@ -464,8 +463,8 @@ def _render_ranking_card(
                 f'<div style="display:flex; align-items:center; gap:0.8rem; margin-bottom:0.6rem;">'
                 f'{headshot_html(pid, size=80)}'
                 f'<div>'
-                f'<div style="color:{CREAM}; font-size:1.1rem; font-weight:700;">{name}</div>'
-                f'<div style="color:{SLATE}; font-size:0.8rem;">'
+                f'<div style="color:var(--tdd-cream); font-size:1.1rem; font-weight:700;">{name}</div>'
+                f'<div style="color:var(--tdd-slate); font-size:0.8rem;">'
                 f'{row.get(info_col, "") if info_col else ""}'
                 f'{" · " + team if team else ""}</div>'
                 f'</div></div>'
@@ -476,10 +475,10 @@ def _render_ranking_card(
                 arch_name, arch_desc = archetype_lookup[pid]
                 detail_parts.append(
                     f'<div style="margin-bottom:0.5rem;">'
-                    f'<span style="background:{GOLD}22; color:{GOLD}; border:1px solid {GOLD}44; '
+                    f'<span style="background:{GOLD}22; color:var(--tdd-gold); border:1px solid {GOLD}44; '
                     f'padding:3px 10px; border-radius:12px; font-size:0.8rem; font-weight:600;">'
                     f'{arch_name}</span>'
-                    f'<span style="color:{SLATE}; font-size:0.78rem; margin-left:0.5rem;">'
+                    f'<span style="color:var(--tdd-slate); font-size:0.78rem; margin-left:0.5rem;">'
                     f'{arch_desc}</span>'
                     f'</div>'
                 )
@@ -492,8 +491,8 @@ def _render_ranking_card(
                         val = _fmt_detail(row[col_name], fmt)
                         stat_cells.append(
                             f'<div style="text-align:center; min-width:55px;">'
-                            f'<div style="color:{CREAM}; font-size:0.9rem; font-weight:700;">{val}</div>'
-                            f'<div style="color:{SLATE}; font-size:0.65rem;">{label}</div>'
+                            f'<div style="color:var(--tdd-cream); font-size:0.9rem; font-weight:700;">{val}</div>'
+                            f'<div style="color:var(--tdd-slate); font-size:0.65rem;">{label}</div>'
                             f'</div>'
                         )
                 if stat_cells:
@@ -506,7 +505,7 @@ def _render_ranking_card(
             if link_type:
                 profile_url = f"?page=player_profile&player_id={pid}&player_type={link_type}"
                 detail_parts.append(
-                    f'<a href="{profile_url}" style="color:{GOLD}; font-size:0.85rem; '
+                    f'<a href="{profile_url}" style="color:var(--tdd-gold); font-size:0.85rem; '
                     f'font-weight:600; text-decoration:none;">'
                     f'View Full Profile &#8594;</a>'
                 )
@@ -545,26 +544,17 @@ def _render_ranking_card(
 
 # ── Batter Rankings (leaderboard cards) ────────────────────────────────────
 
-def _render_batter_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> None:
+def _render_batter_rankings(
+    df: pd.DataFrame, teams_lookup: dict[int, str],
+    league_filter: str = "All", search: str = "",
+) -> None:
     """Render batter rankings as leaderboard cards with positional breakdowns."""
-
-    # ── Filter row ──
-    f1, f2 = st.columns([1, 3])
-    with f1:
-        league_filter = st.selectbox(
-            "League", ["All", "American League", "National League"],
-            key="rank_h_league", label_visibility="collapsed",
-        )
-    with f2:
-        search = st.text_input("Search", placeholder="Search player...", key="rank_h_search")
-
-    # Apply filters
     if search:
         df = df[df["batter_name"].str.contains(search, case=False, na=False)]
-    if league_filter == "American League":
+    if league_filter == "AL":
         al_ids = {pid for pid, abbr in teams_lookup.items() if abbr in _AL_TEAMS}
         df = df[df["batter_id"].isin(al_ids)]
-    elif league_filter == "National League":
+    elif league_filter == "NL":
         nl_ids = {pid for pid, abbr in teams_lookup.items() if abbr in _NL_TEAMS}
         df = df[df["batter_id"].isin(nl_ids)]
 
@@ -611,26 +601,17 @@ def _render_batter_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> N
 
 # ── Pitcher Rankings (leaderboard cards) ───────────────────────────────────
 
-def _render_pitcher_rankings(df: pd.DataFrame, teams_lookup: dict[int, str]) -> None:
+def _render_pitcher_rankings(
+    df: pd.DataFrame, teams_lookup: dict[int, str],
+    league_filter: str = "All", search: str = "",
+) -> None:
     """Render pitcher rankings as leaderboard cards with role breakdowns."""
-
-    # ── Filter row ──
-    f1, f2 = st.columns([1, 3])
-    with f1:
-        league_filter = st.selectbox(
-            "League", ["All", "American League", "National League"],
-            key="rank_p_league", label_visibility="collapsed",
-        )
-    with f2:
-        search = st.text_input("Search", placeholder="Search player...", key="rank_p_search")
-
-    # Apply filters
     if search:
         df = df[df["pitcher_name"].str.contains(search, case=False, na=False)]
-    if league_filter == "American League":
+    if league_filter == "AL":
         al_ids = {pid for pid, abbr in teams_lookup.items() if abbr in _AL_TEAMS}
         df = df[df["pitcher_id"].isin(al_ids)]
-    elif league_filter == "National League":
+    elif league_filter == "NL":
         nl_ids = {pid for pid, abbr in teams_lookup.items() if abbr in _NL_TEAMS}
         df = df[df["pitcher_id"].isin(nl_ids)]
 
@@ -1028,20 +1009,27 @@ def page_player_rankings() -> None:
     st.markdown(_CSS, unsafe_allow_html=True)
     st.markdown(EXPANDABLE_CARD_CSS, unsafe_allow_html=True)
 
-    # Title
-    st.markdown(
-        '<div class="rank-header">'
-        '<div class="rank-title">PLAYER RANKINGS</div>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
-    category = st.selectbox(
-        "Category",
-        ["Batters", "Pitchers", "Hitting Prospects", "Pitching Prospects", "Prospect Readiness"],
-        key="rankings_category",
-        label_visibility="collapsed",
-    )
+    # Inline toolbar: Category | League | Search
+    tb1, tb2, tb3 = st.columns([1.5, 1, 3])
+    with tb1:
+        category = st.selectbox(
+            "Category",
+            ["Batters", "Pitchers", "Hitting Prospects", "Pitching Prospects", "Prospect Readiness"],
+            key="rankings_category",
+            label_visibility="collapsed",
+        )
+    with tb2:
+        league_filter = st.selectbox(
+            "League", ["All", "AL", "NL"],
+            key="rank_league",
+            label_visibility="collapsed",
+            disabled=category not in ("Batters", "Pitchers"),
+        )
+    with tb3:
+        search = st.text_input(
+            "Search", placeholder="Search player...",
+            key="rank_search", label_visibility="collapsed",
+        )
 
     # Team lookup for MLB sections
     teams_df = load_player_teams()
@@ -1056,14 +1044,14 @@ def page_player_rankings() -> None:
         if df.empty:
             st.warning("No batter rankings data found. Run precompute first.")
             return
-        _render_batter_rankings(df, teams_lookup)
+        _render_batter_rankings(df, teams_lookup, league_filter, search)
 
     elif category == "Pitchers":
         df = load_rankings("pitchers")
         if df.empty:
             st.warning("No pitcher rankings data found. Run precompute first.")
             return
-        _render_pitcher_rankings(df, teams_lookup)
+        _render_pitcher_rankings(df, teams_lookup, league_filter, search)
 
     elif category == "Hitting Prospects":
         df = load_rankings("prospect")

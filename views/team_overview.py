@@ -64,14 +64,14 @@ def _elo_bar(label: str, value: float, rank: int | None = None,
     pct = max(0, min(100, (value - min_v) / (max_v - min_v) * 100))
     mid_pct = (1500 - min_v) / (max_v - min_v) * 100
     color = GOLD if value >= 1520 else SAGE if value >= 1490 else EMBER if value < 1470 else SLATE
-    rank_str = f'<span style="color:{SLATE}; font-size:0.8rem; margin-left:6px;">#{rank}</span>' if rank else ""
+    rank_str = f'<span class="tdd-meta" style="margin-left:6px;">#{rank}</span>' if rank else ""
     return (
         f'<div style="margin-bottom:10px;">'
         f'<div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:3px;">'
-        f'<span style="color:{CREAM}; font-size:0.85rem; font-weight:600;">{label}</span>'
+        f'<span class="tdd-stat-value">{label}</span>'
         f'<span style="color:{color}; font-weight:700;">{value:.0f}{rank_str}</span>'
         f'</div>'
-        f'<div style="position:relative; height:18px; background:#1a1d24; border-radius:4px; overflow:visible;">'
+        f'<div style="position:relative; height:18px; background:var(--tdd-dark-card); border-radius:4px; overflow:visible;">'
         f'<div style="width:{pct:.1f}%; height:100%; background:{color}; border-radius:4px;"></div>'
         f'<div style="position:absolute; left:{mid_pct:.1f}%; top:0; height:100%; '
         f'width:1px; background:{SLATE}44;"></div>'
@@ -83,15 +83,15 @@ def _score_gauge(label: str, score: float, extra: str = "") -> str:
     """Small score gauge for sub-dimensions (0-1 scale)."""
     pct = max(0, min(100, score * 100))
     color = GOLD if score >= 0.70 else SAGE if score >= 0.45 else EMBER if score < 0.30 else SLATE
-    extra_html = f'<span style="color:{SLATE}; font-size:0.75rem; margin-left:4px;">{extra}</span>' if extra else ""
+    extra_html = f'<span class="tdd-meta" style="margin-left:4px;">{extra}</span>' if extra else ""
     return (
         f'<div style="margin-bottom:8px;">'
         f'<div style="display:flex; justify-content:space-between; margin-bottom:2px;">'
-        f'<span style="color:{CREAM}; font-size:0.8rem;">{label}</span>'
-        f'<span style="color:{color}; font-weight:600; font-size:0.85rem;">'
+        f'<span class="tdd-meta" style="color:var(--tdd-cream);">{label}</span>'
+        f'<span class="tdd-stat-value" style="color:{color};">'
         f'{score:.2f}{extra_html}</span>'
         f'</div>'
-        f'<div style="height:8px; background:#1a1d24; border-radius:4px;">'
+        f'<div style="height:8px; background:var(--tdd-dark-card); border-radius:4px;">'
         f'<div style="width:{pct:.1f}%; height:100%; background:{color}; border-radius:4px;"></div>'
         f'</div></div>'
     )
@@ -100,9 +100,8 @@ def _score_gauge(label: str, score: float, extra: str = "") -> str:
 def _pill(label: str, color: str) -> str:
     """Render a colored pill/tag."""
     return (
-        f'<span style="background:{color}22; color:{color}; '
-        f'border:1px solid {color}44; padding:3px 10px; border-radius:12px; '
-        f'font-size:0.8rem; font-weight:600; margin-right:5px;">{label}</span>'
+        f'<span class="tdd-badge" style="background:{color}22; color:{color}; '
+        f'border:1px solid {color}44; margin-right:5px;">{label}</span>'
     )
 
 
@@ -110,8 +109,8 @@ def _stat_row(label: str, value: str, color: str = CREAM) -> str:
     """Key-value stat row."""
     return (
         f'<div style="display:flex; justify-content:space-between; padding:3px 0;">'
-        f'<span style="color:{SLATE}; font-size:0.85rem;">{label}</span>'
-        f'<span style="color:{color}; font-weight:600; font-size:0.85rem;">{value}</span>'
+        f'<span class="tdd-stat-label">{label}</span>'
+        f'<span class="tdd-stat-value" style="color:{color};">{value}</span>'
         f'</div>'
     )
 
@@ -149,11 +148,11 @@ def _render_team_profile_tab(
     rank = int(tr["rank"]) if not tr.empty and pd.notna(tr.get("rank")) else None
     proj_w = tr.get("projected_wins", None)
 
-    rank_html = f'<span style="color:{GOLD}; font-size:2rem; font-weight:800;">#{rank}</span>' if rank else ""
+    rank_html = f'<span style="color:var(--tdd-gold); font-size:2rem; font-weight:800;">#{rank}</span>' if rank else ""
     tier_html = _pill(tier, tier_color)
     proj_w_html = (
-        f'<span style="color:{CREAM}; font-size:0.85rem;">'
-        f'Proj. W: <span style="color:{GOLD}; font-weight:700;">{proj_w:.0f}</span></span>'
+        f'<span class="tdd-context" style="color:var(--tdd-cream);">'
+        f'Proj. W: <span style="color:var(--tdd-gold); font-weight:700;">{proj_w:.0f}</span></span>'
         if proj_w and pd.notna(proj_w) else ""
     )
 
@@ -167,8 +166,7 @@ def _render_team_profile_tab(
     # ── ELO breakdown ────────────────────────────────────────────────
     if not te.empty:
         st.markdown(
-            f'<div style="color:{GOLD}; font-weight:700; font-size:0.95rem; '
-            f'margin-bottom:8px;">Component ELO</div>',
+            '<div class="tdd-section-hdr" style="margin-bottom:8px;">Component ELO</div>',
             unsafe_allow_html=True,
         )
 
@@ -198,8 +196,8 @@ def _render_team_profile_tab(
             st.markdown(
                 f'<div style="padding:6px 12px; border-left:3px solid {insight_color}; '
                 f'margin-bottom:12px; font-size:0.85rem;">'
-                f'<span style="color:{CREAM};">{stronger.title()}-first team</span> '
-                f'<span style="color:{SLATE};">\u2014 {abs(diff):.0f} ELO gap over {weaker}</span>'
+                f'<span class="tdd-player-name" style="font-weight:400;">{stronger.title()}-first team</span> '
+                f'<span class="tdd-context">\u2014 {abs(diff):.0f} ELO gap over {weaker}</span>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -207,8 +205,7 @@ def _render_team_profile_tab(
     # ── Sub-score gauges ─────────────────────────────────────────────
     if not tr.empty:
         st.markdown(
-            f'<div style="color:{GOLD}; font-weight:700; font-size:0.95rem; '
-            f'margin-top:16px; margin-bottom:8px;">Profile Scores</div>',
+            '<div class="tdd-section-hdr" style="margin-top:16px; margin-bottom:8px;">Profile Scores</div>',
             unsafe_allow_html=True,
         )
 
@@ -227,8 +224,8 @@ def _render_team_profile_tab(
             gauges_r = ""
             hd_score = tr.get("health_depth_score", 0.5)
             gauges_r += _score_gauge("Health & Depth", hd_score)
-            composite = tr.get("composite_score", 0.5)
-            gauges_r += _score_gauge("Composite", composite)
+            tdd_score = tr.get("tdd_score", tr.get("composite_score", 0.5))
+            gauges_r += _score_gauge("TDD Score", tdd_score / 10 if tdd_score > 1 else tdd_score)
 
             # Add style pills
             styles = []
@@ -252,8 +249,7 @@ def _render_team_profile_tab(
 
     # ── Offense snapshot ─────────────────────────────────────────────
     st.markdown(
-        f'<div style="color:{GOLD}; font-weight:700; font-size:0.95rem; '
-        f'margin-top:16px; margin-bottom:8px;">Offense</div>',
+        '<div class="tdd-section-hdr" style="margin-top:16px; margin-bottom:8px;">Offense</div>',
         unsafe_allow_html=True,
     )
 
@@ -296,8 +292,7 @@ def _render_team_profile_tab(
 
     # ── Pitching snapshot ────────────────────────────────────────────
     st.markdown(
-        f'<div style="color:{GOLD}; font-weight:700; font-size:0.95rem; '
-        f'margin-top:16px; margin-bottom:8px;">Pitching</div>',
+        '<div class="tdd-section-hdr" style="margin-top:16px; margin-bottom:8px;">Pitching</div>',
         unsafe_allow_html=True,
     )
 
@@ -339,8 +334,7 @@ def _render_team_profile_tab(
     def_org_cols = st.columns(2)
     with def_org_cols[0]:
         st.markdown(
-            f'<div style="color:{GOLD}; font-weight:700; font-size:0.95rem; '
-            f'margin-top:12px; margin-bottom:8px;">Defense</div>',
+            '<div class="tdd-section-hdr" style="margin-top:12px; margin-bottom:8px;">Defense</div>',
             unsafe_allow_html=True,
         )
         html = ""
@@ -357,8 +351,7 @@ def _render_team_profile_tab(
 
     with def_org_cols[1]:
         st.markdown(
-            f'<div style="color:{GOLD}; font-weight:700; font-size:0.95rem; '
-            f'margin-top:12px; margin-bottom:8px;">Organization</div>',
+            '<div class="tdd-section-hdr" style="margin-top:12px; margin-bottom:8px;">Organization</div>',
             unsafe_allow_html=True,
         )
         html = ""
@@ -384,8 +377,7 @@ def _render_team_profile_tab(
         avg_age = tr.get("avg_age") if not tr.empty else None
         if (il_days and pd.notna(il_days)) or (avg_age and pd.notna(avg_age)):
             st.markdown(
-                f'<div style="color:{GOLD}; font-weight:700; font-size:0.95rem; '
-                f'margin-top:12px; margin-bottom:8px;">Health & Age</div>',
+                '<div class="tdd-section-hdr" style="margin-top:12px; margin-bottom:8px;">Health & Age</div>',
                 unsafe_allow_html=True,
             )
             html = ""
@@ -402,8 +394,7 @@ def _render_team_profile_tab(
         div_elo = tr.get("div_avg_elo") if not tr.empty else None
         if (opp_elo and pd.notna(opp_elo)) or (big_gm and pd.notna(big_gm)):
             st.markdown(
-                f'<div style="color:{GOLD}; font-weight:700; font-size:0.95rem; '
-                f'margin-top:12px; margin-bottom:8px;">Schedule Context</div>',
+                '<div class="tdd-section-hdr" style="margin-top:12px; margin-bottom:8px;">Schedule Context</div>',
                 unsafe_allow_html=True,
             )
             html = ""
@@ -425,8 +416,7 @@ def _render_team_profile_tab(
 
         if not team_hist.empty and len(team_hist) > 20:
             st.markdown(
-                f'<div style="color:{GOLD}; font-weight:700; font-size:0.95rem; '
-                f'margin-top:16px; margin-bottom:8px;">ELO Trend</div>',
+                '<div class="tdd-section-hdr" style="margin-top:16px; margin-bottom:8px;">ELO Trend</div>',
                 unsafe_allow_html=True,
             )
             # Aggregate to weekly for a cleaner chart
@@ -537,9 +527,8 @@ def _player_row_html(
     if pd.notna(arch) and arch:
         color = _PILL_COLORS.get(arch, SLATE)
         arch_html = (
-            f'<span style="background:{color}22; color:{color}; border:1px solid {color}44; '
-            f'padding:2px 8px; border-radius:10px; font-size:0.75rem; font-weight:600; '
-            f'margin-left:8px;">{arch}</span>'
+            f'<span class="tdd-badge" style="background:{color}22; color:{color}; '
+            f'border:1px solid {color}44; margin-left:8px;">{arch}</span>'
         )
 
     h_color = _HEALTH_COLORS.get(health, SLATE)
@@ -549,19 +538,19 @@ def _player_row_html(
         else "\u25cb"
     )
     health_html = (
-        f'<span style="color:{h_color}; font-size:0.75rem; margin-left:8px;">'
+        f'<span class="tdd-meta" style="color:{h_color}; margin-left:8px;">'
         f'{dot} {health}</span>'
     )
 
     hand_html = ""
     if hand:
         hand_html = (
-            f'<span style="color:{SLATE}; font-size:0.8rem; min-width:30px;">'
+            f'<span class="tdd-meta" style="min-width:30px;">'
             f'{hand}HP</span>'
         )
 
     rank_html = (
-        f'<span style="color:{SLATE}; font-size:0.85rem; min-width:60px;">'
+        f'<span class="tdd-context" style="min-width:60px;">'
         f'#{rank}</span>'
         if rank > 0 else ""
     )
@@ -570,11 +559,11 @@ def _player_row_html(
         f'<div style="padding:6px 12px; border-left:3px solid {border_color}; '
         f'margin-bottom:2px; display:flex; align-items:center; gap:8px; '
         f'flex-wrap:wrap; opacity:{opacity};">'
-        f'<span style="color:{CREAM}; font-weight:{"700" if is_first else "400"}; '
+        f'<span class="tdd-player-name" style="font-weight:{"700" if is_first else "400"}; '
         f'min-width:6rem; flex-shrink:1;">{name}</span>'
         f'{hand_html}'
         f'{rank_html}'
-        f'<span style="color:{GOLD}; font-size:0.85rem; min-width:2.5rem;">{score:.2f}</span>'
+        f'<span class="tdd-stat-value" style="color:var(--tdd-gold); min-width:2.5rem;">{score * 10:.1f}</span>'
         f'{arch_html}{health_html}'
         f'</div>'
     )
@@ -654,9 +643,9 @@ def _render_hitter_depth(team_h: pd.DataFrame) -> None:
         if pos_players.empty:
             st.markdown(
                 f'<div style="padding:8px 12px; margin-bottom:6px; '
-                f'border-left:3px solid {SLATE}44; opacity:0.5;">'
-                f'<span style="color:{SLATE}; font-weight:600;">{pos}</span> '
-                f'<span style="color:{SLATE}; font-size:0.85rem;">'
+                f'border-left:3px solid var(--tdd-slate); opacity:0.3;">'
+                f'<span class="tdd-stat-label" style="font-weight:600;">{pos}</span> '
+                f'<span class="tdd-context">'
                 f'\u2014 No ranked player</span></div>',
                 unsafe_allow_html=True,
             )
@@ -679,8 +668,7 @@ def _render_hitter_depth(team_h: pd.DataFrame) -> None:
 
         st.markdown(
             f'<div style="margin-bottom:10px;">'
-            f'<div style="color:{GOLD}; font-weight:700; font-size:0.9rem; '
-            f'margin-bottom:4px; padding-left:15px;">{pos}</div>'
+            f'<div class="tdd-section-hdr" style="margin-bottom:4px; padding-left:15px;">{pos}</div>'
             f'{rows_html}</div>',
             unsafe_allow_html=True,
         )
@@ -701,8 +689,7 @@ def _render_pitching_depth(team_p: pd.DataFrame) -> None:
         if subset.empty:
             continue
         st.markdown(
-            f'<div style="color:{GOLD}; font-weight:700; font-size:0.9rem; '
-            f'margin-bottom:4px; padding-left:15px;">{label}</div>',
+            f'<div class="tdd-section-hdr" style="margin-bottom:4px; padding-left:15px;">{label}</div>',
             unsafe_allow_html=True,
         )
         rows_html = ""
@@ -848,10 +835,9 @@ def _render_trade_simulator_tab(
         for w in weaknesses:
             suffix = f' (#{w["best_rank"]})' if w["best_rank"] else " (empty)"
             pills_html += (
-                f'<span style="background:{EMBER}22; color:{EMBER}; '
-                f'border:1px solid {EMBER}44; padding:4px 12px; '
-                f'border-radius:16px; font-size:0.85rem; font-weight:600; '
-                f'margin-right:6px;">{w["position"]}{suffix}</span> '
+                f'<span class="tdd-badge" style="background:{EMBER}22; color:{EMBER}; '
+                f'border:1px solid {EMBER}44; margin-right:6px;">'
+                f'{w["position"]}{suffix}</span> '
             )
         st.markdown(
             f'<div style="margin-bottom:16px;">{pills_html}</div>',
@@ -859,7 +845,7 @@ def _render_trade_simulator_tab(
         )
     else:
         st.markdown(
-            f'<span style="color:{SAGE};">'
+            f'<span style="color:var(--tdd-sage);">'
             f'No significant positional weaknesses detected.</span>',
             unsafe_allow_html=True,
         )
@@ -914,8 +900,8 @@ def _render_trade_simulator_tab(
     st.markdown(
         f'<div style="padding:8px 16px; background:{GOLD}15; '
         f'border:1px solid {GOLD}44; border-radius:8px; margin:8px 0 16px;">'
-        f'<span style="color:{CREAM}; font-weight:600;">Trade Capital:</span> '
-        f'<span style="color:{GOLD}; font-weight:700; font-size:1.1rem;">'
+        f'<span class="tdd-stat-value">Trade Capital:</span> '
+        f'<span style="color:var(--tdd-gold); font-weight:700; font-size:1.1rem;">'
         f'{trade_capital:.2f}</span></div>',
         unsafe_allow_html=True,
     )
@@ -973,7 +959,7 @@ def _render_trade_results(
         if current_best_rank and rank < current_best_rank:
             upgrade = f'<span style="color:{POSITIVE}; font-weight:600;">\u2191 +{current_best_rank - rank}</span>'
         elif current_best_rank:
-            upgrade = f'<span style="color:{SLATE};">\u2014</span>'
+            upgrade = f'<span style="color:var(--tdd-slate);">\u2014</span>'
         else:
             upgrade = f'<span style="color:{POSITIVE}; font-weight:600;">\u2191 New</span>'
 
@@ -981,26 +967,24 @@ def _render_trade_results(
         if pd.notna(arch) and arch:
             color = _PILL_COLORS.get(arch, SLATE)
             arch_html = (
-                f'<span style="background:{color}22; color:{color}; '
-                f'border:1px solid {color}44; padding:2px 8px; '
-                f'border-radius:10px; font-size:0.75rem;">{arch}</span>'
+                f'<span class="tdd-badge" style="background:{color}22; color:{color}; '
+                f'border:1px solid {color}44;">{arch}</span>'
             )
 
         m_color = GOLD if match_pct >= 85 else SAGE if match_pct >= 70 else EMBER
 
         rows_html += (
             f'<tr>'
-            f'<td style="color:{CREAM};padding:6px 10px;font-weight:600;">{name}</td>'
-            f'<td style="padding:6px 10px;color:{SLATE};">{team}</td>'
+            f'<td class="tdd-player-name" style="padding:6px 10px;">{name}</td>'
+            f'<td class="tdd-stat-label" style="padding:6px 10px;" data-team="{team}">{team}</td>'
             f'<td style="padding:6px 10px;">{arch_html}</td>'
-            f'<td style="padding:6px 10px;color:{GOLD};">{score:.2f}</td>'
+            f'<td class="tdd-stat-value" style="padding:6px 10px;color:var(--tdd-gold);">{score:.2f}</td>'
             f'<td style="padding:6px 10px;">#{rank}</td>'
             f'<td style="padding:6px 10px;color:{m_color};">{match_pct:.0f}%</td>'
             f'<td style="padding:6px 10px;">{upgrade}</td>'
             f'<td style="padding:6px 10px;">'
-            f'<span style="background:{fit_color}22; color:{fit_color}; '
-            f'border:1px solid {fit_color}44; padding:2px 8px; '
-            f'border-radius:10px; font-size:0.75rem; font-weight:600;">'
+            f'<span class="tdd-badge" style="background:{fit_color}22; color:{fit_color}; '
+            f'border:1px solid {fit_color}44;">'
             f'{fit_label}</span></td>'
             f'</tr>'
         )
@@ -1008,14 +992,14 @@ def _render_trade_results(
     table_html = (
         f'<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">'
         f'<thead><tr style="border-bottom:1px solid {SLATE}44;">'
-        f'<th style="text-align:left;padding:6px 10px;color:{GOLD};">Player</th>'
-        f'<th style="padding:6px 10px;color:{SLATE};">Team</th>'
-        f'<th style="padding:6px 10px;color:{SLATE};">Archetype</th>'
-        f'<th style="padding:6px 10px;color:{SLATE};">TDD Score</th>'
-        f'<th style="padding:6px 10px;color:{SLATE};">Pos Rank</th>'
-        f'<th style="padding:6px 10px;color:{SLATE};">Match %</th>'
-        f'<th style="padding:6px 10px;color:{SLATE};">Upgrade</th>'
-        f'<th style="padding:6px 10px;color:{SLATE};">Trade Fit</th>'
+        f'<th class="tdd-section-hdr" style="text-align:left;padding:6px 10px;">Player</th>'
+        f'<th class="tdd-stat-label" style="padding:6px 10px;">Team</th>'
+        f'<th class="tdd-stat-label" style="padding:6px 10px;">Archetype</th>'
+        f'<th class="tdd-stat-label" style="padding:6px 10px;">TDD Score</th>'
+        f'<th class="tdd-stat-label" style="padding:6px 10px;">Pos Rank</th>'
+        f'<th class="tdd-stat-label" style="padding:6px 10px;">Match %</th>'
+        f'<th class="tdd-stat-label" style="padding:6px 10px;">Upgrade</th>'
+        f'<th class="tdd-stat-label" style="padding:6px 10px;">Trade Fit</th>'
         f'</tr></thead><tbody>{rows_html}</tbody></table>'
     )
     st.markdown(f'<div class="insight-card">{table_html}</div>', unsafe_allow_html=True)
@@ -1073,13 +1057,13 @@ def _render_staff_metrics(
             for m in strengths:
                 st.markdown(
                     f'<div style="padding:4px 0;">'
-                    f'<span style="color:{CREAM};">{m["Metric"]}</span>: '
-                    f'<span style="color:{POSITIVE}; font-weight:600;">{m["Team"]}</span> '
-                    f'<span style="color:{SLATE};">(lg: {m["League Avg"]}, {m["Diff"]})</span></div>',
+                    f'<span class="tdd-player-name" style="font-weight:400;">{m["Metric"]}</span>: '
+                    f'<span class="tdd-stat-value" style="color:{POSITIVE};">{m["Team"]}</span> '
+                    f'<span class="tdd-context">(lg: {m["League Avg"]}, {m["Diff"]})</span></div>',
                     unsafe_allow_html=True,
                 )
         else:
-            st.markdown(f'<span style="color:{SLATE};">None vs league average</span>', unsafe_allow_html=True)
+            st.markdown('<span class="tdd-context">None vs league average</span>', unsafe_allow_html=True)
     with col_w:
         st.markdown(
             f'<div style="color:{NEGATIVE}; font-weight:600; margin-bottom:8px;">Weaknesses</div>',
@@ -1089,13 +1073,13 @@ def _render_staff_metrics(
             for m in weaknesses_p:
                 st.markdown(
                     f'<div style="padding:4px 0;">'
-                    f'<span style="color:{CREAM};">{m["Metric"]}</span>: '
-                    f'<span style="color:{NEGATIVE}; font-weight:600;">{m["Team"]}</span> '
-                    f'<span style="color:{SLATE};">(lg: {m["League Avg"]}, {m["Diff"]})</span></div>',
+                    f'<span class="tdd-player-name" style="font-weight:400;">{m["Metric"]}</span>: '
+                    f'<span class="tdd-stat-value" style="color:{NEGATIVE};">{m["Team"]}</span> '
+                    f'<span class="tdd-context">(lg: {m["League Avg"]}, {m["Diff"]})</span></div>',
                     unsafe_allow_html=True,
                 )
         else:
-            st.markdown(f'<span style="color:{SLATE};">None vs league average</span>', unsafe_allow_html=True)
+            st.markdown('<span class="tdd-context">None vs league average</span>', unsafe_allow_html=True)
 
 
 def _build_limited_pitcher_rows(
@@ -1173,7 +1157,15 @@ def _build_pitcher_rows(
 ) -> list[dict]:
     """Build display rows for a set of pitchers."""
     rows: list[dict] = []
-    for _, row in pitchers.sort_values("composite_score", ascending=False).iterrows():
+    # Use diamond_rating from rankings as source of truth
+    _p_ranks = load_rankings("pitchers") if "diamond_rating" not in pitchers.columns else pd.DataFrame()
+    if not _p_ranks.empty and "diamond_rating" in _p_ranks.columns:
+        pitchers = pitchers.merge(
+            _p_ranks[["pitcher_id", "diamond_rating"]].drop_duplicates(),
+            on="pitcher_id", how="left",
+        )
+    sort_col = "diamond_rating" if "diamond_rating" in pitchers.columns else "composite_score"
+    for _, row in pitchers.sort_values(sort_col, ascending=False).iterrows():
         pid = int(row["pitcher_id"])
         inj = injury_lookup.get(pid)
         name = row["pitcher_name"]
@@ -1181,11 +1173,13 @@ def _build_pitcher_rows(
             sev = inj["severity"]
             tag = "[IL-60]" if sev == "major" else "[IL]" if sev == "significant" else "[DTD]"
             name = f"{tag} {name}"
+        dr = row.get("diamond_rating")
+        rating_str = f"{dr:.1f}" if pd.notna(dr) else diamond_rating_text_composite(row.get("composite_score", 0))
         r: dict[str, object] = {
             "Name": name,
             "Age": int(row["age"]) if pd.notna(row.get("age")) else "",
             "Hand": row.get("pitch_hand", ""),
-            "Rating": diamond_rating_text_composite(row["composite_score"]),
+            "Rating": rating_str,
         }
         if use_priors:
             for label, key, _, _ in PITCHER_STATS:
@@ -1330,7 +1324,15 @@ def _render_roster_tab(
     else:
         h_rows = []
         if not team_hitters.empty:
-            for _, row in team_hitters.sort_values("composite_score", ascending=False).iterrows():
+            # Use diamond_rating from rankings as source of truth
+            _h_ranks = load_rankings("hitters") if "diamond_rating" not in team_hitters.columns else pd.DataFrame()
+            if not _h_ranks.empty and "diamond_rating" in _h_ranks.columns:
+                team_hitters = team_hitters.merge(
+                    _h_ranks[["batter_id", "diamond_rating"]].drop_duplicates(),
+                    on="batter_id", how="left",
+                )
+            sort_col = "diamond_rating" if "diamond_rating" in team_hitters.columns else "composite_score"
+            for _, row in team_hitters.sort_values(sort_col, ascending=False).iterrows():
                 pid = int(row["batter_id"])
                 inj = injury_lookup.get(pid)
                 name = row["batter_name"]
@@ -1338,11 +1340,13 @@ def _render_roster_tab(
                     sev = inj["severity"]
                     tag = "[IL-60]" if sev == "major" else "[IL]" if sev == "significant" else "[DTD]"
                     name = f"{tag} {name}"
+                dr = row.get("diamond_rating")
+                rating_str = f"{dr:.1f}" if pd.notna(dr) else diamond_rating_text_composite(row.get("composite_score", 0))
                 r: dict[str, object] = {
                     "Name": name,
                     "Age": int(row["age"]) if pd.notna(row.get("age")) else "",
                     "Bats": row.get("batter_stand", ""),
-                    "Rating": diamond_rating_text_composite(row["composite_score"]),
+                    "Rating": rating_str,
                 }
                 if use_priors:
                     for label, key, _, _ in HITTER_STATS:
@@ -1486,22 +1490,19 @@ def page_team_overview() -> None:
         tier_color = _TIER_COLORS.get(tier, SLATE)
         if tier:
             tier_html = (
-                f'<span style="background:{tier_color}22; color:{tier_color}; '
-                f'border:1px solid {tier_color}44; padding:2px 10px; '
-                f'border-radius:12px; font-size:0.8rem; font-weight:600; '
-                f'margin-left:10px;">{tier}</span>'
+                f'<span class="tdd-badge" style="background:{tier_color}22; color:{tier_color}; '
+                f'border:1px solid {tier_color}44; margin-left:10px;">{tier}</span>'
             )
         rank_val = tr.get("rank")
         if pd.notna(rank_val):
             elo_html = (
-                f'<span style="color:{GOLD}; font-weight:700; '
+                f'<span style="color:var(--tdd-gold); font-weight:700; '
                 f'margin-left:8px;">#{int(rank_val)}</span>'
             )
         pw = tr.get("projected_wins")
         if pd.notna(pw):
             proj_w_html = (
-                f'<span style="color:{SLATE}; font-size:0.85rem; '
-                f'margin-left:10px;">{pw:.0f} proj W</span>'
+                f'<span class="tdd-context" style="margin-left:10px;">{pw:.0f} proj W</span>'
             )
 
     _inj_full = load_preseason_injuries()
@@ -1514,12 +1515,12 @@ def page_team_overview() -> None:
     team_header_html = (
         f'<div class="brand-header">'
         f'<div>'
-        f'<div class="brand-title">{selected_team}{elo_html}{tier_html}</div>'
+        f'<div class="brand-title"><span class="tdd-team-abbr" data-team="{selected_team}">{selected_team}</span>{elo_html}{tier_html}</div>'
         f'<div class="brand-subtitle">'
         f'{total_pitchers} pitchers | {total_hitters} hitters | '
         f'{n_injured} injured{proj_w_html}</div>'
         f'</div>'
-        f'<div style="color:{SLATE}; font-size:0.9rem;">'
+        f'<div class="tdd-context">'
         f'{CURRENT_SEASON} Season</div>'
         f'</div>'
     )

@@ -40,7 +40,7 @@ def _stat_row_html(label: str, values: list[str], colors: list[str]) -> str:
     )
     return (
         f'<tr>'
-        f'<td style="padding:6px 8px; color:{SLATE}; white-space:nowrap;">{label}</td>'
+        f'<td style="padding:6px 8px; color:var(--tdd-slate); white-space:nowrap;">{label}</td>'
         f'{val_cells}'
         f'</tr>'
     )
@@ -199,10 +199,8 @@ def page_compare() -> None:
             )
             st.markdown(
                 f'<div style="text-align:center;">'
-                f'<div style="color:{GOLD}; font-size:1.1rem; font-weight:700;">'
-                f'{row[name_col]}</div>'
-                f'<div style="color:{SLATE}; font-size:0.85rem;">'
-                f'{team}</div>'
+                f'<div class="tdd-player-name">{row[name_col]}</div>'
+                f'<div class="tdd-meta" data-team="{team}">{team}</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -232,7 +230,7 @@ def page_compare() -> None:
                     info_parts.append(f"Bats {stand}")
 
             st.markdown(
-                f'<div style="text-align:center; color:{SLATE}; font-size:0.8rem; '
+                f'<div class="tdd-meta" style="text-align:center; '
                 f'margin-bottom:4px;">{" | ".join(info_parts)}</div>',
                 unsafe_allow_html=True,
             )
@@ -245,9 +243,7 @@ def page_compare() -> None:
                     arch_name = arch_match.iloc[0]["archetype_name"]
                     st.markdown(
                         f'<div style="text-align:center;">'
-                        f'<span style="background:{DARK_BORDER}; color:{GOLD}; '
-                        f'padding:2px 8px; border-radius:4px; font-size:0.75rem; '
-                        f'font-weight:600;">{arch_name}</span>'
+                        f'<span class="tdd-badge">{arch_name}</span>'
                         f'</div>',
                         unsafe_allow_html=True,
                     )
@@ -266,13 +262,13 @@ def page_compare() -> None:
 
     # Table header
     header_cells = "".join(
-        f'<th style="text-align:center; padding:6px 8px; color:{GOLD}; '
+        f'<th style="text-align:center; padding:6px 8px; color:var(--tdd-gold); '
         f'font-weight:700; font-size:0.9rem;">{r[name_col]}</th>'
         for r in ordered_rows
     )
     table_header = (
         f'<tr>'
-        f'<th style="padding:6px 8px; color:{SLATE};">Stat</th>'
+        f'<th style="padding:6px 8px; color:var(--tdd-slate);">Stat</th>'
         f'{header_cells}'
         f'</tr>'
     )
@@ -281,9 +277,9 @@ def page_compare() -> None:
 
     # Section: Bayesian Projected Rates
     table_rows.append(
-        f'<tr><td colspan="{n_players + 1}" style="padding:10px 8px 4px; '
-        f'color:{GOLD}; font-weight:700; font-size:0.9rem; '
-        f'border-bottom:1px solid {DARK_BORDER};">'
+        f'<tr><td colspan="{n_players + 1}" class="tdd-section-hdr" '
+        f'style="padding:10px 8px 4px; '
+        f'border-bottom:1px solid var(--tdd-dark-border);">'
         f'{PROJECTION_LABEL} Rates</td></tr>'
     )
 
@@ -353,9 +349,9 @@ def page_compare() -> None:
 
     # Section: Observed Skill Metrics
     table_rows.append(
-        f'<tr><td colspan="{n_players + 1}" style="padding:10px 8px 4px; '
-        f'color:{GOLD}; font-weight:700; font-size:0.9rem; '
-        f'border-bottom:1px solid {DARK_BORDER};">'
+        f'<tr><td colspan="{n_players + 1}" class="tdd-section-hdr" '
+        f'style="padding:10px 8px 4px; '
+        f'border-bottom:1px solid var(--tdd-dark-border);">'
         f'Observed Skill Profile</td></tr>'
     )
 
@@ -397,7 +393,7 @@ def page_compare() -> None:
                         hi = int(round(c_data.get(p90_col, v)))
                         vals.append(float(mean_v))
                         display_vals.append(
-                            f'{mean_v} <span style="color:{SLATE}; font-size:0.75rem;">'
+                            f'{mean_v} <span class="tdd-context">'
                             f'({lo}-{hi})</span>'
                         )
                         counting_rows_exist = True
@@ -410,9 +406,9 @@ def page_compare() -> None:
 
         if counting_rows_exist:
             table_rows.append(
-                f'<tr><td colspan="{n_players + 1}" style="padding:10px 8px 4px; '
-                f'color:{GOLD}; font-weight:700; font-size:0.9rem; '
-                f'border-bottom:1px solid {DARK_BORDER};">'
+                f'<tr><td colspan="{n_players + 1}" class="tdd-section-hdr" '
+                f'style="padding:10px 8px 4px; '
+                f'border-bottom:1px solid var(--tdd-dark-border);">'
                 f'{PROJECTION_LABEL} Counting Stats</td></tr>'
             )
             table_rows.extend(counting_row_html)
@@ -422,8 +418,8 @@ def page_compare() -> None:
     table_html = (
         f'<div style="overflow-x:auto;">'
         f'<table style="width:100%; border-collapse:collapse; '
-        f'background:{DARK_CARD}; border:1px solid {DARK_BORDER}; '
-        f'border-radius:8px; overflow:hidden;">'
+        f'background:transparent; border:none; '
+        f'border-bottom:1px solid var(--tdd-dark-border); overflow:hidden;">'
         f'<thead style="background:{DARK};">{table_header}</thead>'
         f'<tbody>{all_rows}</tbody>'
         f'</table>'
@@ -453,7 +449,7 @@ def page_compare() -> None:
                 bar_parts.append(
                     f'<div style="margin-bottom:4px;">'
                     f'<div style="display:flex; align-items:center; gap:8px;">'
-                    f'<span style="color:{CREAM}; font-size:0.8rem; min-width:4rem; '
+                    f'<span style="color:var(--tdd-cream); font-size:0.8rem; min-width:4rem; '
                     f'text-align:right; flex-shrink:1;">{pname}</span>'
                     f'<div style="flex:1; height:10px; background:{DARK_BORDER}; '
                     f'border-radius:5px; overflow:hidden;">'
@@ -469,10 +465,9 @@ def page_compare() -> None:
         if bar_parts:
             bars_html = "".join(bar_parts)
             st.markdown(
-                f'<div style="background:{DARK_CARD}; border:1px solid {DARK_BORDER}; '
-                f'border-radius:8px; padding:12px 16px; margin-bottom:12px;">'
-                f'<div style="color:{GOLD}; font-weight:700; font-size:0.85rem; '
-                f'margin-bottom:8px;">{label}</div>'
+                f'<div style="background:transparent; border:none; '
+                f'border-bottom:1px solid var(--tdd-dark-border); padding:12px 0; margin-bottom:12px;">'
+                f'<div class="tdd-section-hdr" style="margin-bottom:8px;">{label}</div>'
                 f'{bars_html}'
                 f'</div>',
                 unsafe_allow_html=True,

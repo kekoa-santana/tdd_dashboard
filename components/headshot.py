@@ -26,6 +26,6 @@ def headshot_html(player_id: int, size: int = 50) -> str:
     return (
         f'<img src="{url}" '
         f'style="width:{size}px; border-radius:6px; '
-        f'background-color:#181b23; '
+        f'background-color:var(--tdd-dark-card); '
         f'display:inline-block; vertical-align:middle;" />'
     )

@@ -91,7 +91,7 @@ def page_data_health() -> None:
     """Dashboard data health: freshness, inventory, manifest validation."""
 
     st.markdown(
-        '<div class="section-header">Data Health</div>',
+        '<div class="tdd-section-hdr">Data Health</div>',
         unsafe_allow_html=True,
     )
 
@@ -99,7 +99,7 @@ def page_data_health() -> None:
     # Section 1: Update Status
     # ------------------------------------------------------------------
     st.markdown(
-        '<div class="section-header">Update Status</div>',
+        '<div class="tdd-section-hdr">Update Status</div>',
         unsafe_allow_html=True,
     )
 
@@ -143,7 +143,7 @@ def page_data_health() -> None:
 
         st.markdown(
             f'<div class="insight-card">'
-            f'<span style="color:{SLATE};">Last Updated: </span>'
+            f'<span class="tdd-stat-label">Last Updated: </span>'
             f'<span style="color:{fresh_color}; font-weight:600;">'
             f'{ts_display} ({freshness_label})</span>'
             f'</div>',
@@ -167,7 +167,7 @@ def page_data_health() -> None:
     # Section 2: Artifact Inventory
     # ------------------------------------------------------------------
     st.markdown(
-        '<div class="section-header">Artifact Inventory</div>',
+        '<div class="tdd-section-hdr">Artifact Inventory</div>',
         unsafe_allow_html=True,
     )
 
@@ -179,7 +179,7 @@ def page_data_health() -> None:
         st.info("No artifacts found in data/dashboard/.")
     else:
         st.markdown(
-            f'<span style="color:{SLATE}; font-size:0.85rem;">'
+            f'<span class="tdd-meta">'
             f'{len(df_main)} files in data/dashboard/ '
             f'({_human_size(df_main["size_bytes"].sum())} total)'
             f'</span>',
@@ -191,7 +191,7 @@ def page_data_health() -> None:
 
     if not df_snap.empty:
         st.markdown(
-            f'<span style="color:{SLATE}; font-size:0.85rem;">'
+            f'<span class="tdd-meta">'
             f'{len(df_snap)} files in snapshots/ '
             f'({_human_size(df_snap["size_bytes"].sum())} total)'
             f'</span>',
@@ -205,7 +205,7 @@ def page_data_health() -> None:
     # Section 3: Manifest Validation
     # ------------------------------------------------------------------
     st.markdown(
-        '<div class="section-header">Manifest Validation</div>',
+        '<div class="tdd-section-hdr">Manifest Validation</div>',
         unsafe_allow_html=True,
     )
 
@@ -223,9 +223,9 @@ def page_data_health() -> None:
             if status.valid and not status.warnings:
                 st.markdown(
                     f'<div class="insight-card">'
-                    f'<span style="color:{SAGE}; font-weight:700;">'
+                    f'<span style="color:var(--tdd-sage); font-weight:700;">'
                     f'PASS</span>'
-                    f'<span style="color:{CREAM};"> -- '
+                    f'<span style="color:var(--tdd-cream);"> -- '
                     f'All manifest checks passed.</span>'
                     f'</div>',
                     unsafe_allow_html=True,
@@ -233,55 +233,55 @@ def page_data_health() -> None:
             elif status.valid and status.warnings:
                 st.markdown(
                     f'<div class="insight-card">'
-                    f'<span style="color:{GOLD}; font-weight:700;">'
+                    f'<span style="color:var(--tdd-gold); font-weight:700;">'
                     f'WARNINGS</span>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
                 for w in status.warnings:
                     st.markdown(
-                        f'<span style="color:{GOLD};">- {w}</span>',
+                        f'<span style="color:var(--tdd-gold);">- {w}</span>',
                         unsafe_allow_html=True,
                     )
             else:
                 st.markdown(
                     f'<div class="insight-card">'
-                    f'<span style="color:{EMBER}; font-weight:700;">'
+                    f'<span style="color:var(--tdd-ember); font-weight:700;">'
                     f'ERRORS</span>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
                 if status.missing_artifacts:
                     st.markdown(
-                        f'<span style="color:{EMBER};">Missing artifacts:</span>',
+                        f'<span style="color:var(--tdd-ember);">Missing artifacts:</span>',
                         unsafe_allow_html=True,
                     )
                     for m in status.missing_artifacts:
                         st.markdown(
-                            f'<span style="color:{CREAM};">  - {m}</span>',
+                            f'<span style="color:var(--tdd-cream);">  - {m}</span>',
                             unsafe_allow_html=True,
                         )
                 if status.row_count_mismatches:
                     st.markdown(
-                        f'<span style="color:{EMBER};">Row count mismatches:</span>',
+                        f'<span style="color:var(--tdd-ember);">Row count mismatches:</span>',
                         unsafe_allow_html=True,
                     )
                     for r in status.row_count_mismatches:
                         st.markdown(
-                            f'<span style="color:{CREAM};">  - {r}</span>',
+                            f'<span style="color:var(--tdd-cream);">  - {r}</span>',
                             unsafe_allow_html=True,
                         )
                 if status.warnings:
                     for w in status.warnings:
                         st.markdown(
-                            f'<span style="color:{GOLD};">- {w}</span>',
+                            f'<span style="color:var(--tdd-gold);">- {w}</span>',
                             unsafe_allow_html=True,
                         )
 
             if status.manifest_age_hours is not None:
                 age_color = _freshness_color(status.manifest_age_hours)
                 st.markdown(
-                    f'<span style="color:{SLATE}; font-size:0.85rem;">'
+                    f'<span class="tdd-meta">'
                     f'Manifest age: '
                     f'<span style="color:{age_color};">'
                     f'{status.manifest_age_hours:.1f}h</span></span>',
@@ -295,7 +295,7 @@ def page_data_health() -> None:
     # Section 4: Config Summary
     # ------------------------------------------------------------------
     st.markdown(
-        '<div class="section-header">Config Summary</div>',
+        '<div class="tdd-section-hdr">Config Summary</div>',
         unsafe_allow_html=True,
     )
 
@@ -312,8 +312,8 @@ def page_data_health() -> None:
     for label, value in config_items:
         config_html += (
             f'<div style="margin:4px 0;">'
-            f'<span style="color:{SLATE}; font-size:0.85rem;">{label}: </span>'
-            f'<span style="color:{CREAM}; font-size:0.85rem;">{value}</span>'
+            f'<span class="tdd-stat-label">{label}: </span>'
+            f'<span class="tdd-stat-value">{value}</span>'
             f'</div>'
         )
     config_html += "</div>"
