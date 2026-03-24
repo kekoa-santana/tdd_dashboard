@@ -56,6 +56,30 @@ echo [%date% %time%] Running dashboard update... >> "%LOG_FILE%" 2>&1
 
 if %ERRORLEVEL% NEQ 0 (
     echo [%date% %time%] Dashboard update FAILED with exit code %ERRORLEVEL% >> "%LOG_FILE%" 2>&1
+    goto :end
 ) else (
-    echo [%date% %time%] Daily update completed successfully >> "%LOG_FILE%" 2>&1
+    echo [%date% %time%] Dashboard update completed successfully >> "%LOG_FILE%" 2>&1
 )
+
+REM ── Step 4: Git commit + push data to GitHub ──
+echo [%date% %time%] Pushing updated data to GitHub... >> "%LOG_FILE%" 2>&1
+cd /d "%PROJECT_DIR%"
+
+REM Stage only data files and manifest
+git add data/dashboard/*.parquet data/dashboard/*.json data/dashboard/*.npz data/dashboard/snapshots/ >> "%LOG_FILE%" 2>&1
+
+REM Check if there are changes to commit
+git diff --cached --quiet
+if %ERRORLEVEL% NEQ 0 (
+    git commit -m "data update" >> "%LOG_FILE%" 2>&1
+    git push >> "%LOG_FILE%" 2>&1
+    if %ERRORLEVEL% NEQ 0 (
+        echo [%date% %time%] Git push FAILED >> "%LOG_FILE%" 2>&1
+    ) else (
+        echo [%date% %time%] Data pushed to GitHub successfully >> "%LOG_FILE%" 2>&1
+    )
+) else (
+    echo [%date% %time%] No data changes to push >> "%LOG_FILE%" 2>&1
+)
+
+:end
