@@ -219,6 +219,83 @@ hr {
     text-decoration: none !important;
 }
 
+/* Desktop nav wrapper — keeps buttons in a flex row */
+.topbar-nav-desktop {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+}
+
+/* ================================================================
+   Mobile navigation — details/summary hamburger menu
+   ================================================================ */
+
+/* Hidden on desktop */
+.topbar-mobile-menu {
+    display: none;
+}
+.topbar-hamburger {
+    cursor: pointer;
+    font-size: 1.4rem;
+    color: var(--tdd-dark);
+    padding: 0.2rem 0.5rem;
+    list-style: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+.topbar-hamburger::-webkit-details-marker {
+    display: none;
+}
+.topbar-mobile-nav {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--tdd-cream);
+    border-top: 1px solid rgba(0,0,0,0.08);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    padding: 0.5rem 0;
+    z-index: 10001;
+    max-height: 80vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.topbar-mob-item {
+    display: block;
+    padding: 0.65rem 1.5rem;
+    color: var(--tdd-dark) !important;
+    font-size: 0.9rem;
+    font-weight: 500;
+    text-decoration: none !important;
+    opacity: 0.6;
+    transition: opacity 0.15s, background 0.15s;
+}
+.topbar-mob-item:hover,
+.topbar-mob-active {
+    opacity: 1 !important;
+    background: rgba(0,0,0,0.05);
+}
+.topbar-mob-active {
+    font-weight: 700 !important;
+}
+.topbar-mob-group {
+    padding: 0.8rem 1.5rem 0.15rem;
+    color: var(--tdd-dark);
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    opacity: 0.35;
+}
+.topbar-mob-group:first-child {
+    padding-top: 0.3rem;
+}
+.topbar-mob-socials {
+    border-top: 1px solid rgba(0,0,0,0.08);
+    padding: 0.6rem 1.5rem;
+    margin-top: 0.3rem;
+}
+
 /* ================================================================
    Global element classes — use these instead of inline styles
    ================================================================ */
@@ -916,6 +993,44 @@ div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
     .hide-desktop [data-testid="stVerticalBlock"] > div {
         margin-bottom: 1rem !important;
     }
+
+    /* Mobile menu — show hamburger, hide desktop nav */
+    .topbar-nav-desktop { display: none !important; }
+    .topbar-right { display: none !important; }
+    .topbar-mobile-menu {
+        display: block !important;
+        margin-left: auto;
+    }
+
+    /* Topbar — compact for mobile */
+    .topbar {
+        padding: 0.3rem 0.75rem;
+    }
+    .topbar-brand-text {
+        font-size: 0.75rem;
+        letter-spacing: 1px;
+        margin-right: 0;
+    }
+    .topbar-logo {
+        height: 28px;
+    }
+
+    /* Block container — reduce side padding */
+    .block-container {
+        padding-top: 3rem !important;
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+    }
+
+    /* Leaderboard cards — fill width on mobile */
+    .lb-card {
+        max-width: 100%;
+    }
+
+    /* Plotly charts — respect container width */
+    .js-plotly-plot, .plotly {
+        max-width: 100% !important;
+    }
 }
 
 /* =========================================================================
@@ -975,5 +1090,26 @@ div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
     /* Dataframes — even smaller text */
     .stDataFrame {
         font-size: 0.72rem;
+    }
+
+    /* Topbar — even more compact */
+    .topbar-brand-text {
+        font-size: 0.65rem;
+        letter-spacing: 0.5px;
+    }
+    .topbar-logo {
+        height: 24px;
+    }
+
+    /* Block container — tighter padding */
+    .block-container {
+        padding-left: 0.5rem !important;
+        padding-right: 0.5rem !important;
+    }
+
+    /* Leaderboard cards — full width, no margin constraint */
+    .lb-card {
+        max-width: 100%;
+        margin-bottom: 1rem;
     }
 }

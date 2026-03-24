@@ -322,6 +322,26 @@ def main() -> None:
                 f'</div>'
             )
 
+    # Mobile navigation — flat list for details/summary menu
+    mobile_nav_html = ""
+    for label, children in _NAV:
+        if children is None:
+            slug = label.lower().replace(" ", "_")
+            active = " topbar-mob-active" if page == label else ""
+            mobile_nav_html += (
+                f'<a href="?page={slug}" target="_self"'
+                f' class="topbar-mob-item{active}">{label}</a>'
+            )
+        else:
+            mobile_nav_html += f'<div class="topbar-mob-group">{label}</div>'
+            for child in children:
+                slug = child.lower().replace(" ", "_")
+                active = " topbar-mob-active" if page == child else ""
+                mobile_nav_html += (
+                    f'<a href="?page={slug}" target="_self"'
+                    f' class="topbar-mob-item{active}">{child}</a>'
+                )
+
     # Social links
     socials_html = (
         '<div class="topbar-socials">'
@@ -345,10 +365,19 @@ def main() -> None:
     <div class="topbar">
         {_logo_html}
         <span class="topbar-brand-text">The Data Diamond</span>
-        {nav_html}
+        <div class="topbar-nav-desktop">
+            {nav_html}
+        </div>
         <div class="topbar-right">
             {socials_html}
         </div>
+        <details class="topbar-mobile-menu">
+            <summary class="topbar-hamburger">&#9776;</summary>
+            <div class="topbar-mobile-nav">
+                {mobile_nav_html}
+                <div class="topbar-mob-socials">{socials_html}</div>
+            </div>
+        </details>
     </div>
     </div>
     """, unsafe_allow_html=True)
