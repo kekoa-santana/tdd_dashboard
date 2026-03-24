@@ -336,6 +336,10 @@ def _fmt_detail(val, fmt: str) -> str:
         return f"{val:.2f}"
     if fmt == "pct":
         return f"{val:.1%}"
+    if fmt == "dec1":
+        return f"{val:.1f}"
+    if fmt == "dec2":
+        return f"{val:.2f}"
     if fmt == "dec3":
         return f"{val:.3f}"
     return str(val)
