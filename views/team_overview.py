@@ -1499,6 +1499,7 @@ def page_team_overview() -> None:
                 f'<span style="color:var(--tdd-gold); font-weight:700; '
                 f'margin-left:8px;">#{int(rank_val)}</span>'
             )
+    if not team_rank_row.empty:
         pw = tr.get("projected_wins")
         if pd.notna(pw):
             proj_w_html = (

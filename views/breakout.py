@@ -13,6 +13,8 @@ from services.data_loader import (
 from components.headshot import headshot_html
 from components.diamond_rating import diamond_rating_html
 from lib.diamond_rating import score_to_diamonds
+from views.player_rankings import _render_ranking_card, _CSS as _RANKING_CSS
+from components.expandable_card import EXPANDABLE_CARD_CSS
 
 
 # ── Archetype configuration ─────────────────────────────────────────────
@@ -370,40 +372,17 @@ def _build_compact_card_html(
 
 # ── Section renderers ────────────────────────────────────────────────────
 
-def _render_top_cards(
-    df: pd.DataFrame,
-    id_col: str,
-    name_col: str,
-    teams_lookup: dict[int, str],
-    archetype_stats: dict[str, list[tuple[str, str, str]]],
-    prob_map: dict[str, str],
-    title: str,
-    n: int = 10,
-) -> None:
-    """Render top N breakout candidates as 2-wide card grid."""
-    st.markdown(
-        f'<div class="tdd-section-hdr">{title}</div>',
-        unsafe_allow_html=True,
-    )
+_HITTER_DETAIL_STATS = [
+    ("wOBA", "woba", ".000"), ("xwOBA", "xwoba", ".000"),
+    ("K%", "k_pct", "pct"), ("BB%", "bb_pct", "pct"),
+    ("Brl%", "barrel_pct", "pct"), ("Sprint", "sprint_speed", "dec1"),
+]
 
-    top = df.nlargest(n, "breakout_score")
-    if top.empty:
-        st.info("No breakout candidates available.")
-        return
-
-    rows = list(top.iterrows())
-    for i in range(0, len(rows), 2):
-        cols = st.columns(2)
-        for j, col in enumerate(cols):
-            idx = i + j
-            if idx < len(rows):
-                _, row = rows[idx]
-                card_html = _build_card_html(
-                    row, id_col, name_col, teams_lookup,
-                    archetype_stats, prob_map, rank=idx + 1,
-                )
-                with col:
-                    st.markdown(card_html, unsafe_allow_html=True)
+_PITCHER_DETAIL_STATS = [
+    ("K%", "k_pct", "pct"), ("BB%", "bb_pct", "pct"),
+    ("SwStr%", "swstr_pct", "pct"), ("Velo", "avg_velo", "dec1"),
+    ("ERA", "era", "0.00"), ("FIP", "fip", "0.00"),
+]
 
 
 def _render_position_bests(
@@ -442,8 +421,8 @@ def _render_position_bests(
                     st.markdown(card_html, unsafe_allow_html=True)
 
 
-def _render_hitter_table(df: pd.DataFrame) -> None:
-    """Render full hitter breakout table."""
+def _render_hitter_table(df: pd.DataFrame, teams_lookup: dict[int, str]) -> None:
+    """Render filtered hitter breakout leaderboard."""
     col_pos, col_arch, col_search = st.columns([1, 1, 2])
     with col_pos:
         pos_opts = ["All"] + sorted(
@@ -468,56 +447,17 @@ def _render_hitter_table(df: pd.DataFrame) -> None:
             filtered["batter_name"].str.contains(search, case=False, na=False)
         ]
 
-    filtered = filtered.copy()
-    filtered["_diamond"] = filtered["breakout_score"].apply(score_to_diamonds)
-
-    display_map = {
-        "breakout_rank": "#",
-        "batter_name": "Name",
-        "age": "Age",
-        "position": "Pos",
-        "team_abbr": "Team",
-        "batter_stand": "Bats",
-        "_diamond": "Rating",
-        "breakout_type": "Archetype",
-        "breakout_score": "Score",
-        "breakout_tier": "Tier",
-        "woba": "wOBA",
-        "xwoba": "xwOBA",
-        "k_pct": "K%",
-        "bb_pct": "BB%",
-        "barrel_pct": "Brl%",
-        "sprint_speed": "Sprint",
-        "oaa": "OAA",
-    }
-
-    available = [c for c in display_map if c in filtered.columns]
-    display_df = filtered[available].copy()
-    sort_col = "breakout_rank" if "breakout_rank" in available else "_diamond"
-    ascending = sort_col == "breakout_rank"
-    display_df = display_df.sort_values(sort_col, ascending=ascending)
-    display_df.columns = [display_map[c] for c in available]
-
-    fmt: dict[str, str] = {}
-    for col, f in [
-        ("Rating", "{:.1f}"), ("Score", "{:.0%}"),
-        ("wOBA", "{:.3f}"), ("xwOBA", "{:.3f}"),
-        ("K%", "{:.1%}"), ("BB%", "{:.1%}"), ("Brl%", "{:.1%}"),
-        ("Sprint", "{:.1f}"), ("OAA", "{:.0f}"),
-        ("#", "{:.0f}"), ("Age", "{:.0f}"),
-    ]:
-        if col in display_df.columns:
-            fmt[col] = f
-
-    styler = display_df.style.format(fmt, na_rep="\u2014")
-    if "Rating" in display_df.columns:
-        styler = styler.map(_score_color, subset=["Rating"])
-
-    st.dataframe(styler, width='stretch', hide_index=True, height=500)
+    _render_ranking_card(
+        filtered, "All Candidates", "breakout_rank",
+        "batter_name", "batter_id", "breakout_score", teams_lookup,
+        info_col="breakout_type", max_height=500, n_headshots=5,
+        wide=True, link_type="hitter",
+        hover_stats=_HITTER_DETAIL_STATS,
+    )
 
 
-def _render_pitcher_table(df: pd.DataFrame, role_label: str) -> None:
-    """Render full pitcher breakout table."""
+def _render_pitcher_table(df: pd.DataFrame, role_label: str, teams_lookup: dict[int, str]) -> None:
+    """Render filtered pitcher breakout leaderboard."""
     col_arch, col_search = st.columns([1, 3])
     with col_arch:
         arch_opts = ["All"] + sorted(
@@ -541,50 +481,13 @@ def _render_pitcher_table(df: pd.DataFrame, role_label: str) -> None:
             )
         ]
 
-    filtered = filtered.copy()
-    filtered["_diamond"] = filtered["breakout_score"].apply(score_to_diamonds)
-
-    display_map = {
-        "breakout_rank": "#",
-        "pitcher_name": "Name",
-        "age": "Age",
-        "team_abbr": "Team",
-        "_diamond": "Rating",
-        "breakout_type": "Archetype",
-        "breakout_score": "Score",
-        "breakout_tier": "Tier",
-        "k_pct": "K%",
-        "bb_pct": "BB%",
-        "swstr_pct": "SwStr%",
-        "avg_velo": "Velo",
-        "era": "ERA",
-        "fip": "FIP",
-        "xfip": "xFIP",
-    }
-
-    available = [c for c in display_map if c in filtered.columns]
-    display_df = filtered[available].copy()
-    sort_col = "breakout_rank" if "breakout_rank" in available else "_diamond"
-    ascending = sort_col == "breakout_rank"
-    display_df = display_df.sort_values(sort_col, ascending=ascending)
-    display_df.columns = [display_map[c] for c in available]
-
-    fmt: dict[str, str] = {}
-    for col, f in [
-        ("Rating", "{:.1f}"), ("Score", "{:.0%}"),
-        ("K%", "{:.1%}"), ("BB%", "{:.1%}"), ("SwStr%", "{:.1%}"),
-        ("Velo", "{:.1f}"), ("ERA", "{:.2f}"), ("FIP", "{:.2f}"),
-        ("xFIP", "{:.2f}"),
-        ("#", "{:.0f}"), ("Age", "{:.0f}"),
-    ]:
-        if col in display_df.columns:
-            fmt[col] = f
-
-    styler = display_df.style.format(fmt, na_rep="\u2014")
-    if "Rating" in display_df.columns:
-        styler = styler.map(_score_color, subset=["Rating"])
-
-    st.dataframe(styler, width='stretch', hide_index=True, height=500)
+    _render_ranking_card(
+        filtered, "All Candidates", "breakout_rank",
+        "pitcher_name", "pitcher_id", "breakout_score", teams_lookup,
+        info_col="breakout_type", max_height=500, n_headshots=5,
+        wide=True, link_type="pitcher",
+        hover_stats=_PITCHER_DETAIL_STATS,
+    )
 
 
 # ── Role-specific renderers ──────────────────────────────────────────────
@@ -598,17 +501,19 @@ def _render_hitters() -> None:
 
     df, teams_lookup = _merge_teams(df, "batter_id")
 
-    _render_top_cards(
-        df, "batter_id", "batter_name", teams_lookup,
-        _HITTER_ARCHETYPE_STATS, _HITTER_PROB_COL,
-        "Top 10 Hitter Breakout Candidates",
+    _render_ranking_card(
+        df, "Hitter Breakout Candidates", "breakout_rank",
+        "batter_name", "batter_id", "breakout_score", teams_lookup,
+        info_col="breakout_type", max_height=600, n_headshots=10,
+        detail_stats=_HITTER_DETAIL_STATS, wide=True,
+        link_type="hitter", expandable=True,
     )
 
     st.markdown("---")
     _render_position_bests(df, teams_lookup)
 
     st.markdown("---")
-    _render_hitter_table(df)
+    _render_hitter_table(df, teams_lookup)
 
 
 def _render_pitchers(is_starter: bool) -> None:
@@ -633,14 +538,16 @@ def _render_pitchers(is_starter: bool) -> None:
     df, teams_lookup = _merge_teams(df, "pitcher_id")
 
     role_label = "SP" if is_starter else "RP"
-    _render_top_cards(
-        df, "pitcher_id", "pitcher_name", teams_lookup,
-        _PITCHER_ARCHETYPE_STATS, _PITCHER_PROB_COL,
-        f"Top 10 {role_label} Breakout Candidates",
+    _render_ranking_card(
+        df, f"{role_label} Breakout Candidates", "breakout_rank",
+        "pitcher_name", "pitcher_id", "breakout_score", teams_lookup,
+        info_col="breakout_type", max_height=600, n_headshots=10,
+        detail_stats=_PITCHER_DETAIL_STATS, wide=True,
+        link_type="pitcher", expandable=True,
     )
 
     st.markdown("---")
-    _render_pitcher_table(df, role_label)
+    _render_pitcher_table(df, role_label, teams_lookup)
 
 
 # ── Main page ────────────────────────────────────────────────────────────
@@ -658,6 +565,8 @@ def page_breakout() -> None:
     )
 
     st.markdown(_BREAKOUT_CSS, unsafe_allow_html=True)
+    st.markdown(_RANKING_CSS, unsafe_allow_html=True)
+    st.markdown(EXPANDABLE_CARD_CSS, unsafe_allow_html=True)
 
     category = st.radio(
         "Category",
