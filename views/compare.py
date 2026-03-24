@@ -15,6 +15,7 @@ from config import (
 from services.data_loader import (
     load_projections,
     load_counting,
+    load_rankings,
     load_hitter_archetypes,
     load_pitcher_archetypes,
 )
@@ -179,6 +180,11 @@ def page_compare() -> None:
         else HITTER_COUNTING_DISPLAY
     )
 
+    # Load rankings for role/position rank display
+    _rank_type = "pitchers" if player_type == "Pitcher" else "hitters"
+    _rank_df = load_rankings(_rank_type)
+    _rank_id_col = "pitcher_id" if player_type == "Pitcher" else "batter_id"
+
     # ----- Player header cards -----
     cols = st.columns(len(selected))
     for col_st, display_name in zip(cols, selected):
@@ -215,19 +221,30 @@ def page_compare() -> None:
                     unsafe_allow_html=True,
                 )
 
-            # Age + hand/role info
+            # Age + hand/role info (with positional rank)
             age = int(row["age"]) if pd.notna(row.get("age")) else "?"
             info_parts = [f"Age {age}"]
+            _rk_row = _rank_df[_rank_df[_rank_id_col] == pid] if not _rank_df.empty else pd.DataFrame()
             if player_type == "Pitcher":
                 hand = row.get("pitch_hand", "")
                 if hand:
                     info_parts.append(f"{'LHP' if hand == 'L' else 'RHP'}")
                 if "is_starter" in row.index:
-                    info_parts.append("SP" if row["is_starter"] else "RP")
+                    _role_label = "SP" if row["is_starter"] else "RP"
+                    if not _rk_row.empty:
+                        _rr = _rk_row.iloc[0].get("role_rank")
+                        if pd.notna(_rr):
+                            _role_label = f"{_role_label} #{int(_rr)}"
+                    info_parts.append(_role_label)
             else:
                 stand = row.get("batter_stand", "")
                 if stand:
                     info_parts.append(f"Bats {stand}")
+                if not _rk_row.empty:
+                    _pos = _rk_row.iloc[0].get("position", "")
+                    _pr = _rk_row.iloc[0].get("pos_rank")
+                    if _pos and pd.notna(_pr):
+                        info_parts.append(f"{_pos} #{int(_pr)}")
 
             st.markdown(
                 f'<div class="tdd-meta" style="text-align:center; '

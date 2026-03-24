@@ -281,12 +281,10 @@ def _render_team_profile_tab(
 
     with off_cols[2]:
         html = ""
-        off_elo = te.get("offense_elo", None) if not te.empty else None
-        if off_elo and pd.notna(off_elo):
-            html += _stat_row("Offense ELO", f"{off_elo:.0f}")
-        off_rnk = te.get("offense_rank", None) if not te.empty else None
-        if off_rnk and pd.notna(off_rnk):
-            html += _stat_row("Offense Rank", f"#{int(off_rnk)} / 30")
+        lu_d = tp.get("lineup_diamond") if not tp.empty else None
+        if lu_d is not None and pd.notna(lu_d):
+            lu_color = GOLD if float(lu_d) >= 6.5 else SAGE if float(lu_d) >= 5.0 else SLATE
+            html += _stat_row("Lineup", f"{float(lu_d):.1f}", lu_color)
         if html:
             st.markdown(f'<div class="insight-card">{html}</div>', unsafe_allow_html=True)
 
@@ -321,12 +319,14 @@ def _render_team_profile_tab(
 
     with pit_cols[2]:
         html = ""
-        pit_elo = te.get("pitching_elo", None) if not te.empty else None
-        if pit_elo and pd.notna(pit_elo):
-            html += _stat_row("Pitching ELO", f"{pit_elo:.0f}")
-        pit_rnk = te.get("pitching_rank", None) if not te.empty else None
-        if pit_rnk and pd.notna(pit_rnk):
-            html += _stat_row("Pitching Rank", f"#{int(pit_rnk)} / 30")
+        rot_d = tp.get("rotation_diamond") if not tp.empty else None
+        if rot_d is not None and pd.notna(rot_d):
+            rot_color = GOLD if float(rot_d) >= 6.5 else SAGE if float(rot_d) >= 5.0 else SLATE
+            html += _stat_row("Rotation", f"{float(rot_d):.1f}", rot_color)
+        bp_d = tp.get("bullpen_diamond") if not tp.empty else None
+        if bp_d is not None and pd.notna(bp_d):
+            bp_color = GOLD if float(bp_d) >= 6.5 else SAGE if float(bp_d) >= 5.0 else SLATE
+            html += _stat_row("Bullpen", f"{float(bp_d):.1f}", bp_color)
         if html:
             st.markdown(f'<div class="insight-card">{html}</div>', unsafe_allow_html=True)
 

@@ -1203,6 +1203,22 @@ def page_player_profile() -> None:
         composite = player_row["composite_score"]
         diamond_html = diamond_rating_html_composite(composite, size="lg")
 
+    # Enrich role/position in header with rank from rankings data
+    if not _rank_row.empty:
+        _rr = _rank_row.iloc[0]
+        if player_type == "Pitcher" and role:
+            _role_rank = _rr.get("role_rank")
+            if pd.notna(_role_rank):
+                for i, part in enumerate(header_parts):
+                    if part == role:
+                        header_parts[i] = f"{role} #{int(_role_rank)}"
+                        break
+        elif player_type != "Pitcher":
+            _pos = _rr.get("position", "")
+            _pos_rank = _rr.get("pos_rank")
+            if _pos and pd.notna(_pos_rank):
+                header_parts.append(f"{_pos} #{int(_pos_rank)}")
+
     # Injury status
     injury_lookup = get_injury_lookup()
     inj_info = injury_lookup.get(player_id)

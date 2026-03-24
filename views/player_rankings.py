@@ -629,28 +629,27 @@ def _render_pitcher_rankings(
                 str(arow.get("archetype_desc", "")),
             )
 
-    # Overall rankings — expandable cards
-    _render_ranking_card(
-        df, "Overall", "overall_rank", "pitcher_name", "pitcher_id",
-        "tdd_value_score", teams_lookup,
-        info_col="role", max_height=600, n_headshots=10,
-        detail_stats=PITCHER_DETAIL_STATS, wide=True, link_type="pitcher",
-        expandable=True, archetype_lookup=arch_lookup,
-    )
+    # Starting Pitchers — expandable cards
+    sp_df = df[df["role"] == "SP"].copy()
+    if not sp_df.empty:
+        _render_ranking_card(
+            sp_df, "Starting Pitchers", "role_rank", "pitcher_name", "pitcher_id",
+            "tdd_value_score", teams_lookup,
+            max_height=600, n_headshots=10,
+            detail_stats=PITCHER_DETAIL_STATS, wide=True, link_type="pitcher",
+            expandable=True, archetype_lookup=arch_lookup,
+        )
 
-    # Role breakdowns (with hover tooltips)
-    st.markdown('<div class="rank-section">By Role</div>', unsafe_allow_html=True)
-
-    cols = st.columns(2)
-    for col_st, role in zip(cols, ["SP", "RP"]):
-        with col_st:
-            role_df = df[df["role"] == role].copy()
-            _render_ranking_card(
-                role_df, role, "role_rank", "pitcher_name", "pitcher_id",
-                "tdd_value_score", teams_lookup,
-                max_height=500, n_headshots=5, link_type="pitcher",
-                hover_stats=PITCHER_DETAIL_STATS,
-            )
+    # Relief Pitchers — expandable cards
+    rp_df = df[df["role"] == "RP"].copy()
+    if not rp_df.empty:
+        _render_ranking_card(
+            rp_df, "Relief Pitchers", "role_rank", "pitcher_name", "pitcher_id",
+            "tdd_value_score", teams_lookup,
+            max_height=600, n_headshots=10,
+            detail_stats=PITCHER_DETAIL_STATS, wide=True, link_type="pitcher",
+            expandable=True, archetype_lookup=arch_lookup,
+        )
 
 
 # ── Prospect Rankings ────────────────────────────────────────────────────────
