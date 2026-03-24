@@ -1,7 +1,7 @@
-"""Schedule page — Today's Games (with live updates) + Game Browser combined."""
+"""Schedule page — date-based game browser with projections and live data."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -249,14 +249,9 @@ def _render_schedule_cards(
         pinfo["tdd_value_score"] = _diamond_lookup.get(pid)
 
     if schedule.empty:
-        game_date = meta.get("game_date", "")
-        st.info(
-            f"No games loaded{f' for {game_date}' if game_date else ''}. "
-            "Projections update daily during the season."
-        )
+        st.info("No games scheduled for this date.")
         return
 
-    game_date = schedule.iloc[0].get("game_date", "")
     n_games = len(schedule)
 
     # Check if sims are stale (different date than schedule)
@@ -276,8 +271,7 @@ def _render_schedule_cards(
 
     st.markdown(
         f'<div style="color:var(--tdd-slate); font-size:0.9rem; margin-bottom:1rem;">'
-        f'{game_date} | {n_games} games'
-        f'</div>',
+        f'{n_games} games</div>',
         unsafe_allow_html=True,
     )
 
@@ -371,8 +365,8 @@ def _render_schedule_cards(
         home_sp_html = _pitcher_summary(home_sim, "home_pitcher_name", "home_pitcher_id", home_abbr)
 
         # Team logos
-        away_logo = team_logo_html(int(away_tid), size=100) if pd.notna(away_tid) else ""
-        home_logo = team_logo_html(int(home_tid), size=100) if pd.notna(home_tid) else ""
+        away_logo = team_logo_html(int(away_tid), size=80) if pd.notna(away_tid) else ""
+        home_logo = team_logo_html(int(home_tid), size=80) if pd.notna(home_tid) else ""
 
         # Build game card header HTML
         ctx_html = (
@@ -380,19 +374,28 @@ def _render_schedule_cards(
             f'{" · ".join(ctx_parts)}</div>'
         ) if ctx_parts else ""
 
+        # Date/time/status line
+        dt_parts = []
+        if game_dt:
+            dt_parts.append(game_dt)
+        if game_time:
+            dt_parts.append(game_time)
+        dt_line = " · ".join(dt_parts)
+        if status_badge:
+            dt_line += f'  {status_badge}'
+
         # Game card with logos
         card_html = (
             f'<div class="tdd-game-card">'
-            # Top row: logos + teams + time
+            # Date/time/status row
+            f'<div class="tdd-meta" style="margin-bottom:0.4rem;">{dt_line}</div>'
+            # Team row: logos + abbreviations
             f'<div style="display:flex; align-items:center; gap:0.6rem;">'
             f'{away_logo}'
             f'<span class="tdd-team-abbr" data-team="{away_abbr}">{away_abbr}</span>'
             f'<span style="color:var(--tdd-slate); font-size:0.9rem; margin:0 0.3rem;">@</span>'
             f'<span class="tdd-team-abbr" data-team="{home_abbr}">{home_abbr}</span>'
             f'{home_logo}'
-            f'<span style="flex:1;"></span>'
-            f'<span class="tdd-meta">{game_dt} · {game_time}</span>'
-            f'{f" " + status_badge if status_badge else ""}'
             f'</div>'
             # Pitcher summaries
             f'<div style="display:flex; gap:2rem; margin-top:0.5rem;">'
@@ -2405,18 +2408,61 @@ def _render_game_browser() -> None:
 
 
 def page_schedule() -> None:
-    """Combined Schedule page — Today's Games + Game Browser."""
+    """Schedule page — browse games by date with projections."""
     st.markdown('<div class="section-header">Schedule</div>',
                 unsafe_allow_html=True)
 
-    view = st.radio(
-        "View",
-        ["Today's Games", "Game Browser"],
-        horizontal=True,
-        key="schedule_view",
-    )
+    today = date.today()
 
-    if view == "Today's Games":
-        _render_todays_games()
+    # Date range: 7 days back through 7 days forward
+    dates = [today + timedelta(days=d) for d in range(-7, 8)]
+    date_labels: list[str] = []
+    default_idx = 0
+    for i, d in enumerate(dates):
+        label = d.strftime("%a, %b %d")
+        if d == today:
+            label += "  (Today)"
+            default_idx = i
+        date_labels.append(label)
+
+    selected_label = st.selectbox(
+        "Game Date", date_labels, index=default_idx,
+        key="schedule_date", label_visibility="collapsed",
+    )
+    selected_date = dates[date_labels.index(selected_label)]
+    is_today = selected_date == today
+
+    meta = load_update_metadata()
+
+    if is_today:
+        # Today: use cached parquets (sims + lineups) with refresh button
+        sims = load_todays_sims()
+        if st.session_state.get("schedule_refreshed"):
+            schedule = fetch_live_schedule()
+            lineups = fetch_live_lineups(schedule) if not schedule.empty else pd.DataFrame()
+            st.session_state["schedule_refreshed"] = False
+        else:
+            schedule = load_todays_games()
+            lineups = load_todays_lineups()
+
+        col_info, col_btn = st.columns([4, 1])
+        with col_info:
+            proj_ts = meta.get("last_updated")
+            st.markdown(
+                f'<div style="color:var(--tdd-slate); font-size:0.85rem;">'
+                f'Projections from: {_staleness_indicator(proj_ts)}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        with col_btn:
+            if st.button("Refresh Lineups", key="schedule_refresh"):
+                st.session_state["schedule_refreshed"] = True
+                st.cache_data.clear()
+                st.rerun()
     else:
-        _render_game_browser()
+        # Other dates: fetch schedule from MLB API, no sims
+        schedule = fetch_live_schedule(selected_date.isoformat())
+        lineups = fetch_live_lineups(schedule) if not schedule.empty else pd.DataFrame()
+        sims = pd.DataFrame()
+
+    _render_schedule_cards(schedule, sims, lineups, meta)
