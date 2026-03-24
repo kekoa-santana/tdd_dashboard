@@ -51,7 +51,7 @@ _CSS = f"""
     margin-bottom: 0.8rem;
 }}
 .proj-title {{
-    color: {CREAM};
+    color: var(--tdd-cream);
     font-size: 1.7rem;
     font-weight: 800;
     letter-spacing: 1.5px;
@@ -63,7 +63,7 @@ _CSS = f"""
     margin: 0.6rem 0;
 }}
 .proj-nav-btn {{
-    color: {SLATE};
+    color: var(--tdd-slate);
     font-size: 0.88rem;
     font-weight: 600;
     cursor: pointer;
@@ -73,16 +73,8 @@ _CSS = f"""
     transition: color 0.15s;
 }}
 .proj-nav-active {{
-    color: {GOLD};
-    border-bottom: 2px solid {GOLD};
-}}
-.lb-card {{
-    background: {DARK_CARD};
-    border: 1px solid {DARK_BORDER};
-    border-radius: 10px;
-    padding: 0.8rem 1rem;
-    margin-bottom: 1.5rem;
-    max-width: 380px;
+    color: var(--tdd-gold);
+    border-bottom: 2px solid var(--tdd-gold);
 }}
 .lb-title-row {{
     display: flex;
@@ -90,16 +82,16 @@ _CSS = f"""
     align-items: baseline;
     margin-bottom: 0.5rem;
     padding-bottom: 0.4rem;
-    border-bottom: 1px solid {DARK_BORDER};
+    border-bottom: 1px solid var(--tdd-dark-border);
 }}
 .lb-title {{
-    color: {GOLD};
+    color: var(--tdd-gold);
     font-size: 1.0rem;
     font-weight: 700;
     letter-spacing: 0.5px;
 }}
 .lb-subtitle {{
-    color: {SLATE};
+    color: var(--tdd-slate);
     font-size: 0.70rem;
     font-weight: 400;
     margin-left: 0.4rem;
@@ -108,23 +100,23 @@ _CSS = f"""
     display: flex;
     align-items: center;
     padding: 0.28rem 0;
-    border-bottom: 1px solid {DARK_BORDER}15;
+    border-bottom: 1px solid var(--tdd-dark-border-faint);
 }}
 .lb-row:last-child {{ border-bottom: none; }}
 .lb-rank {{
-    color: {SLATE};
+    color: var(--tdd-slate);
     font-size: 0.82rem;
     min-width: 1.6rem;
     text-align: right;
     margin-right: 0.5rem;
 }}
-.lb-rank-top {{ color: {GOLD}; font-weight: 700; }}
+.lb-rank-top {{ color: var(--tdd-gold); font-weight: 700; }}
 .lb-headshot {{
     margin-left: 0.5rem;
     margin-right: 0.5rem;
 }}
 .lb-name {{
-    color: {CREAM};
+    color: var(--tdd-cream);
     font-size: 0.95rem;
     font-weight: 600;
     flex: 1;
@@ -134,35 +126,35 @@ _CSS = f"""
     text-decoration: none;
 }}
 .lb-name a:hover {{
-    color: {GOLD};
+    color: var(--tdd-gold);
     text-decoration: underline;
 }}
 .lb-team {{
-    color: {SLATE};
+    color: var(--tdd-slate);
     font-size: 0.80rem;
     margin-right: 0.5rem;
 }}
 .lb-val {{
-    color: {SAGE};
+    color: var(--tdd-sage);
     font-size: 1rem;
     font-weight: 700;
     min-width: 2.5rem;
     text-align: right;
 }}
 .lb-range {{
-    color: {SLATE};
+    color: var(--tdd-slate);
     font-size: 0.7rem;
     min-width: 4.2rem;
     text-align: right;
     margin-left: 0.3rem;
 }}
 .lb-watch-header {{
-    color: {SLATE};
+    color: var(--tdd-slate);
     font-size: 0.78rem;
     font-weight: 500;
     margin: 0.6rem 0 0.3rem 0;
     padding-top: 0.4rem;
-    border-top: 1px solid {DARK_BORDER};
+    border-top: 1px solid var(--tdd-dark-border);
     font-style: italic;
 }}
 .lb-watch-row {{
@@ -172,19 +164,19 @@ _CSS = f"""
     opacity: 0.75;
 }}
 .lb-watch-name {{
-    color: {SLATE};
+    color: var(--tdd-slate);
     font-size: 0.9rem;
     flex: 1;
 }}
 .lb-watch-val {{
-    color: {SLATE};
+    color: var(--tdd-slate);
     font-size: 0.78rem;
     font-weight: 800;
     min-width: 2.5rem;
     text-align: right;
 }}
 .lb-watch-range {{
-    color: {SLATE};
+    color: var(--tdd-slate);
     font-size: 0.62rem;
     min-width: 4.2rem;
     text-align: right;
@@ -300,7 +292,7 @@ def _render_leaderboard(
         else:
             name_html = name
 
-        team_html = f'<span class="lb-team">{team}</span>' if team else ""
+        team_html = f'<span class="lb-team" data-team="{team}">{team}</span>' if team else ""
 
         range_html = ""
         if has_range and pd.notna(row.get(p10_col)) and pd.notna(row.get(p90_col)):
@@ -346,7 +338,8 @@ def _render_leaderboard(
                     range_html = f'<span class="lb-watch-range">({lo}-{hi})</span>'
                 watch_rows.append(
                     f'<div class="lb-watch-row">'
-                    f'<span class="lb-watch-name">{name} ({team})</span>'
+                    f'<span class="lb-watch-name">{name}'
+                    f' (<span data-team="{team}">{team}</span>)</span>'
                     f'<span class="lb-watch-val">{val}</span>'
                     f'{range_html}'
                     f'</div>'

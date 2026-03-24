@@ -16,6 +16,7 @@ from config import (
 from services.data_loader import (
     load_todays_games, load_todays_sims, load_todays_lineups,
     load_update_metadata, load_pitcher_arsenal, load_hitter_vulnerability,
+    load_hitter_strength,
     load_projections, load_counting, load_game_info, load_player_teams,
     load_hitter_archetypes, load_pitcher_archetypes,
     load_k_samples, load_bb_samples, load_hr_samples, load_bf_priors,
@@ -25,6 +26,7 @@ from services.data_loader import (
     load_exit_model, load_pitcher_pitch_count_features,
     load_batter_pitch_count_features, load_tto_profiles,
     load_pitcher_exit_tendencies,
+    load_pitcher_location_grid, load_hitter_zone_grid,
     load_roster,
     fetch_live_schedule, fetch_live_lineups,
 )
@@ -47,7 +49,7 @@ def _is_game_window() -> bool:
 def _staleness_indicator(ts_str: str | None) -> str:
     """Return colored staleness indicator HTML based on timestamp age."""
     if not ts_str:
-        return f'<span style="color:{SLATE};">unknown</span>'
+        return f'<span style="color:var(--tdd-slate);">unknown</span>'
     try:
         ts = datetime.fromisoformat(ts_str)
         if ts.tzinfo is None:
@@ -65,71 +67,45 @@ def _staleness_indicator(ts_str: str | None) -> str:
             f'{ts.strftime("%I:%M %p")}'
         )
     except Exception:
-        return f'<span style="color:{SLATE};">unknown</span>'
+        return f'<span style="color:var(--tdd-slate);">unknown</span>'
+
+
+_SCHEDULE_CSS = ""
 
 
 def _render_todays_games() -> None:
     """Today's MLB games with matchup analysis and K prop projections.
 
-    During game windows, auto-refreshes schedule/lineup data from MLB API
-    every 10 minutes via st.fragment. Projection data stays cached from
-    the morning update.
+    Uses cached parquet data by default. Manual refresh button fetches
+    fresh lineups/pitchers from the MLB API on demand.
     """
     meta = load_update_metadata()
     sims = load_todays_sims()
 
-    in_game_window = _is_game_window()
-
-    # --- Live schedule data (fragment auto-reruns during game windows) ---
-    if in_game_window:
-        _render_live_schedule_fragment(meta, sims)
-    else:
-        _render_cached_schedule(meta, sims)
-
-
-@st.fragment(run_every=timedelta(minutes=SCHEDULE_REFRESH_MINUTES))
-def _render_live_schedule_fragment(
-    meta: dict,
-    sims: pd.DataFrame,
-) -> None:
-    """Fragment that auto-reruns to poll MLB API for fresh schedule data."""
-    schedule = fetch_live_schedule()
-    lineups = fetch_live_lineups(schedule) if not schedule.empty else pd.DataFrame()
-
-    live_ts = datetime.now(timezone.utc).isoformat()
     proj_ts = meta.get("last_updated")
 
-    # Refresh button
+    # Use cached data; manual refresh pulls from MLB API
+    if st.session_state.get("schedule_refreshed"):
+        schedule = fetch_live_schedule()
+        lineups = fetch_live_lineups(schedule) if not schedule.empty else pd.DataFrame()
+        st.session_state["schedule_refreshed"] = False
+    else:
+        schedule = load_todays_games()
+        lineups = load_todays_lineups()
+
     col_info, col_btn = st.columns([4, 1])
     with col_info:
         st.markdown(
-            f'<div style="color:{SLATE}; font-size:0.85rem;">'
-            f'Projections from: {_staleness_indicator(proj_ts)} '
-            f'&nbsp;|&nbsp; Schedule updated: {_staleness_indicator(live_ts)}'
+            f'<div style="color:var(--tdd-slate); font-size:0.85rem;">'
+            f'Projections from: {_staleness_indicator(proj_ts)}'
             f'</div>',
             unsafe_allow_html=True,
         )
     with col_btn:
-        if st.button("Refresh", key="schedule_refresh"):
+        if st.button("Refresh Lineups", key="schedule_refresh"):
+            st.session_state["schedule_refreshed"] = True
             st.cache_data.clear()
             st.rerun()
-
-    _render_schedule_cards(schedule, sims, lineups, meta)
-
-
-def _render_cached_schedule(meta: dict, sims: pd.DataFrame) -> None:
-    """Render schedule from cached parquets (outside game window)."""
-    schedule = load_todays_games()
-    lineups = load_todays_lineups()
-
-    proj_ts = meta.get("last_updated")
-    st.markdown(
-        f'<div style="color:{SLATE}; font-size:0.85rem;">'
-        f'Projections from: {_staleness_indicator(proj_ts)} '
-        f'&nbsp;|&nbsp; <span style="color:{SLATE};">Outside game window — using cached data</span>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
 
     _render_schedule_cards(schedule, sims, lineups, meta)
 
@@ -175,17 +151,27 @@ def _render_schedule_cards(
         for _, _r in _p_arch.iterrows():
             _p_arch_lookup[int(_r["pitcher_id"])] = _r["archetype_name"]
 
-    # Diamond rating lookup from rankings (tdd_value_score → accurate 0-5 diamonds)
+    # Diamond rating lookup from rankings — use pre-computed diamond_rating (0-10)
+    # when available, fall back to tdd_value_score (0-1) converted via score_to_diamonds
     from services.data_loader import load_rankings
+    from lib.diamond_rating import score_to_diamonds
     _h_rankings = load_rankings("hitters")
     _p_rankings = load_rankings("pitchers")
     _diamond_lookup: dict[int, float] = {}
-    if not _h_rankings.empty and "tdd_value_score" in _h_rankings.columns:
+    if not _h_rankings.empty:
+        use_precomputed = "diamond_rating" in _h_rankings.columns
         for _, _r in _h_rankings.iterrows():
-            _diamond_lookup[int(_r["batter_id"])] = _r["tdd_value_score"]
-    if not _p_rankings.empty and "tdd_value_score" in _p_rankings.columns:
+            if use_precomputed and pd.notna(_r.get("diamond_rating")):
+                _diamond_lookup[int(_r["batter_id"])] = _r["diamond_rating"]
+            elif "tdd_value_score" in _r.index:
+                _diamond_lookup[int(_r["batter_id"])] = score_to_diamonds(_r["tdd_value_score"])
+    if not _p_rankings.empty:
+        use_precomputed = "diamond_rating" in _p_rankings.columns
         for _, _r in _p_rankings.iterrows():
-            _diamond_lookup[int(_r["pitcher_id"])] = _r["tdd_value_score"]
+            if use_precomputed and pd.notna(_r.get("diamond_rating")):
+                _diamond_lookup[int(_r["pitcher_id"])] = _r["diamond_rating"]
+            elif "tdd_value_score" in _r.index:
+                _diamond_lookup[int(_r["pitcher_id"])] = score_to_diamonds(_r["tdd_value_score"])
 
     # Hitter projection lookup: batter_id → {k_rate, bb_rate, hr, ...}
     _h_stat_lookup: dict[int, dict] = {}
@@ -215,12 +201,20 @@ def _render_schedule_cards(
                     **counting,
                 }
 
-    # Position lookup from roster
+    # Position lookup from roster + prospect rankings
     _roster = load_roster()
     _pos_lookup: dict[int, str] = {}
     if not _roster.empty and "primary_position" in _roster.columns:
         for _, _r in _roster.iterrows():
             _pos_lookup[int(_r["player_id"])] = _r["primary_position"]
+    # Fill gaps from prospect data
+    from services.data_loader import load_rankings
+    _prospects = load_rankings("prospect")
+    if not _prospects.empty and "primary_position" in _prospects.columns:
+        for _, _r in _prospects.iterrows():
+            pid = int(_r.get("player_id", _r.get("batter_id", 0)))
+            if pid and pid not in _pos_lookup:
+                _pos_lookup[pid] = _r["primary_position"]
 
     # Game simulator + matchup scoring data
     _k_samples_dict = load_k_samples()
@@ -232,6 +226,9 @@ def _render_schedule_cards(
     _offerings_df = load_pitcher_offerings()
     _cluster_meta_df = load_cluster_metadata()
     _matchup_matrix_df = load_archetype_matchup_matrix()
+    _str_df = load_hitter_strength(career=True)
+    _ploc_df = load_pitcher_location_grid()
+    _hzone_df = load_hitter_zone_grid(career=True)
 
     # Hitter posterior rate samples (for batter game sim)
     _hitter_k_samples = load_hitter_k_samples()
@@ -271,14 +268,14 @@ def _render_schedule_cards(
 
     if sims_stale:
         st.markdown(
-            f'<div style="color:{EMBER}; font-size:0.85rem; margin-bottom:0.5rem;">'
+            f'<div style="color:var(--tdd-ember); font-size:0.85rem; margin-bottom:0.5rem;">'
             f'Simulations are from a previous date — showing base projections only.'
             f'</div>',
             unsafe_allow_html=True,
         )
 
     st.markdown(
-        f'<div style="color:{SLATE}; font-size:0.9rem; margin-bottom:1rem;">'
+        f'<div style="color:var(--tdd-slate); font-size:0.9rem; margin-bottom:1rem;">'
         f'{game_date} | {n_games} games'
         f'</div>',
         unsafe_allow_html=True,
@@ -307,6 +304,7 @@ def _render_schedule_cards(
         away_tid = game.get("away_team_id")
         home_tid = game.get("home_team_id")
         game_time = game.get("game_time", "")
+        game_dt = game.get("game_date", "")
         status = game.get("status", "")
 
         game_sims = sims[sims["game_pk"] == gpk] if not sims.empty else pd.DataFrame()
@@ -317,11 +315,11 @@ def _render_schedule_cards(
         status_badge = ""
         if status:
             if status in ("In Progress", "Live"):
-                status_badge = f'<span style="color:{SAGE}; font-size:0.75rem; font-weight:600;">● LIVE</span>'
+                status_badge = f'<span style="color:var(--tdd-sage); font-size:0.75rem; font-weight:600;">● LIVE</span>'
             elif "Final" in status:
-                status_badge = f'<span style="color:{SLATE}; font-size:0.75rem;">{status}</span>'
+                status_badge = f'<span style="color:var(--tdd-slate); font-size:0.75rem;">{status}</span>'
             elif "Scheduled" not in status:
-                status_badge = f'<span style="color:{SLATE}; font-size:0.75rem;">{status}</span>'
+                status_badge = f'<span style="color:var(--tdd-slate); font-size:0.75rem;">{status}</span>'
 
         # Game context
         venue_name = game.get("venue_name", "")
@@ -344,7 +342,7 @@ def _render_schedule_cards(
             pp_name = game.get(pitcher_name_field, "TBD") or "TBD"
             _pp_id = game.get(pitcher_id_field)
             _pp_arch = _p_arch_lookup.get(int(_pp_id)) if pd.notna(_pp_id) else None
-            arch_tag = f'<span style="color:{SLATE}; font-size:0.72rem;"> · {_pp_arch}</span>' if _pp_arch else ""
+            arch_tag = f'<span class="tdd-stat-label"> · {_pp_arch}</span>' if _pp_arch else ""
 
             if sim is not None:
                 exp_k = sim["expected_k"]
@@ -353,9 +351,9 @@ def _render_schedule_cards(
                 if pd.notna(exp_ip):
                     stats += f' · IP {exp_ip:.1f}'
                 return (
-                    f'<span style="color:{CREAM}; font-size:0.85rem; font-weight:600;">{pp_name}</span>'
+                    f'<span class="tdd-player-name">{pp_name}</span>'
                     f'{arch_tag}'
-                    f'<span style="color:{SLATE}; font-size:0.72rem; margin-left:0.4rem;">{stats}</span>'
+                    f'<span class="tdd-stat-label" style="margin-left:0.4rem;">{stats}</span>'
                 )
             else:
                 pid = game.get(pitcher_id_field)
@@ -364,37 +362,36 @@ def _render_schedule_cards(
                 if proj_info and pd.notna(proj_info.get("projected_k_rate")):
                     k_str = f'K% {proj_info["projected_k_rate"]*100:.1f}%'
                 return (
-                    f'<span style="color:{CREAM}; font-size:0.85rem; font-weight:600;">{pp_name}</span>'
+                    f'<span class="tdd-player-name">{pp_name}</span>'
                     f'{arch_tag}'
-                    f'<span style="color:{SLATE}; font-size:0.72rem; margin-left:0.4rem;">{k_str}</span>'
+                    f'<span class="tdd-stat-label" style="margin-left:0.4rem;">{k_str}</span>'
                 )
 
         away_sp_html = _pitcher_summary(away_sim, "away_pitcher_name", "away_pitcher_id", away_abbr)
         home_sp_html = _pitcher_summary(home_sim, "home_pitcher_name", "home_pitcher_id", home_abbr)
 
         # Team logos
-        away_logo = team_logo_html(int(away_tid), size=36) if pd.notna(away_tid) else ""
-        home_logo = team_logo_html(int(home_tid), size=36) if pd.notna(home_tid) else ""
+        away_logo = team_logo_html(int(away_tid), size=100) if pd.notna(away_tid) else ""
+        home_logo = team_logo_html(int(home_tid), size=100) if pd.notna(home_tid) else ""
 
         # Build game card header HTML
         ctx_html = (
-            f'<div style="color:{SLATE}; font-size:0.72rem; margin-top:0.3rem;">'
+            f'<div class="tdd-meta" style="margin-top:0.3rem;">'
             f'{" · ".join(ctx_parts)}</div>'
         ) if ctx_parts else ""
 
-        # Game card with logos (standalone, no bottom radius so expander attaches)
+        # Game card with logos
         card_html = (
-            f'<div style="background:{DARK_CARD}; border:1px solid {DARK_BORDER}; '
-            f'border-radius:10px 10px 0 0; padding:1rem 1.2rem; margin-bottom:0;">'
+            f'<div class="tdd-game-card">'
             # Top row: logos + teams + time
             f'<div style="display:flex; align-items:center; gap:0.6rem;">'
             f'{away_logo}'
-            f'<span style="color:{CREAM}; font-size:1.2rem; font-weight:800;">{away_abbr}</span>'
-            f'<span style="color:{SLATE}; font-size:0.9rem; margin:0 0.3rem;">@</span>'
-            f'<span style="color:{CREAM}; font-size:1.2rem; font-weight:800;">{home_abbr}</span>'
+            f'<span class="tdd-team-abbr" data-team="{away_abbr}">{away_abbr}</span>'
+            f'<span style="color:var(--tdd-slate); font-size:0.9rem; margin:0 0.3rem;">@</span>'
+            f'<span class="tdd-team-abbr" data-team="{home_abbr}">{home_abbr}</span>'
             f'{home_logo}'
             f'<span style="flex:1;"></span>'
-            f'<span style="color:{SLATE}; font-size:0.82rem;">{game_time}</span>'
+            f'<span class="tdd-meta">{game_dt} · {game_time}</span>'
             f'{f" " + status_badge if status_badge else ""}'
             f'</div>'
             # Pitcher summaries
@@ -405,6 +402,7 @@ def _render_schedule_cards(
             f'{ctx_html}'
             f'</div>'
         )
+
         st.markdown(card_html, unsafe_allow_html=True)
 
         with st.expander("View Matchups & Projections"):
@@ -424,12 +422,15 @@ def _render_schedule_cards(
                 hitter_k_samples=_hitter_k_samples,
                 hitter_bb_samples=_hitter_bb_samples,
                 hitter_hr_samples=_hitter_hr_samples,
+                str_df=_str_df,
+                ploc_df=_ploc_df,
+                hzone_df=_hzone_df,
             )
 
     if not sims.empty and not sims_stale:
         st.markdown("---")
         st.markdown(
-            f'<div style="color:{SLATE}; font-size:0.8rem;">'
+            f'<div style="color:var(--tdd-slate); font-size:0.8rem;">'
             f'{len(sims)} pitchers simulated | '
             f'{sims["has_lineup"].sum()} with lineup data | '
             f'10,000 Monte Carlo draws per pitcher</div>',
@@ -467,13 +468,16 @@ def _render_game_drilldown(
     hitter_k_samples: dict[str, np.ndarray] | None = None,
     hitter_bb_samples: dict[str, np.ndarray] | None = None,
     hitter_hr_samples: dict[str, np.ndarray] | None = None,
+    str_df: pd.DataFrame | None = None,
+    ploc_df: pd.DataFrame | None = None,
+    hzone_df: pd.DataFrame | None = None,
 ) -> None:
-    """Rich game drill-down: lineup matchups, archetype analysis, and game simulator."""
+    """Rich game drill-down: lineup matchups, matchup analysis, and game simulator."""
     away_abbr = game.get("away_abbr", "?")
     home_abbr = game.get("home_abbr", "?")
     game_lu = lineups[lineups["game_pk"] == gpk] if not lineups.empty else pd.DataFrame()
 
-    # Build per-side info for both tabs
+    # Build per-side info
     sides = []
     for side, opp_side in [("away", "home"), ("home", "away")]:
         pitcher_name = game.get(f"{side}_pitcher_name") or "TBD"
@@ -506,18 +510,61 @@ def _render_game_drilldown(
     # Resolve umpire + weather context for this game
     game_context = _resolve_game_context(game)
 
-    tab_matchups, tab_hitters, tab_arch, tab_sim = st.tabs(
-        ["Lineup Matchups", "Hitter Projections", "Archetype Analysis", "Game Simulator"]
-    )
+    # --- Inline toolbar: Section | Team | (Matchup picker) ---
+    _SECTIONS = [
+        "Lineup Matchups", "Hitter Projections",
+        "Matchup Analysis", "Game Simulator",
+    ]
+    team_options = [away_abbr, home_abbr]
 
-    with tab_matchups:
-        _render_matchup_tab(sides, h_arch_lookup, h_stat_lookup,
-                            arsenal_df, vuln_df, gpk,
-                            pos_lookup=pos_lookup or {})
+    tb_cols = st.columns([2, 1, 3])
+    with tb_cols[0]:
+        section = st.selectbox(
+            "Section", _SECTIONS,
+            key=f"dd_section_{gpk}",
+            label_visibility="collapsed",
+        )
+    with tb_cols[1]:
+        selected_team = st.selectbox(
+            "Team", team_options,
+            key=f"dd_team_{gpk}",
+            label_visibility="collapsed",
+            disabled=section == "Lineup Matchups",
+        )
+    side_idx = 0 if selected_team == away_abbr else 1
+    active_side = sides[side_idx]
 
-    with tab_hitters:
+    # Matchup picker (only for Matchup Analysis)
+    matchup_choice = None
+    if section == "Matchup Analysis":
+        pid = active_side["pitcher_id"]
+        p_name = active_side["pitcher_name"]
+        opp_lu = active_side["opp_lineup"]
+        if not opp_lu.empty and pid:
+            name_col = "batter_name" if "batter_name" in opp_lu.columns else "player_name"
+            id_col = "batter_id" if "batter_id" in opp_lu.columns else "player_id"
+            matchup_options = [
+                f"{p_name} vs {brow[name_col]}"
+                for _, brow in opp_lu.head(9).iterrows()
+            ]
+            with tb_cols[2]:
+                matchup_choice = st.selectbox(
+                    "Matchup", matchup_options,
+                    key=f"dd_matchup_{gpk}_{active_side['side']}",
+                    label_visibility="collapsed",
+                )
+
+    # --- Render selected section ---
+    if section == "Lineup Matchups":
+        _render_matchup_tab_sidebyside(
+            sides, h_arch_lookup, h_stat_lookup,
+            arsenal_df, vuln_df, gpk,
+            pos_lookup=pos_lookup or {},
+        )
+
+    elif section == "Hitter Projections":
         _render_hitter_projections_tab(
-            sides, h_arch_lookup, h_stat_lookup, gpk,
+            [active_side], h_arch_lookup, h_stat_lookup, gpk,
             hitter_k_samples=hitter_k_samples or {},
             hitter_bb_samples=hitter_bb_samples or {},
             hitter_hr_samples=hitter_hr_samples or {},
@@ -525,20 +572,27 @@ def _render_game_drilldown(
             arsenal_df=arsenal_df,
             vuln_df=vuln_df,
             pos_lookup=pos_lookup or {},
+            sides_all=sides,
         )
 
-    with tab_arch:
-        _render_archetype_tab(
-            sides, h_arch_lookup, p_arch_lookup,
-            offerings_df if offerings_df is not None else pd.DataFrame(),
-            cluster_meta_df if cluster_meta_df is not None else pd.DataFrame(),
-            matchup_matrix_df if matchup_matrix_df is not None else pd.DataFrame(),
-            gpk,
+    elif section == "Matchup Analysis":
+        _render_matchup_analysis(
+            active_side, matchup_choice, gpk,
+            arsenal_df=arsenal_df,
+            vuln_df=vuln_df,
+            str_df=str_df if str_df is not None else pd.DataFrame(),
+            ploc_df=ploc_df if ploc_df is not None else pd.DataFrame(),
+            hzone_df=hzone_df if hzone_df is not None else pd.DataFrame(),
+            offerings_df=offerings_df if offerings_df is not None else pd.DataFrame(),
+            cluster_meta_df=cluster_meta_df if cluster_meta_df is not None else pd.DataFrame(),
+            matchup_matrix_df=matchup_matrix_df if matchup_matrix_df is not None else pd.DataFrame(),
+            h_arch_lookup=h_arch_lookup,
+            p_arch_lookup=p_arch_lookup,
         )
 
-    with tab_sim:
+    elif section == "Game Simulator":
         _render_sim_tab(
-            sides, h_stat_lookup, k_samples_dict,
+            [active_side], h_stat_lookup, k_samples_dict,
             bf_priors, arsenal_df, vuln_df, gpk,
             game_context=game_context,
             bb_samples_dict=bb_samples_dict or {},
@@ -563,6 +617,7 @@ def _render_hitter_projections_tab(
     arsenal_df: pd.DataFrame | None = None,
     vuln_df: pd.DataFrame | None = None,
     pos_lookup: dict[int, str] | None = None,
+    sides_all: list[dict] | None = None,
 ) -> None:
     """Hitter projection cards — MLB-style lineup with game-level sim projections."""
     from lib.game_sim.batter_simulator import simulate_batter_game
@@ -584,6 +639,9 @@ def _render_hitter_projections_tab(
     if vuln_df is None:
         vuln_df = pd.DataFrame()
 
+    # Use sides_all for opposing pitcher lookup when sides is a single-element list
+    _all_sides = sides_all if sides_all is not None else sides
+
     # Build baselines for matchup scoring
     baselines_pt = {
         pt: {
@@ -599,7 +657,7 @@ def _render_hitter_projections_tab(
     bullpen_bb = 0.09
     bullpen_hr = 0.03
 
-    for side_idx, side_info in enumerate(sides):
+    for side_info in sides:
         side_abbr = side_info["abbr"]
         own_lu = side_info["own_lineup"]
         pitcher_name = side_info["pitcher_name"]
@@ -607,10 +665,11 @@ def _render_hitter_projections_tab(
         p_arch = side_info["pitcher_arch"]
         p_proj = side_info["pitcher_proj"]
 
-        # Opposing pitcher: for sides[0] (away lineup), opposing pitcher is sides[1]
-        # (home pitcher); for sides[1] (home lineup), opposing pitcher is sides[0].
-        opp_idx = 1 - side_idx
-        opp_side = sides[opp_idx] if opp_idx < len(sides) else None
+        # Find opposing pitcher from the full sides list
+        opp_side = next(
+            (s for s in _all_sides if s["side"] != side_info["side"]),
+            None,
+        )
         opp_pid = opp_side["pitcher_id"] if opp_side else None
         opp_proj = opp_side["pitcher_proj"] if opp_side else {}
         opp_pitcher_name = opp_side["pitcher_name"] if opp_side else "TBD"
@@ -634,19 +693,19 @@ def _render_hitter_projections_tab(
         opp_ctx = ""
         if opp_pid:
             opp_ctx = (
-                f' <span style="color:{SLATE}; font-size:0.8rem; font-weight:400;">'
+                f' <span style="color:var(--tdd-slate); font-size:0.8rem; font-weight:400;">'
                 f'vs {opp_pitcher_name}</span>'
             )
         st.markdown(
-            f'<div style="color:{GOLD}; font-size:1rem; font-weight:700; '
-            f'margin:0.8rem 0 0.4rem;">'
-            f'{side_abbr} Lineup{opp_ctx}</div>',
+            f'<div class="tdd-section-hdr">'
+            f'<span class="tdd-team-abbr" data-team="{side_abbr}">{side_abbr}</span>'
+            f' Lineup{opp_ctx}</div>',
             unsafe_allow_html=True,
         )
 
         if own_lu.empty:
             st.markdown(
-                f'<div style="color:{SLATE}; font-size:0.85rem; '
+                f'<div style="color:var(--tdd-slate); font-size:0.85rem; '
                 f'padding:0.5rem 0;">No probable lineup yet</div>',
                 unsafe_allow_html=True,
             )
@@ -663,17 +722,15 @@ def _render_hitter_projections_tab(
 
             pos = pos_lookup.get(bid, "--") if bid else "--"
             stats = h_stat_lookup.get(bid, {}) if bid else {}
-            arch = h_arch_lookup.get(bid, "") if bid else ""
+            arch = h_arch_lookup.get(bid, "Prospect") if bid else ""
 
             composite = stats.get("tdd_value_score")
             diamond_html = ""
             if pd.notna(composite):
-                diamond_html = diamond_rating_html(composite, size="sm")
+                diamond_html = diamond_rating_html(0, size="sm", precomputed=composite)
 
             arch_html = (
-                f'<span style="color:{SLATE}; font-size:0.68rem; '
-                f'background:rgba(123,143,166,0.12); padding:1px 5px; '
-                f'border-radius:3px;">{arch}</span>'
+                f'<span class="tdd-badge">{arch}</span>'
             ) if arch else ""
 
             # --- Game-level batter simulation ---
@@ -736,7 +793,7 @@ def _render_hitter_projections_tab(
                     e_hr = summary["hr"]["mean"]
 
                     stat_html = (
-                        f'<span style="color:{SLATE}; font-size:0.7rem;">'
+                        f'<span style="color:var(--tdd-slate); font-size:0.7rem;">'
                         f'K {e_k:.2f} · BB {e_bb:.2f} · '
                         f'H {e_h:.2f} · HR {e_hr:.2f}'
                         f'</span>'
@@ -759,7 +816,7 @@ def _render_hitter_projections_tab(
                     stat_parts.append(f'HR {proj_hr:.0f}')
                 if stat_parts:
                     stat_html = (
-                        f'<span style="color:{SLATE}; font-size:0.7rem;">'
+                        f'<span style="color:var(--tdd-slate); font-size:0.7rem;">'
                         f'{" · ".join(stat_parts)}</span>'
                     )
 
@@ -767,14 +824,15 @@ def _render_hitter_projections_tab(
             if bid:
                 hs = f'<span style="margin:0 0.3rem;">{headshot_html(bid, size=32)}</span>'
 
+            _order_color = "var(--tdd-gold)" if order <= 3 else "var(--tdd-slate)"
             rows_html.append(
                 f'<div style="display:flex; align-items:center; gap:0.3rem; '
-                f'padding:0.3rem 0.6rem; border-bottom:1px solid {DARK_BORDER}20;">'
-                f'<span style="color:{GOLD if order <= 3 else SLATE}; font-size:0.8rem; '
+                f'padding:0.3rem 0.6rem; border-bottom:1px solid var(--tdd-dark-border-faint);">'
+                f'<span style="color:{_order_color}; font-size:0.8rem; '
                 f'min-width:1.2rem; text-align:right; font-weight:700;">{order}</span>'
                 f'{hs}'
-                f'<span style="color:{SLATE}; font-size:0.72rem; min-width:1.8rem;">{pos}</span>'
-                f'<span style="color:{CREAM}; font-size:0.88rem; font-weight:600; '
+                f'<span style="color:var(--tdd-slate); font-size:0.72rem; min-width:1.8rem;">{pos}</span>'
+                f'<span style="color:var(--tdd-cream); font-size:0.88rem; font-weight:600; '
                 f'flex:1; min-width:5rem;">{bname}</span>'
                 f'{arch_html}'
                 f'<span style="margin:0 0.3rem;">{diamond_html}</span>'
@@ -787,21 +845,17 @@ def _render_hitter_projections_tab(
             p_composite = p_proj.get("tdd_value_score")
             p_diamond = diamond_rating_html(p_composite, size="sm") if pd.notna(p_composite) else ""
             p_arch_html = (
-                f'<span style="color:{SLATE}; font-size:0.68rem; '
-                f'background:rgba(123,143,166,0.12); padding:1px 5px; '
-                f'border-radius:3px;">{p_arch}</span>'
+                f'<span class="tdd-badge">{p_arch}</span>'
             ) if p_arch else ""
             p_hs = f'<span style="margin:0 0.3rem;">{headshot_html(pid, size=32)}</span>'
 
             rows_html.append(
-                f'<div style="display:flex; align-items:center; gap:0.3rem; '
-                f'padding:0.3rem 0.6rem; background:rgba(200,169,110,0.06);">'
-                f'<span style="color:{GOLD}; font-size:0.8rem; '
+                f'<div class="tdd-lineup-row" style="background:rgba(200,169,110,0.06);">'
+                f'<span style="color:var(--tdd-gold); font-size:var(--tdd-fs-meta); '
                 f'min-width:1.2rem; text-align:right; font-weight:700;">P</span>'
                 f'{p_hs}'
-                f'<span style="color:{SLATE}; font-size:0.72rem; min-width:1.8rem;">SP</span>'
-                f'<span style="color:{CREAM}; font-size:0.88rem; font-weight:600; '
-                f'flex:1; min-width:5rem;">{pitcher_name}</span>'
+                f'<span class="tdd-stat-label" style="min-width:1.8rem;">SP</span>'
+                f'<span class="tdd-player-name" style="flex:1; min-width:5rem;">{pitcher_name}</span>'
                 f'{p_arch_html}'
                 f'<span style="margin:0 0.3rem;">{p_diamond}</span>'
                 f'</div>'
@@ -809,11 +863,31 @@ def _render_hitter_projections_tab(
 
         if rows_html:
             st.markdown(
-                f'<div style="background:{DARK_CARD}; border:1px solid {DARK_BORDER}; '
-                f'border-radius:8px; margin-bottom:1rem; overflow:hidden;">'
+                f'<div style="background:transparent; border:none; '
+                f'border-bottom:1px solid var(--tdd-dark-border); margin-bottom:1rem; overflow:hidden;">'
                 + "".join(rows_html)
                 + '</div>',
                 unsafe_allow_html=True,
+            )
+
+
+def _render_matchup_tab_sidebyside(
+    sides: list[dict],
+    h_arch_lookup: dict[int, str],
+    h_stat_lookup: dict[int, dict],
+    arsenal_df: pd.DataFrame,
+    vuln_df: pd.DataFrame,
+    gpk: int,
+    pos_lookup: dict[int, str] | None = None,
+) -> None:
+    """Lineup matchups for both sides rendered in side-by-side columns."""
+    col_away, col_home = st.columns(2)
+    for side_info, col in zip(sides, [col_away, col_home]):
+        with col:
+            _render_matchup_tab(
+                [side_info], h_arch_lookup, h_stat_lookup,
+                arsenal_df, vuln_df, gpk,
+                pos_lookup=pos_lookup or {},
             )
 
 
@@ -863,15 +937,17 @@ def _render_matchup_tab(
 
         # Section header
         st.markdown(
-            f'<div style="color:{GOLD}; font-size:1rem; font-weight:700; '
-            f'margin:0.8rem 0 0.4rem;">'
-            f'{side_abbr} SP vs {opp_abbr} Lineup</div>',
+            f'<div class="tdd-section-hdr">'
+            f'<span class="tdd-team-abbr" data-team="{side_abbr}">{side_abbr}</span>'
+            f' SP vs '
+            f'<span class="tdd-team-abbr" data-team="{opp_abbr}">{opp_abbr}</span>'
+            f' Lineup</div>',
             unsafe_allow_html=True,
         )
 
         if opp_lu.empty:
             st.markdown(
-                f'<div style="color:{SLATE}; font-size:0.85rem; padding:0.5rem 0;">'
+                f'<div style="color:var(--tdd-slate); font-size:0.85rem; padding:0.5rem 0;">'
                 f'No probable lineup yet</div>',
                 unsafe_allow_html=True,
             )
@@ -893,11 +969,9 @@ def _render_matchup_tab(
             pos = pos_lookup.get(bid, "--") if bid else "--"
 
             # Archetype
-            arch = h_arch_lookup.get(bid, "") if bid else ""
+            arch = h_arch_lookup.get(bid, "Prospect") if bid else ""
             arch_html = (
-                f'<span style="color:{SLATE}; font-size:0.68rem; '
-                f'background:rgba(123,143,166,0.12); padding:1px 5px; '
-                f'border-radius:3px;">{arch}</span>'
+                f'<span class="tdd-badge">{arch}</span>'
             ) if arch else ""
 
             # Diamond rating
@@ -905,7 +979,7 @@ def _render_matchup_tab(
             composite = stats.get("tdd_value_score")
             diamond_html = ""
             if pd.notna(composite):
-                diamond_html = diamond_rating_html(composite, size="sm")
+                diamond_html = diamond_rating_html(0, size="sm", precomputed=composite)
 
             # Matchup advantage
             advantage_html = ""
@@ -925,17 +999,17 @@ def _render_matchup_tab(
                 net = k_lift - bb_lift * 0.5 - hr_lift * 0.5
                 if net > 0.03:
                     advantage_html = (
-                        f'<span style="color:{EMBER}; font-size:0.68rem; '
+                        f'<span style="color:var(--tdd-ember); font-size:0.68rem; '
                         f'font-weight:600;">Pitcher</span>'
                     )
                 elif net < -0.03:
                     advantage_html = (
-                        f'<span style="color:{SAGE}; font-size:0.68rem; '
+                        f'<span style="color:var(--tdd-sage); font-size:0.68rem; '
                         f'font-weight:600;">Hitter</span>'
                     )
                 else:
                     advantage_html = (
-                        f'<span style="color:{SLATE}; font-size:0.68rem;">Even</span>'
+                        f'<span style="color:var(--tdd-slate); font-size:0.68rem;">Even</span>'
                     )
 
                 total_k_lift += k_lift
@@ -948,14 +1022,12 @@ def _render_matchup_tab(
                 hs = f'<span style="margin:0 0.3rem;">{headshot_html(bid, size=32)}</span>'
 
             rows_html.append(
-                f'<div style="display:flex; align-items:center; gap:0.3rem; '
-                f'padding:0.3rem 0.6rem; border-bottom:1px solid {DARK_BORDER}20;">'
-                f'<span style="color:{GOLD if order <= 3 else SLATE}; font-size:0.8rem; '
-                f'min-width:1.2rem; text-align:right; font-weight:700;">{order}</span>'
+                f'<div class="tdd-lineup-row">'
+                f'<span style="color:{"var(--tdd-gold)" if order <= 3 else "var(--tdd-slate)"}; '
+                f'font-size:var(--tdd-fs-meta); min-width:1.2rem; text-align:right; font-weight:700;">{order}</span>'
                 f'{hs}'
-                f'<span style="color:{SLATE}; font-size:0.72rem; min-width:1.8rem;">{pos}</span>'
-                f'<span style="color:{CREAM}; font-size:0.88rem; font-weight:600; '
-                f'flex:1; min-width:5rem;">{bname}</span>'
+                f'<span class="tdd-stat-label" style="min-width:1.8rem;">{pos}</span>'
+                f'<span class="tdd-player-name" style="flex:1; min-width:5rem;">{bname}</span>'
                 f'{arch_html}'
                 f'<span style="margin:0 0.3rem;">{diamond_html}</span>'
                 f'{advantage_html}'
@@ -967,21 +1039,17 @@ def _render_matchup_tab(
             p_composite = p_proj.get("tdd_value_score")
             p_diamond = diamond_rating_html(p_composite, size="sm") if pd.notna(p_composite) else ""
             p_arch_html = (
-                f'<span style="color:{SLATE}; font-size:0.68rem; '
-                f'background:rgba(123,143,166,0.12); padding:1px 5px; '
-                f'border-radius:3px;">{p_arch}</span>'
+                f'<span class="tdd-badge">{p_arch}</span>'
             ) if p_arch else ""
             p_hs = f'<span style="margin:0 0.3rem;">{headshot_html(pid, size=32)}</span>'
 
             rows_html.append(
-                f'<div style="display:flex; align-items:center; gap:0.3rem; '
-                f'padding:0.3rem 0.6rem; background:rgba(200,169,110,0.06);">'
-                f'<span style="color:{GOLD}; font-size:0.8rem; '
+                f'<div class="tdd-lineup-row" style="background:rgba(200,169,110,0.06);">'
+                f'<span style="color:var(--tdd-gold); font-size:var(--tdd-fs-meta); '
                 f'min-width:1.2rem; text-align:right; font-weight:700;">P</span>'
                 f'{p_hs}'
-                f'<span style="color:{SLATE}; font-size:0.72rem; min-width:1.8rem;">SP</span>'
-                f'<span style="color:{CREAM}; font-size:0.88rem; font-weight:600; '
-                f'flex:1; min-width:5rem;">{pitcher_name}</span>'
+                f'<span class="tdd-stat-label" style="min-width:1.8rem;">SP</span>'
+                f'<span class="tdd-player-name" style="flex:1; min-width:5rem;">{pitcher_name}</span>'
                 f'{p_arch_html}'
                 f'<span style="margin:0 0.3rem;">{p_diamond}</span>'
                 f'</div>'
@@ -989,8 +1057,8 @@ def _render_matchup_tab(
 
         if rows_html:
             st.markdown(
-                f'<div style="background:{DARK_CARD}; border:1px solid {DARK_BORDER}; '
-                f'border-radius:8px; margin-bottom:1rem; overflow:hidden;">'
+                f'<div style="background:transparent; border:none; '
+                f'border-bottom:1px solid var(--tdd-dark-border); margin-bottom:1rem; overflow:hidden;">'
                 + "".join(rows_html)
                 + '</div>',
                 unsafe_allow_html=True,
@@ -1010,7 +1078,7 @@ def _render_matchup_tab(
                 f'<div style="font-size:0.82rem; margin-bottom:0.5rem;">'
                 f'<span style="color:{k_color};">Avg K matchup: {avg_k:+.3f} '
                 f'({k_word})</span>'
-                f' · <span style="color:{SLATE};">BB: {avg_bb:+.3f}</span></div>',
+                f' · <span style="color:var(--tdd-slate);">BB: {avg_bb:+.3f}</span></div>',
                 unsafe_allow_html=True,
             )
 
@@ -1039,9 +1107,9 @@ def _render_archetype_tab(
 
         arch_tag = f" ({p_arch})" if p_arch else ""
         st.markdown(
-            f'<div style="color:{GOLD}; font-size:1rem; font-weight:600; '
-            f'margin:0.5rem 0 0.3rem;">'
-            f'{side_abbr} SP: {pitcher_name}{arch_tag}</div>',
+            f'<div class="tdd-section-hdr" style="margin:0.5rem 0 0.3rem;">'
+            f'<span class="tdd-team-abbr" data-team="{side_abbr}">{side_abbr}</span>'
+            f' SP: {pitcher_name}{arch_tag}</div>',
             unsafe_allow_html=True,
         )
 
@@ -1055,60 +1123,60 @@ def _render_archetype_tab(
                     on="pitch_archetype", how="left",
                 )
                 p_offers["usage"] = p_offers["pitches"] / total_pitches
-                p_offers = p_offers.sort_values("usage", ascending=True)
+                p_offers = p_offers.sort_values("usage", ascending=False)
 
                 st.markdown(
-                    f'<div style="color:{CREAM}; font-size:0.9rem; font-weight:500; '
+                    f'<div style="color:var(--tdd-cream); font-size:0.9rem; font-weight:500; '
                     f'margin:0.5rem 0 0.3rem;">Arsenal Profile</div>',
                     unsafe_allow_html=True,
                 )
 
-                fig, ax = plt.subplots(
-                    figsize=(5.5, max(1.5, len(p_offers) * 0.4))
-                )
+                # Donut chart with pitch type + velo annotations
+                fig, ax = plt.subplots(figsize=(4, 4))
                 fig.patch.set_facecolor(DARK)
                 ax.set_facecolor(DARK)
 
+                from config import PITCH_TYPE_COLORS
                 colors = [
-                    GOLD if row.get("pitch_family") == "Fastball"
-                    else EMBER if row.get("pitch_family") == "Breaking"
-                    else SAGE
+                    PITCH_TYPE_COLORS.get(row.get("pitch_type", ""), SLATE)
                     for _, row in p_offers.iterrows()
                 ]
-                ax.barh(
-                    range(len(p_offers)),
+
+                wedges, _ = ax.pie(
                     p_offers["usage"],
-                    color=colors,
-                    height=0.6,
+                    colors=colors,
+                    startangle=90,
+                    wedgeprops=dict(width=0.38, edgecolor=DARK, linewidth=1.5),
                 )
 
-                labels = [
-                    f'{row["pitch_name"]} ({row.get("archetype_name", "?")})'
-                    for _, row in p_offers.iterrows()
-                ]
-                ax.set_yticks(range(len(p_offers)))
-                ax.set_yticklabels(labels, fontsize=8, color=CREAM)
-                ax.set_xlabel("Usage %", fontsize=9, color=SLATE)
-                ax.xaxis.set_major_formatter(
-                    plt.FuncFormatter(lambda x, _: f"{x:.0%}")
-                )
-                ax.tick_params(colors=SLATE, labelsize=8)
-                ax.spines["top"].set_visible(False)
-                ax.spines["right"].set_visible(False)
-                ax.spines["bottom"].set_color(DARK_BORDER)
-                ax.spines["left"].set_color(DARK_BORDER)
-
+                # Annotate each wedge with pitch name + velo
                 for i, (_, row) in enumerate(p_offers.iterrows()):
+                    ang = (wedges[i].theta2 + wedges[i].theta1) / 2
+                    x = np.cos(np.deg2rad(ang))
+                    y = np.sin(np.deg2rad(ang))
+                    label = row["pitch_name"]
                     velo = row.get("release_speed")
                     if pd.notna(velo):
-                        ax.text(
-                            row["usage"] + 0.005, i,
-                            f'{velo:.0f} mph', va="center",
-                            fontsize=7, color=SLATE,
-                        )
+                        label += f"  {velo:.0f} mph"
+                    pct = row["usage"]
+                    label += f"  ({pct:.0%})"
+                    ha = "left" if x >= 0 else "right"
+                    ax.annotate(
+                        label,
+                        xy=(x * 0.62, y * 0.62),
+                        xytext=(x * 1.25, y * 1.25),
+                        fontsize=8, color=CREAM, fontweight=500,
+                        ha=ha, va="center",
+                        arrowprops=dict(
+                            arrowstyle="-",
+                            color=SLATE,
+                            lw=0.8,
+                        ),
+                    )
 
+                ax.set_aspect("equal")
                 plt.tight_layout()
-                st.pyplot(fig, width='stretch')
+                st.pyplot(fig, use_container_width=False)
                 plt.close(fig)
 
         # --- Section B: Archetype Matchup Matrix (filtered) ---
@@ -1133,61 +1201,291 @@ def _render_archetype_tab(
                         if bid and bid in h_arch_lookup:
                             lineup_archs.add(h_arch_lookup[bid])
 
-                stat_choice = st.radio(
-                    "Stat", ["K%", "BB%", "HR%"],
-                    horizontal=True,
-                    key=f"arch_stat_{side_info['side']}_{gpk}",
-                )
-                stat_col = {
-                    "K%": "k_pct", "BB%": "bb_pct", "HR%": "hr_pct",
-                }[stat_choice]
+                if not lineup_archs:
+                    st.markdown(
+                        f'<div style="color:var(--tdd-slate); font-size:0.85rem;">'
+                        f'No lineup archetypes available</div>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    stat_choice = st.radio(
+                        "Stat", ["K%", "BB%", "HR%"],
+                        horizontal=True,
+                        key=f"arch_stat_{side_info['side']}_{gpk}",
+                    )
+                    stat_col = {
+                        "K%": "k_pct", "BB%": "bb_pct", "HR%": "hr_pct",
+                    }[stat_choice]
 
-                st.markdown(
-                    f'<div style="color:{CREAM}; font-size:0.9rem; font-weight:500; '
-                    f'margin:0.3rem 0;">'
-                    f'Matchup Matrix — All Pitcher Archetypes vs Hitter '
-                    f'Archetypes</div>',
-                    unsafe_allow_html=True,
-                )
+                    # Filter matrix to this pitcher's row + lineup hitter columns
+                    filtered_df = matchup_matrix_df[
+                        (matchup_matrix_df["pitcher_archetype_name"] == p_arch)
+                        & (matchup_matrix_df["hitter_archetype_name"].isin(lineup_archs))
+                    ]
 
-                heatmap_html = _render_matchup_heatmap(
-                    matchup_matrix_df,
-                    stat_col=stat_col,
-                    stat_label=stat_choice,
-                    pitcher_arch=p_arch,
-                    lineup_archetypes=lineup_archs,
-                )
-                st.markdown(heatmap_html, unsafe_allow_html=True)
-
-        # --- Section C: Lineup Archetype Composition ---
-        if not opp_lu.empty and h_arch_lookup:
-            id_col = (
-                "batter_id" if "batter_id" in opp_lu.columns
-                else "player_id"
-            )
-            arch_counts: dict[str, int] = {}
-            for _, brow in opp_lu.head(9).iterrows():
-                bid = (
-                    int(brow[id_col])
-                    if pd.notna(brow.get(id_col)) else None
-                )
-                if bid:
-                    a = h_arch_lookup.get(bid, "Unknown")
-                    arch_counts[a] = arch_counts.get(a, 0) + 1
-
-            if arch_counts:
-                from components.charts import create_archetype_donut_fig
-
-                st.markdown(
-                    f'<div style="color:{SLATE}; font-size:0.85rem; '
-                    f'margin:0.5rem 0 0.2rem;">{opp_abbr} Lineup</div>',
-                    unsafe_allow_html=True,
-                )
-                fig = create_archetype_donut_fig(arch_counts)
-                st.pyplot(fig, use_container_width=False)
-                plt.close(fig)
+                    if not filtered_df.empty:
+                        heatmap_html = _render_matchup_heatmap(
+                            filtered_df,
+                            stat_col=stat_col,
+                            stat_label=stat_choice,
+                            pitcher_arch=p_arch,
+                            lineup_archetypes=lineup_archs,
+                        )
+                        st.markdown(heatmap_html, unsafe_allow_html=True)
 
         st.markdown("---")
+
+
+# ---------------------------------------------------------------------------
+# Matchup Analysis — individual pitcher-vs-batter breakdowns
+# ---------------------------------------------------------------------------
+
+def _render_matchup_analysis(
+    side_info: dict,
+    matchup_choice: str | None,
+    gpk: int,
+    arsenal_df: pd.DataFrame,
+    vuln_df: pd.DataFrame,
+    str_df: pd.DataFrame,
+    ploc_df: pd.DataFrame,
+    hzone_df: pd.DataFrame,
+    offerings_df: pd.DataFrame,
+    cluster_meta_df: pd.DataFrame,
+    matchup_matrix_df: pd.DataFrame,
+    h_arch_lookup: dict[int, str],
+    p_arch_lookup: dict[int, str],
+) -> None:
+    """Individual pitcher-vs-batter matchup analysis with zone contours."""
+    from lib.matchup import score_matchup, score_matchup_bb, score_matchup_hr
+    from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
+    from components.scouting import build_matchup_scouting_bullets
+    from components.tables import build_matchup_table
+    from components.charts import create_pitch_density_plotly, create_hitter_zone_plotly
+    from config import PITCH_DISPLAY, PITCH_TYPE_COLORS
+
+    pid = side_info["pitcher_id"]
+    pitcher_name = side_info["pitcher_name"]
+    opp_lu = side_info["opp_lineup"]
+    side_abbr = side_info["abbr"]
+
+    if not pid or opp_lu.empty:
+        st.markdown(
+            f'<div style="color:var(--tdd-slate); font-size:0.85rem;">'
+            f'No lineup or pitcher data available</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    name_col = "batter_name" if "batter_name" in opp_lu.columns else "player_name"
+    id_col = "batter_id" if "batter_id" in opp_lu.columns else "player_id"
+
+    # Resolve selected batter from matchup picker
+    batter_row = None
+    if matchup_choice:
+        # Extract batter name from "Pitcher vs Batter" format
+        vs_idx = matchup_choice.find(" vs ")
+        if vs_idx >= 0:
+            batter_name_sel = matchup_choice[vs_idx + 4:]
+            match = opp_lu[opp_lu[name_col] == batter_name_sel]
+            if not match.empty:
+                batter_row = match.iloc[0]
+
+    if batter_row is None and not opp_lu.empty:
+        batter_row = opp_lu.iloc[0]
+
+    if batter_row is None:
+        return
+
+    bid = int(batter_row[id_col]) if pd.notna(batter_row.get(id_col)) else None
+    batter_name = batter_row.get(name_col, "Unknown")
+
+    if not bid:
+        return
+
+    # --- Header with headshots + edge label ---
+    baselines_pt = {
+        pt: {
+            "whiff_rate": vals.get("whiff_rate", 0.25),
+            "chase_rate": vals.get("chase_rate", 0.30),
+            "barrel_rate": vals.get("barrel_rate", 0.06),
+        }
+        for pt, vals in LEAGUE_AVG_BY_PITCH_TYPE.items()
+    }
+
+    k_result = score_matchup(pid, bid, arsenal_df, vuln_df, baselines_pt)
+    bb_result = score_matchup_bb(pid, bid, arsenal_df, vuln_df, baselines_pt)
+    hr_result = score_matchup_hr(pid, bid, arsenal_df, vuln_df, baselines_pt)
+
+    k_lift = k_result.get("matchup_k_logit_lift", 0.0)
+    bb_lift = bb_result.get("matchup_bb_logit_lift", 0.0)
+    hr_lift = hr_result.get("matchup_hr_logit_lift", 0.0)
+    k_lift = 0.0 if np.isnan(k_lift) else k_lift
+    bb_lift = 0.0 if np.isnan(bb_lift) else bb_lift
+    hr_lift = 0.0 if np.isnan(hr_lift) else hr_lift
+    net_edge = k_lift - bb_lift * 0.5 - hr_lift * 0.5
+
+    if net_edge > 0.05:
+        edge_label, edge_color = "Pitcher Advantage", SAGE
+    elif net_edge < -0.05:
+        edge_label, edge_color = "Hitter Advantage", EMBER
+    else:
+        edge_label, edge_color = "Neutral Matchup", SLATE
+
+    p_hs = headshot_html(pid, size=40)
+    b_hs = headshot_html(bid, size=40)
+    p_arch = side_info["pitcher_arch"] or ""
+    h_arch = h_arch_lookup.get(bid, "")
+
+    st.markdown(
+        f'<div style="display:flex; align-items:center; gap:0.8rem; '
+        f'margin:0.5rem 0 1rem;">'
+        f'{p_hs}'
+        f'<div>'
+        f'<span style="color:var(--tdd-cream); font-size:1rem; font-weight:700;">{pitcher_name}</span>'
+        f'{f" <span style=&quot;color:var(--tdd-slate); font-size:0.75rem;&quot;>{p_arch}</span>" if p_arch else ""}'
+        f'</div>'
+        f'<span style="color:{edge_color}; font-size:0.85rem; font-weight:600; '
+        f'background:rgba(255,255,255,0.05); padding:0.2rem 0.6rem; '
+        f'border-radius:4px;">{edge_label}</span>'
+        f'{b_hs}'
+        f'<div>'
+        f'<span style="color:var(--tdd-cream); font-size:1rem; font-weight:700;">{batter_name}</span>'
+        f'{f" <span style=&quot;color:var(--tdd-slate); font-size:0.75rem;&quot;>{h_arch}</span>" if h_arch else ""}'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # --- Zone contours for primary pitches (≥10% usage) ---
+    p_loc = ploc_df[ploc_df["pitcher_id"] == pid] if not ploc_df.empty else pd.DataFrame()
+    h_zone = hzone_df[hzone_df["batter_id"] == bid] if not hzone_df.empty else pd.DataFrame()
+    p_arsenal = arsenal_df[arsenal_df["pitcher_id"] == pid] if not arsenal_df.empty else pd.DataFrame()
+
+    # Also try raw pitch locations for smoother KDE
+    from services.data_loader import load_pitcher_pitch_locations
+    _raw_locs = load_pitcher_pitch_locations()
+    _p_raw = _raw_locs[_raw_locs["pitcher_id"] == pid] if not _raw_locs.empty else pd.DataFrame()
+    _pitch_loc_data = _p_raw if not _p_raw.empty else p_loc
+
+    # Determine handedness for filtering
+    _pitch_hand = None
+    if not p_arsenal.empty and "pitch_hand" in p_arsenal.columns:
+        _hand_rows = p_arsenal[~p_arsenal["pitch_hand"].isna()]
+        if not _hand_rows.empty:
+            _pitch_hand = _hand_rows.iloc[0]["pitch_hand"]
+
+    # Batter stand from the lineup data
+    _batter_stand = batter_row.get("batter_stand") if pd.notna(batter_row.get("batter_stand")) else None
+
+    if not _pitch_loc_data.empty and not p_arsenal.empty:
+        total_pitches = p_arsenal["pitches"].sum()
+        p_arsenal_sorted = p_arsenal.copy()
+        p_arsenal_sorted["usage"] = p_arsenal_sorted["pitches"] / total_pitches
+        p_arsenal_sorted = p_arsenal_sorted.sort_values("usage", ascending=False)
+
+        primary_pts = p_arsenal_sorted[p_arsenal_sorted["usage"] >= 0.10]["pitch_type"].tolist()
+        secondary_pts = p_arsenal_sorted[p_arsenal_sorted["usage"] < 0.10]
+
+        if primary_pts:
+            # Per pitch type: pitcher density (left) vs hitter xwOBA (right)
+            for rank, pt in enumerate(primary_pts, 1):
+                pt_name = PITCH_DISPLAY.get(pt, pt)
+                _pt_row = p_arsenal_sorted[p_arsenal_sorted["pitch_type"] == pt]
+                _pt_usage = f" ({_pt_row.iloc[0]['usage']:.0%})" if not _pt_row.empty else ""
+                st.markdown(
+                    f'<div class="tdd-meta" style="margin:0.8rem 0 0.2rem;">'
+                    f'#{rank} {pt_name}{_pt_usage}</div>',
+                    unsafe_allow_html=True,
+                )
+                matchup_cols = st.columns(2, gap="medium")
+                with matchup_cols[0]:
+                    fig_density = create_pitch_density_plotly(
+                        _pitch_loc_data, pitch_types=[pt],
+                        pitcher_name=pitcher_name,
+                        batter_stand=_batter_stand,
+                        pitch_hand=_pitch_hand,
+                    )
+                    st.plotly_chart(
+                        fig_density, use_container_width=True,
+                        config={"displayModeBar": False},
+                        key=f"mu_density_{gpk}_{bid}_{pt}",
+                    )
+                with matchup_cols[1]:
+                    if not h_zone.empty:
+                        fig_xwoba = create_hitter_zone_plotly(
+                            h_zone, metric="xwoba",
+                            batter_name=batter_name,
+                            batter_stand=_batter_stand,
+                            pitch_types=[pt] if "pitch_type" in h_zone.columns else None,
+                        )
+                        st.plotly_chart(
+                            fig_xwoba, use_container_width=True,
+                            config={"displayModeBar": False},
+                            key=f"mu_xwoba_{gpk}_{bid}_{pt}",
+                        )
+                    else:
+                        st.markdown(
+                            f'<div class="tdd-meta">No zone data for {batter_name}</div>',
+                            unsafe_allow_html=True,
+                        )
+
+        # Secondary pitches
+        if not secondary_pts.empty:
+            sec_parts = [
+                f"{PITCH_DISPLAY.get(row['pitch_type'], row['pitch_type'])} ({row['usage']:.0%})"
+                for _, row in secondary_pts.iterrows()
+            ]
+            st.markdown(
+                f'<div class="tdd-context" style="margin:0.3rem 0 0.8rem;">'
+                f'Also throws: {", ".join(sec_parts)} — limited usage, not shown above'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    # --- Pitch-type breakdown table ---
+    h_vuln = vuln_df[vuln_df["batter_id"] == bid] if not vuln_df.empty else pd.DataFrame()
+    h_str = str_df[str_df["batter_id"] == bid] if not str_df.empty else pd.DataFrame()
+
+    if not p_arsenal.empty and not h_vuln.empty:
+        st.markdown(
+            f'<div style="color:var(--tdd-cream); font-size:0.9rem; font-weight:500; '
+            f'margin:0.5rem 0 0.3rem;">Pitch-Type Breakdown</div>',
+            unsafe_allow_html=True,
+        )
+        table_html = build_matchup_table(p_arsenal, h_vuln, h_str)
+        st.markdown(table_html, unsafe_allow_html=True)
+
+    # --- Scouting bullets (primary pitches only) ---
+    if not p_arsenal.empty and not h_vuln.empty:
+        _primary_arsenal = p_arsenal.copy()
+        _total = _primary_arsenal["pitches"].sum()
+        if _total > 0:
+            _primary_arsenal = _primary_arsenal[_primary_arsenal["pitches"] / _total >= 0.10]
+        bullets = build_matchup_scouting_bullets(
+            _primary_arsenal, h_vuln, h_str,
+            pitcher_name=pitcher_name, hitter_name=batter_name,
+        )
+        if bullets:
+            bullet_html = "".join(
+                f'<div style="color:{color}; font-size:0.82rem; '
+                f'margin:0.15rem 0; padding-left:0.8rem; '
+                f'border-left:2px solid {color};">{text}</div>'
+                for color, text in bullets
+            )
+            st.markdown(
+                f'<div style="margin:0.5rem 0 0.8rem;">{bullet_html}</div>',
+                unsafe_allow_html=True,
+            )
+
+    # --- View in Matchup Explorer link ---
+    st.markdown(
+        f'<div style="margin:0.5rem 0;">'
+        f'<a href="?page=matchup_explorer&pitcher_id={pid}&hitter_id={bid}" '
+        f'target="_self" style="color:var(--tdd-gold); font-size:0.85rem; '
+        f'text-decoration:none; font-weight:500;">'
+        f'View full matchup in Matchup Explorer →</a></div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _heatmap_color(
@@ -1268,32 +1566,32 @@ def _render_matchup_heatmap(
     .arch-heatmap th, .arch-heatmap td {{
         padding: 6px 8px;
         text-align: center;
-        border: 1px solid {DARK_BORDER};
-        color: {CREAM};
+        border: 1px solid var(--tdd-dark-border);
+        color: var(--tdd-cream);
     }}
     .arch-heatmap th {{
-        background: {DARK_CARD};
+        background: var(--tdd-dark-card);
         font-weight: 600;
         font-size: 0.75rem;
         white-space: nowrap;
     }}
     .arch-heatmap th.corner {{
-        background: {DARK};
+        background: var(--tdd-dark);
     }}
     .arch-heatmap th.col-hl {{
-        color: {GOLD};
-        border-bottom: 2px solid {GOLD};
+        color: var(--tdd-gold);
+        border-bottom: 2px solid var(--tdd-gold);
     }}
     .arch-heatmap td.row-label {{
         text-align: left;
         font-weight: 500;
-        background: {DARK_CARD};
+        background: var(--tdd-dark-card);
         white-space: nowrap;
         font-size: 0.75rem;
     }}
     .arch-heatmap tr.row-hl td.row-label {{
-        color: {GOLD};
-        border-left: 2px solid {GOLD};
+        color: var(--tdd-gold);
+        border-left: 2px solid var(--tdd-gold);
     }}
     .arch-heatmap td.cell {{
         font-weight: 500;
@@ -1344,14 +1642,14 @@ def _render_matchup_heatmap(
                     f"rgba(200,169,110,0.10)),"
                     f"{bg}"
                 )
-                parts.append(f"border-left:2px solid {GOLD}")
-                parts.append(f"border-right:2px solid {GOLD}")
+                parts.append(f"border-left:2px solid var(--tdd-gold)")
+                parts.append(f"border-right:2px solid var(--tdd-gold)")
             else:
                 parts.append(f"background:{bg}")
 
             if is_p_row:
-                parts.append(f"border-top:2px solid {GOLD}")
-                parts.append(f"border-bottom:2px solid {GOLD}")
+                parts.append(f"border-top:2px solid var(--tdd-gold)")
+                parts.append(f"border-bottom:2px solid var(--tdd-gold)")
 
             style = "; ".join(parts)
             row += f'<td class="cell" style="{style}">{cell_text}</td>'
@@ -1514,7 +1812,7 @@ def _render_sim_tab(
     context_parts = []
     venue = ctx.get("venue_name")
     if venue:
-        context_parts.append(f'<span style="color:{CREAM};">{venue}</span>')
+        context_parts.append(f'<span style="color:var(--tdd-cream);">{venue}</span>')
     ump_name = ctx.get("ump_name")
     if ump_name:
         ump_detail = ctx.get("ump_detail", "")
@@ -1525,14 +1823,14 @@ def _render_sim_tab(
     wx_display = ctx.get("weather_display")
     if wx_display:
         wx_detail = ctx.get("wx_detail", "")
-        wx_html = f' <span style="color:{SLATE};">({wx_detail})</span>' if wx_detail else ""
+        wx_html = f' <span style="color:var(--tdd-slate);">({wx_detail})</span>' if wx_detail else ""
         context_parts.append(f'{wx_display}{wx_html}')
 
     if context_parts:
         st.markdown(
-            f'<div style="background:{DARK_CARD}; border:1px solid {DARK_BORDER}; '
-            f'border-radius:6px; padding:0.6rem 1rem; margin-bottom:1rem; '
-            f'font-size:0.85rem; color:{SLATE};">'
+            f'<div style="background:transparent; border:none; '
+            f'border-bottom:1px solid var(--tdd-dark-border); padding:0.6rem 0; margin-bottom:1rem; '
+            f'font-size:0.85rem; color:var(--tdd-slate);">'
             f'{" &nbsp;|&nbsp; ".join(context_parts)}'
             f'</div>',
             unsafe_allow_html=True,
@@ -1685,7 +1983,10 @@ def _render_sim_tab(
         # Pitcher header with multi-stat expectations
         arch = side_info.get("pitcher_arch")
         arch_tag = f" ({arch})" if arch else ""
-        lineup_tag = f"vs {opp_abbr} lineup" if has_lineup else "league-avg baseline"
+        lineup_tag = (
+            f'vs <span class="tdd-team-abbr" data-team="{opp_abbr}">{opp_abbr}</span> lineup'
+            if has_lineup else "league-avg baseline"
+        )
 
         exp_parts = [
             f"E[K]: {np.mean(result.k_samples):.1f}",
@@ -1696,10 +1997,11 @@ def _render_sim_tab(
         ]
 
         st.markdown(
-            f'<div style="color:{GOLD}; font-size:1rem; font-weight:600; '
+            f'<div style="color:var(--tdd-gold); font-size:1rem; font-weight:600; '
             f'margin:0.8rem 0 0.3rem;">'
-            f'{side_abbr} SP: {pitcher_name}{arch_tag}'
-            f'<span style="color:{SLATE}; font-size:0.85rem; font-weight:400;">'
+            f'<span class="tdd-team-abbr" data-team="{side_abbr}">{side_abbr}</span>'
+            f' SP: {pitcher_name}{arch_tag}'
+            f'<span style="color:var(--tdd-slate); font-size:0.85rem; font-weight:400;">'
             f' — {" | ".join(exp_parts)} | {lineup_tag}</span>'
             f'</div>',
             unsafe_allow_html=True,
@@ -1707,7 +2009,7 @@ def _render_sim_tab(
 
         # DK fantasy line
         st.markdown(
-            f'<div style="font-size:0.85rem; color:{SLATE}; margin-bottom:0.5rem;">'
+            f'<div style="font-size:0.85rem; color:var(--tdd-slate); margin-bottom:0.5rem;">'
             f'DK: {dk["mean"]:.1f} pts (median {dk["median"]:.1f}, '
             f'10th {dk["q10"]:.1f}, 90th {dk["q90"]:.1f})</div>',
             unsafe_allow_html=True,
@@ -2040,15 +2342,19 @@ def _render_game_browser() -> None:
     pitcher_name = game_row.get("pitcher_name", "Unknown")
     pitcher_team = team_lookup.get(pitcher_id, "")
 
+    pitcher_team_tag = (
+        f' (<span class="tdd-team-abbr" data-team="{pitcher_team}">{pitcher_team}</span>)'
+        if pitcher_team else ""
+    )
     gb_header_html = (
         f'<div class="brand-header">'
         f'<div>'
-        f'<div class="brand-title">{pitcher_name}{f" ({pitcher_team})" if pitcher_team else ""}</div>'
+        f'<div class="brand-title">{pitcher_name}{pitcher_team_tag}</div>'
         f'<div class="brand-subtitle">{date_str} — {away_name} @ {home_name} | {ip} IP, {bf} BF</div>'
         f'</div>'
         f'<div style="font-size:1.2rem; font-weight:600;">'
-        f'<span style="color:{GOLD};">{total_actual_k} K</span>'
-        f'<span style="color:{SLATE};"> | Avg Lift: {avg_lift:+.3f}</span>'
+        f'<span style="color:var(--tdd-gold);">{total_actual_k} K</span>'
+        f'<span style="color:var(--tdd-slate);"> | Avg Lift: {avg_lift:+.3f}</span>'
         f'</div>'
         f'</div>'
     )

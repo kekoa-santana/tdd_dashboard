@@ -76,7 +76,7 @@ def pctile_bar_html(
             arrow_color = SLATE
         prev_line = (
             f'<div style="position:absolute; left:{pctile_prev:.0f}%; top:0; '
-            f'height:100%; width:2px; border-left:2px dashed {SLATE}; opacity:0.7; z-index:2;"></div>'
+            f'height:100%; width:2px; border-left:2px dashed var(--tdd-slate); opacity:0.7; z-index:2;"></div>'
         )
         prev_label = (
             f'<span style="color:{arrow_color}; font-size:0.75rem; margin-left:8px;">'

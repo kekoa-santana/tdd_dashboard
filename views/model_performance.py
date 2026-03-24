@@ -163,11 +163,11 @@ def _render_rate_backtest(ptype: str) -> None:
                 continue
 
             label = "K%" if stat_name == "k_rate" else "BB%"
-            st.markdown(f'<div class="section-header">{label} Backtest</div>',
+            st.markdown(f'<div class="tdd-section-hdr">{label} Backtest</div>',
                         unsafe_allow_html=True)
             _render_backtest_summary(df_stat, label)
     elif not df_single.empty:
-        st.markdown('<div class="section-header">K% Backtest</div>',
+        st.markdown('<div class="tdd-section-hdr">K% Backtest</div>',
                     unsafe_allow_html=True)
         _render_backtest_summary(df_single, "K%")
 
@@ -183,7 +183,7 @@ def _render_counting_backtest(ptype: str) -> None:
     for stat_name in stats_available:
         df_stat = df[df["stat"] == stat_name]
         label = stat_name.replace("total_", "").upper()
-        st.markdown(f'<div class="section-header">{label} Counting Backtest</div>',
+        st.markdown(f'<div class="tdd-section-hdr">{label} Counting Backtest</div>',
                     unsafe_allow_html=True)
         _render_backtest_summary(df_stat, label, is_counting=True)
 
@@ -307,14 +307,14 @@ def _render_game_k_tab() -> None:
                 st.markdown(metric_card(f"{lbl} Coverage", f"{avg:.1f}%"), unsafe_allow_html=True)
 
     # Model tier comparison chart
-    st.markdown('<div class="section-header">Model Tier Comparison</div>',
+    st.markdown('<div class="tdd-section-hdr">Model Tier Comparison</div>',
                 unsafe_allow_html=True)
     fig = create_game_k_model_comparison(df)
     st.pyplot(fig, width='stretch')
 
     # Coverage chart
     if existing:
-        st.markdown('<div class="section-header">Interval Coverage</div>',
+        st.markdown('<div class="tdd-section-hdr">Interval Coverage</div>',
                     unsafe_allow_html=True)
         fig = create_coverage_chart(
             df,
@@ -389,7 +389,7 @@ def _render_hits_misses_tab() -> None:
 
     with chart_col1:
         st.markdown(
-            f'<div class="section-header" style="color:{SAGE};">Biggest Hits ({stat_label})</div>',
+            f'<div class="tdd-section-hdr" style="color:var(--tdd-sage);">Biggest Hits ({stat_label})</div>',
             unsafe_allow_html=True,
         )
         if not biggest_hits.empty:
@@ -415,7 +415,7 @@ def _render_hits_misses_tab() -> None:
 
     with chart_col2:
         st.markdown(
-            f'<div class="section-header" style="color:{EMBER};">Biggest Misses ({stat_label})</div>',
+            f'<div class="tdd-section-hdr" style="color:var(--tdd-ember);">Biggest Misses ({stat_label})</div>',
             unsafe_allow_html=True,
         )
         if not biggest_misses.empty:
@@ -560,7 +560,7 @@ def _render_movers_tab() -> None:
     col1, col2 = st.columns(2)
     with col1:
         st.markdown(
-            f'<div class="section-header" style="color:{SAGE};">{up_label} ({stat_label})</div>',
+            f'<div class="tdd-section-hdr" style="color:var(--tdd-sage);">{up_label} ({stat_label})</div>',
             unsafe_allow_html=True,
         )
         if not up_df.empty:
@@ -577,7 +577,7 @@ def _render_movers_tab() -> None:
 
     with col2:
         st.markdown(
-            f'<div class="section-header" style="color:{EMBER};">{down_label} ({stat_label})</div>',
+            f'<div class="tdd-section-hdr" style="color:var(--tdd-ember);">{down_label} ({stat_label})</div>',
             unsafe_allow_html=True,
         )
         if not down_df.empty:
@@ -593,7 +593,7 @@ def _render_movers_tab() -> None:
             st.caption("No data")
 
     # Player search with timeline
-    st.markdown('<div class="section-header">Player Timeline</div>',
+    st.markdown('<div class="tdd-section-hdr">Player Timeline</div>',
                 unsafe_allow_html=True)
 
     all_snapshots = {}
@@ -726,11 +726,11 @@ def _render_preseason_comparison_tab() -> None:
 
         st.markdown(
             f'<div class="insight-card">'
-            f'<span style="color:{SLATE};">Comparing </span>'
-            f'<span style="color:{GOLD}; font-weight:600;">preseason ({snap_date})</span>'
-            f'<span style="color:{SLATE};"> to </span>'
-            f'<span style="color:{GOLD}; font-weight:600;">current projections</span>'
-            f'<span style="color:{SLATE};"> | {len(merged)} {ptype}s matched</span>'
+            f'<span class="tdd-meta">Comparing </span>'
+            f'<span class="tdd-stat-value">preseason ({snap_date})</span>'
+            f'<span class="tdd-meta"> to </span>'
+            f'<span class="tdd-stat-value">current projections</span>'
+            f'<span class="tdd-meta"> | {len(merged)} {ptype}s matched</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -829,7 +829,7 @@ def _render_preseason_comparison_tab() -> None:
     with sub_lookup:
         st.markdown(
             f'<div class="insight-card">'
-            f'<span style="color:{SLATE};">Search for a player to see their projection '
+            f'<span class="tdd-meta">Search for a player to see their projection '
             f'evolution from preseason through weekly snapshots.</span>'
             f'</div>',
             unsafe_allow_html=True,
@@ -1012,7 +1012,7 @@ def _render_preseason_only_table(
 def _render_season_tracker_tab() -> None:
     """In-season accuracy tracker — stub until games begin."""
     st.markdown(
-        f'<div class="section-header">In-Season Accuracy Tracker</div>',
+        f'<div class="tdd-section-hdr">In-Season Accuracy Tracker</div>',
         unsafe_allow_html=True,
     )
 
@@ -1023,7 +1023,7 @@ def _render_season_tracker_tab() -> None:
     )
 
     st.markdown(
-        f'<div style="color:{CREAM}; font-weight:600; margin-top:16px; '
+        f'<div class="tdd-stat-value" style="margin-top:16px; '
         f'margin-bottom:8px;">What will be tracked:</div>',
         unsafe_allow_html=True,
     )
@@ -1037,8 +1037,8 @@ def _render_season_tracker_tab() -> None:
 
     st.markdown(
         f'<div style="margin-top:16px; padding:12px 16px; '
-        f'border-left:3px solid {GOLD}; background:{GOLD}08;">'
-        f'<span style="color:{SLATE}; font-size:0.85rem;">'
+        f'border-left:3px solid var(--tdd-gold); background:transparent;">'
+        f'<span class="tdd-meta">'
         f'Data will auto-populate from weekly projection snapshots and '
         f'the daily update pipeline. No manual setup required.</span>'
         f'</div>',

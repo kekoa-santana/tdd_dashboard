@@ -23,6 +23,6 @@ def team_logo_html(team_id: int, size: int = 40) -> str:
     return (
         f'<img src="{url}" '
         f'style="width:{size}px; height:{size}px; border-radius:4px; '
-        f'background-color:#181b23; display:inline-block; '
+        f'background-color:transparent; display:inline-block; '
         f'vertical-align:middle; object-fit:contain;" />'
     )

@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from config import EMBER, GOLD, SAGE, SLATE, CREAM, DARK_BORDER
+from config import EMBER, GOLD, SAGE, SLATE, CREAM, DARK_BORDER, PITCH_DISPLAY
 from services.data_loader import (
     load_baselines_arch,
     load_cluster_metadata,
@@ -39,7 +39,7 @@ def page_matchup_explorer() -> None:
     from lib.matchup import score_matchup, score_matchup_by_archetype
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
 
-    st.markdown('<div class="section-header">Matchup Explorer</div>',
+    st.markdown('<div class="tdd-section-hdr">Matchup Explorer</div>',
                 unsafe_allow_html=True)
 
     arsenal_df = load_pitcher_arsenal()
@@ -250,8 +250,8 @@ def page_matchup_explorer() -> None:
         f'{h_headshot}'
         f'</div>'
         f'<div style="text-align:right;">'
-        f'<div style="color:{edge_color}; font-size:1.1rem; font-weight:600;">{edge_label}</div>'
-        f'<div style="color:{SLATE}; font-size:0.85rem;">'
+        f'<div class="tdd-edge-label" style="color:{edge_color};">{edge_label}</div>'
+        f'<div class="tdd-meta">'
         f'<span class="tdd-tip" title="Matchup-driven K% advantage above baseline (logit scale)">K Lift</span>: {lift:+.3f}</div>'
         f'</div>'
         f'</div>'
@@ -292,7 +292,7 @@ def page_matchup_explorer() -> None:
 
     # --- Combined matchup breakdown table ---
     breakdown_label = "Archetype Matchup" if using_archetype else "Pitch-by-Pitch Matchup"
-    st.markdown(f'<div class="section-header">{breakdown_label}</div>',
+    st.markdown(f'<div class="tdd-section-hdr">{breakdown_label}</div>',
                 unsafe_allow_html=True)
 
     p_arsenal = arsenal_df[
@@ -434,14 +434,14 @@ def page_matchup_explorer() -> None:
         if not p_loc.empty and not h_zone.empty:
             from lib.zone_charts import plot_matchup_overlay
 
-            st.markdown('<div class="section-header">Location Matchup</div>',
+            st.markdown('<div class="tdd-section-hdr">Location Matchup</div>',
                         unsafe_allow_html=True)
             st.markdown(
-                f'<div style="font-size:0.8rem; color:{SLATE};">'
+                f'<div class="tdd-context">'
                 f"Gold dots = where the pitcher throws each pitch. "
                 f'Background = hitter whiff vulnerability '
-                f'(<span style="color:{EMBER};">orange</span> = exploitable, '
-                f'<span style="color:{SAGE};">green</span> = strong). '
+                f'(<span style="color:var(--tdd-ember);">orange</span> = exploitable, '
+                f'<span style="color:var(--tdd-sage);">green</span> = strong). '
                 f"Catcher's perspective."
                 f'</div>',
                 unsafe_allow_html=True,
@@ -456,26 +456,27 @@ def page_matchup_explorer() -> None:
             # 2x2 grid for zone overlays
             for row_start in range(0, len(top_pts), 2):
                 row_pts = top_pts[row_start:row_start + 2]
-                overlay_cols = st.columns(2)
+                overlay_cols = st.columns([1, 1], gap="medium")
                 for i, pt in enumerate(row_pts):
                     with overlay_cols[i]:
                         fig_ov = plot_matchup_overlay(
                             p_loc, h_zone, pitch_type=pt,
                             pitcher_name=selected_pitcher, hitter_name=selected_hitter,
                             batter_stand=stand_for_overlay,
+                            pitch_display_name=PITCH_DISPLAY.get(pt, pt),
                         )
-                        st.pyplot(fig_ov, width='stretch')
+                        st.pyplot(fig_ov, use_container_width=True)
                         plt.close(fig_ov)
 
     # --- Side-by-side profile tables ---
-    st.markdown('<div class="section-header">Individual Profiles</div>',
+    st.markdown('<div class="tdd-section-hdr">Individual Profiles</div>',
                 unsafe_allow_html=True)
 
     prof_col1, prof_col2 = st.columns(2)
     with prof_col1:
         st.markdown(
-            f'<div style="color:{GOLD}; font-size:0.95rem; font-weight:600; '
-            f'margin-bottom:0.5rem;">{selected_pitcher} — Arsenal</div>',
+            f'<div class="tdd-section-hdr" style="margin-bottom:0.5rem;">'
+            f'{selected_pitcher} — Arsenal</div>',
             unsafe_allow_html=True,
         )
         if not p_arsenal.empty:
@@ -491,8 +492,8 @@ def page_matchup_explorer() -> None:
         if is_switch:
             vuln_label += f" (batting {hitter_hand})"
         st.markdown(
-            f'<div style="color:{GOLD}; font-size:0.95rem; font-weight:600; '
-            f'margin-bottom:0.5rem;">{vuln_label}</div>',
+            f'<div class="tdd-section-hdr" style="margin-bottom:0.5rem;">'
+            f'{vuln_label}</div>',
             unsafe_allow_html=True,
         )
         if not h_vuln.empty:
@@ -506,7 +507,7 @@ def page_matchup_explorer() -> None:
     # --- Archetype Matchup Matrix ---
     _mm_df = load_archetype_matchup_matrix()
     if not _mm_df.empty:
-        st.markdown('<div class="section-header">Archetype Matchup Matrix</div>',
+        st.markdown('<div class="tdd-section-hdr">Archetype Matchup Matrix</div>',
                     unsafe_allow_html=True)
 
         # Determine selected player archetypes for highlighting
@@ -555,17 +556,17 @@ def page_matchup_explorer() -> None:
         # Build HTML table
         _hdr = "".join(
             f'<th style="padding:6px 8px; font-size:0.75rem; color:'
-            f'{GOLD if name == _sel_h_arch else CREAM}; '
+            f'{"var(--tdd-gold)" if name == _sel_h_arch else "var(--tdd-cream)"}; '
             f'{"font-weight:700; text-decoration:underline;" if name == _sel_h_arch else ""}'
-            f'border-bottom:1px solid {DARK_BORDER};">{name}</th>'
+            f'border-bottom:1px solid var(--tdd-dark-border);">{name}</th>'
             for name in _h_names
         )
         _rows = ""
         for p_name in _p_names:
             _is_sel_row = (p_name == _sel_p_arch)
             _row_label_style = (
-                f'color:{GOLD}; font-weight:700; text-decoration:underline;'
-                if _is_sel_row else f'color:{CREAM};'
+                f'color:var(--tdd-gold); font-weight:700; text-decoration:underline;'
+                if _is_sel_row else f'color:var(--tdd-cream);'
             )
             _cells = f'<td style="padding:6px 8px; {_row_label_style} font-size:0.8rem; white-space:nowrap;">{p_name}</td>'
             for h_name in _h_names:
@@ -579,7 +580,7 @@ def page_matchup_explorer() -> None:
                     f'color:{color}; font-weight:{_fw}; background:{_bg};">'
                     f'{val:.1%}</td>'
                 )
-            _rows += f'<tr style="border-bottom:1px solid {DARK_BORDER}22;">{_cells}</tr>'
+            _rows += f'<tr style="border-bottom:1px solid var(--tdd-dark-border)22;">{_cells}</tr>'
 
         _matrix_html = (
             f'<table style="width:100%; border-collapse:collapse;">'
@@ -601,7 +602,7 @@ def page_matchup_explorer() -> None:
         )
 
     # --- Scouting report ---
-    st.markdown('<div class="section-header">Matchup Scouting Report</div>',
+    st.markdown('<div class="tdd-section-hdr">Matchup Scouting Report</div>',
                 unsafe_allow_html=True)
 
     # Overall summary — use blended edge (whiff lift + contact quality)

@@ -62,18 +62,10 @@ _CSS = f"""
     margin-bottom: 0.8rem;
 }}
 .stats-title {{
-    color: {CREAM};
+    color: var(--tdd-cream);
     font-size: 1.7rem;
     font-weight: 800;
     letter-spacing: 1.5px;
-}}
-.lb-card {{
-    background: {DARK_CARD};
-    border: 1px solid {DARK_BORDER};
-    border-radius: 10px;
-    padding: 0.8rem 1rem;
-    margin-bottom: 1.5rem;
-    max-width: 380px;
 }}
 .lb-title-row {{
     display: flex;
@@ -81,16 +73,16 @@ _CSS = f"""
     align-items: baseline;
     margin-bottom: 0.5rem;
     padding-bottom: 0.4rem;
-    border-bottom: 1px solid {DARK_BORDER};
+    border-bottom: 1px solid var(--tdd-dark-border);
 }}
 .lb-title {{
-    color: {GOLD};
+    color: var(--tdd-gold);
     font-size: 2.0rem;
     font-weight: 700;
     letter-spacing: 0.75px;
 }}
 .lb-subtitle {{
-    color: {SLATE};
+    color: var(--tdd-slate);
     font-size: 0.70rem;
     font-weight: 400;
     margin-left: 0.4rem;
@@ -99,23 +91,23 @@ _CSS = f"""
     display: flex;
     align-items: center;
     padding: 0.28rem 0;
-    border-bottom: 1px solid {DARK_BORDER}15;
+    border-bottom: 1px solid var(--tdd-dark-border-faint);
 }}
 .lb-row:last-child {{ border-bottom: none; }}
 .lb-rank {{
-    color: {SLATE};
+    color: var(--tdd-slate);
     font-size: 0.82rem;
     min-width: 1.6rem;
     text-align: right;
     margin-right: 0.5rem;
 }}
-.lb-rank-top {{ color: {GOLD}; font-weight: 700; }}
+.lb-rank-top {{ color: var(--tdd-gold); font-weight: 700; }}
 .lb-headshot {{
     margin-left: 0.5rem;
     margin-right: 0.5rem;
 }}
 .lb-name {{
-    color: {CREAM};
+    color: var(--tdd-cream);
     font-size: 0.95rem;
     font-weight: 600;
     flex: 1;
@@ -125,16 +117,16 @@ _CSS = f"""
     text-decoration: none;
 }}
 .lb-name a:hover {{
-    color: {GOLD};
+    color: var(--tdd-gold);
     text-decoration: underline;
 }}
 .lb-team {{
-    color: {SLATE};
+    color: var(--tdd-slate);
     font-size: 0.80rem;
     margin-right: 0.5rem;
 }}
 .lb-val {{
-    color: {SAGE};
+    color: var(--tdd-sage);
     font-size: 1rem;
     font-weight: 700;
     min-width: 2.5rem;
@@ -228,7 +220,7 @@ def _render_stat_leaderboard(
         else:
             name_html = name
 
-        team_html = f'<span class="lb-team">{team}</span>' if team else ""
+        team_html = f'<span class="lb-team" data-team="{team}">{team}</span>' if team else ""
 
         rows_html.append(
             f'<div class="lb-row">'

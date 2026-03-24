@@ -8,18 +8,18 @@ SLATE = "#7B8FA6"
 
 
 def _build_diamonds(rating: float, font_size: str) -> str:
-    """Build the filled/empty diamond HTML for a given rating."""
+    """Build the filled/empty diamond HTML for a given rating (0-10 scale)."""
     full_diamonds = int(rating)
     fractional = rating - full_diamonds
 
     parts: list[str] = []
-    for i in range(5):
+    for i in range(10):
         if i < full_diamonds:
-            parts.append(f'<span style="color:{GOLD};">&#9670;</span>')
+            parts.append(f'<span style="color:var(--tdd-gold);">&#9670;</span>')
         elif i == full_diamonds and fractional >= 0.5:
-            parts.append(f'<span style="color:{GOLD};">&#9670;</span>')
+            parts.append(f'<span style="color:var(--tdd-gold);">&#9670;</span>')
         else:
-            parts.append(f'<span style="color:{SLATE};">&#9671;</span>')
+            parts.append(f'<span style="color:var(--tdd-slate);">&#9671;</span>')
     return "".join(parts)
 
 
@@ -43,9 +43,9 @@ def render_diamond_rating(score: float, size: str = "md", show_numeric: bool = T
     numeric = f" {rating:.1f}" if show_numeric else ""
 
     html = (
-        f'<span title="Diamond Rating: {rating:.1f} / 5.0 — {tier}" '
+        f'<span title="Diamond Rating: {rating:.1f} / 10.0 — {tier}" '
         f'style="font-size:{font_size}; letter-spacing:2px; cursor:help;">'
-        f'{diamonds}<span style="color:{GOLD}; font-size:0.8em;">{numeric}</span>'
+        f'{diamonds}<span style="color:var(--tdd-gold); font-size:0.8em;">{numeric}</span>'
         f'</span>'
     )
     st.markdown(html, unsafe_allow_html=True)
@@ -68,16 +68,20 @@ def render_diamond_rating_composite(
     render_diamond_rating(normalize_composite(composite), size=size, show_numeric=show_numeric)
 
 
-def diamond_rating_html(score: float, size: str = "md") -> str:
+def diamond_rating_html(
+    score: float, size: str = "md", precomputed: float | None = None,
+) -> str:
     """Return diamond rating as an HTML string (for use in tables/cards).
 
     Args:
-        score: TDD normalized score (0.0-1.0).
+        score: TDD normalized score (0.0-1.0), used as fallback.
         size: "sm", "md", or "lg".
+        precomputed: Pre-computed diamond rating (0-10) from scouting grades.
+            When provided, ``score`` is ignored and this value is used directly.
     """
     from lib.diamond_rating import score_to_diamonds, diamond_tier
 
-    rating = score_to_diamonds(score)
+    rating = precomputed if precomputed is not None else score_to_diamonds(score)
     tier = diamond_tier(rating)
 
     sizes = {"sm": "0.85rem", "md": "1.1rem", "lg": "1.4rem"}
@@ -85,9 +89,9 @@ def diamond_rating_html(score: float, size: str = "md") -> str:
     diamonds = _build_diamonds(rating, font_size)
 
     return (
-        f'<span title="Diamond Rating: {rating:.1f} / 5.0 — {tier}" '
+        f'<span title="Diamond Rating: {rating:.1f} / 10.0 — {tier}" '
         f'style="font-size:{font_size}; letter-spacing:2px; cursor:help;">'
-        f'{diamonds} <span style="color:{GOLD}; font-size:0.8em;">{rating:.1f}</span>'
+        f'{diamonds} <span style="color:var(--tdd-gold); font-size:0.8em;">{rating:.1f}</span>'
         f'</span>'
     )
 
