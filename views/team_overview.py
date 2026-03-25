@@ -827,6 +827,13 @@ def _render_trade_simulator_tab(
     selected_team: str, teams_df: pd.DataFrame,
 ) -> None:
     """Render the Trade Simulator tab."""
+    st.markdown(
+        f'<div style="background:{EMBER}22; border:1px solid {EMBER}44; '
+        f'border-radius:6px; padding:0.6rem 1rem; margin-bottom:1rem; '
+        f'font-size:0.85rem; color:{EMBER}; font-weight:600;">'
+        f'WORK IN PROGRESS — This feature is still being refined.</div>',
+        unsafe_allow_html=True,
+    )
     weaknesses = _identify_weaknesses(selected_team, teams_df)
 
     st.markdown("#### Positional Needs")

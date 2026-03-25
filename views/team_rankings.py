@@ -501,16 +501,11 @@ def page_team_rankings() -> None:
         return
 
     # ── category filter ──
-    category = st.selectbox(
-        "Category", ["Overall", "American League", "National League"],
-        key="tr_category", label_visibility="collapsed",
-    )
+    from utils.division_filter import division_selectbox, apply_division_filter
 
-    filtered = rankings.copy()
-    if category == "American League":
-        filtered = filtered[filtered["league"] == "AL"]
-    elif category == "National League":
-        filtered = filtered[filtered["league"] == "NL"]
+    category = division_selectbox(key="tr_category")
+
+    filtered = apply_division_filter(rankings, category)
 
     search = st.text_input("Search", placeholder="Search team...", key="tr_search")
     if search:
@@ -532,11 +527,7 @@ def page_team_rankings() -> None:
     st.markdown('<div class="tr-section">Team Scouting Grades</div>', unsafe_allow_html=True)
 
     # Use team_profiles which has the scouting-grade aggregations
-    grade_source = profiles.copy()
-    if category == "American League":
-        grade_source = grade_source[grade_source["league"] == "AL"]
-    elif category == "National League":
-        grade_source = grade_source[grade_source["league"] == "NL"]
+    grade_source = apply_division_filter(profiles, category)
 
     has_grades = all(c in grade_source.columns for c in ["lineup_diamond", "rotation_diamond", "bullpen_diamond"])
     if has_grades:
@@ -550,10 +541,7 @@ def page_team_rankings() -> None:
     else:
         # Fallback to ELO if scouting grades not yet computed
         elo_source = elo_df if not elo_df.empty else rankings
-        if category == "American League":
-            elo_source = elo_source[elo_source["league"] == "AL"]
-        elif category == "National League":
-            elo_source = elo_source[elo_source["league"] == "NL"]
+        elo_source = apply_division_filter(elo_source, category)
         c1, c2, c3 = st.columns(3)
         with c1:
             _render_elo_leaderboard(elo_source, "Offense ELO", "offense_elo", "offense_rank")

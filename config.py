@@ -114,16 +114,16 @@ PITCHER_OBSERVED_STATS = [
     ("GB%", "gb_pct", True, "Ground ball rate"),
 ]
 
-# Counting stat display configs: (label, column_prefix, actual_col, higher_better)
-# Ordered by validated accuracy (MAPE): most reliable stats first
+# Counting stat display configs: (label, column_prefix, actual_col, higher_better, confidence)
+# confidence: "high" = beats Marcel 15%+, "med" = beats Marcel <10%, "low" = no baseline
+# Ordered by validated accuracy. SB removed (Bayes loses to Marcel).
 HITTER_COUNTING_DISPLAY = [
-    ("wRC+", "projected_wrc_plus", None, True),        # MAPE=11%, r=0.739
-    ("Proj. K", "total_k", "actual_k", False),         # MAPE=25%, r=0.783
-    ("Proj. HR", "total_hr", "actual_hr", True),       # MAPE=28%, r=0.936
-    ("Proj. BB", "total_bb", "actual_bb", True),       # MAPE=30%, r=0.871
-    ("Proj. R", "total_r", None, True),                # MAPE=30%, r=0.786
-    ("Proj. RBI", "total_rbi", None, True),            # MAPE=30%, r=0.817
-    ("Proj. SB", "total_sb", None, True),              # r=0.937
+    ("Proj. K", "total_k", "actual_k", False, "high"),         # Bayes +15-17% vs Marcel, r=0.56
+    ("Proj. BB", "total_bb", "actual_bb", True, "high"),       # Bayes +8-16% vs Marcel, r=0.68
+    ("Proj. HR", "total_hr", "actual_hr", True, "med"),        # Bayes +5-11% vs Marcel, r=0.60
+    ("wRC+", "projected_wrc_plus", None, True, "range"),       # r=0.44, show as range not point
+    ("Proj. R", "total_r", None, True, "low"),                 # No Marcel baseline, r=0.56
+    ("Proj. RBI", "total_rbi", None, True, "low"),             # No Marcel baseline, r=0.47
 ]
 PITCHER_COUNTING_DISPLAY = [
     ("FIP-ERA", "projected_fip_era", None, False),     # best rate metric, r=0.297

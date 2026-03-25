@@ -42,6 +42,7 @@ from views.player_rankings import page_player_rankings  # noqa: E402
 from views.team_rankings import page_team_rankings  # noqa: E402
 from views.compare import page_compare  # noqa: E402
 from views.breakout import page_breakout  # noqa: E402
+from views.lineup_creator import page_lineup_creator  # noqa: E402
 from views.methodology import page_methodology  # noqa: E402
 
 # Apply dark matplotlib theme at import time
@@ -265,6 +266,7 @@ PAGES = {
     "Team Rankings": page_team_rankings,
     "Matchup Explorer": page_matchup_explorer,
     "Compare Players": page_compare,
+    "Lineup Creator": page_lineup_creator,
     "Model Performance": page_model_performance,
     "Data Health": page_data_health,
     "Methodology": page_methodology,
@@ -280,7 +282,7 @@ _NAV = [
         "Projections", "Breakout Candidates",
     ]),
     ("Teams", ["Team Overview", "Team Rankings"]),
-    ("Tools", ["Matchup Explorer", "Compare Players"]),
+    ("Tools", ["Matchup Explorer", "Compare Players", "Lineup Creator"]),
     ("About", ["Methodology", "Model Performance", "Data Health"]),
 ]
 
@@ -381,47 +383,6 @@ def main() -> None:
     </div>
     </div>
     """, unsafe_allow_html=True)
-
-    # Settings bar
-    with st.expander("Settings", expanded=False):
-        col_pal, col_font, col_meta = st.columns([2, 2, 3])
-        with col_pal:
-            palette_choice = st.selectbox(
-                "Color Palette",
-                list(_PALETTES.keys()),
-                index=list(_PALETTES.keys()).index(_palette_name),
-                key="palette_selector",
-                label_visibility="collapsed",
-            )
-            if palette_choice != _palette_name:
-                st.session_state["tdd_palette"] = palette_choice
-                st.rerun()
-        with col_font:
-            font_choice = st.selectbox(
-                "Font Pairing",
-                list(_FONT_PAIRINGS.keys()),
-                index=list(_FONT_PAIRINGS.keys()).index(_font_name),
-                key="font_selector",
-                label_visibility="collapsed",
-            )
-            if font_choice != _font_name:
-                st.session_state["tdd_font"] = font_choice
-                st.rerun()
-        with col_meta:
-            meta = load_update_metadata()
-            updated_str = ""
-            if meta.get("last_updated"):
-                try:
-                    from datetime import datetime as _dt
-                    ts = _dt.fromisoformat(meta["last_updated"])
-                    updated_str = f"Updated: {ts.strftime('%b %d, %I:%M %p')} | "
-                except Exception:
-                    pass
-            st.markdown(
-                f'<div class="tdd-meta" style="text-align:right; padding-top:0.3rem;">'
-                f'{updated_str}v2.0 | {CURRENT_SEASON} | {TRAINING_RANGE}</div>',
-                unsafe_allow_html=True,
-            )
 
     if not check_data_exists():
         st.error(
