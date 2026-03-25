@@ -311,7 +311,7 @@ def page_compare() -> None:
                 display_vals.append(fmt_stat(v, key))
             else:
                 vals.append(None)
-                display_vals.append("--")
+                display_vals.append("")
 
         # Percentile sub-row
         pctile_vals: list[str] = []
@@ -321,7 +321,7 @@ def page_compare() -> None:
                 pct = percentile_rank(proj_df[proj_col], float(v), higher_better)
                 pctile_vals.append(_pctile_bar_inline(pct))
             else:
-                pctile_vals.append("--")
+                pctile_vals.append("")
 
         colors = _highlight_best(vals, higher_better)
         table_rows.append(_stat_row_html(label, display_vals, colors))
@@ -344,7 +344,7 @@ def page_compare() -> None:
                     display_vals.append(f"{v:.2f}")
                 else:
                     vals.append(None)
-                    display_vals.append("--")
+                    display_vals.append("")
             colors = _highlight_best(vals, higher_is_better=False)
             table_rows.append(_stat_row_html(label, display_vals, colors))
 
@@ -360,7 +360,7 @@ def page_compare() -> None:
                     display_vals.append(f"{v:.3f}")
                 else:
                     vals.append(None)
-                    display_vals.append("--")
+                    display_vals.append("")
             colors = _highlight_best(vals, higher_is_better=hib)
             table_rows.append(_stat_row_html(label, display_vals, colors))
 
@@ -382,7 +382,7 @@ def page_compare() -> None:
                 display_vals.append(fmt_stat(v, key))
             else:
                 vals.append(None)
-                display_vals.append("--")
+                display_vals.append("")
         colors = _highlight_best(vals, higher_better)
         table_rows.append(_stat_row_html(label, display_vals, colors))
 
@@ -416,7 +416,7 @@ def page_compare() -> None:
                         counting_rows_exist = True
                         continue
                 vals.append(None)
-                display_vals.append("--")
+                display_vals.append("")
 
             colors = _highlight_best(vals, c_hb)
             counting_row_html.append(_stat_row_html(c_label, display_vals, colors))

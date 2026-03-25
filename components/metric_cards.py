@@ -42,14 +42,14 @@ def metric_card(label: str, value: str, delta_html: str = "", pctile: float | No
         pctile_div = f'<div class="metric-pctile" style="color:{pct_color};">{pctile:.0f}th pctile</div>'
     else:
         pctile_div = ""
-    return f"""
-    <div class="metric-card">
-        <div class="metric-value">{value}</div>
-        <div class="metric-label">{label}</div>
-        {pctile_div}
-        {delta_div}
-    </div>
-    """
+    return (
+        f'<div class="metric-card">'
+        f'<div class="metric-value">{value}</div>'
+        f'<div class="metric-label">{label}</div>'
+        f'{pctile_div}'
+        f'{delta_div}'
+        f'</div>'
+    )
 
 
 def pctile_bar_html(

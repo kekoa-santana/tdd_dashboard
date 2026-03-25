@@ -1,4 +1,4 @@
-"""Schedule page — date-based game browser with projections and live data."""
+"""Schedule page | date-based game browser with projections and live data."""
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
@@ -151,7 +151,7 @@ def _render_schedule_cards(
         for _, _r in _p_arch.iterrows():
             _p_arch_lookup[int(_r["pitcher_id"])] = _r["archetype_name"]
 
-    # Diamond rating lookup from rankings — use pre-computed diamond_rating (0-10)
+    # Diamond rating lookup from rankings | use pre-computed diamond_rating (0-10)
     # when available, fall back to tdd_value_score (0-1) converted via score_to_diamonds
     from services.data_loader import load_rankings
     from lib.diamond_rating import score_to_diamonds
@@ -264,7 +264,7 @@ def _render_schedule_cards(
     if sims_stale:
         st.markdown(
             f'<div style="color:var(--tdd-ember); font-size:0.85rem; margin-bottom:0.5rem;">'
-            f'Simulations are from a previous date — showing base projections only.'
+            f'Simulations are from a previous date | showing base projections only.'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -600,7 +600,7 @@ def _render_hitter_projections_tab(
     pos_lookup: dict[int, str] | None = None,
     sides_all: list[dict] | None = None,
 ) -> None:
-    """Hitter projection cards — MLB-style lineup with game-level sim projections."""
+    """Hitter projection cards | MLB-style lineup with game-level sim projections."""
     from lib.game_sim.batter_simulator import simulate_batter_game
     from lib.matchup import score_matchup, score_matchup_bb, score_matchup_hr
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
@@ -670,7 +670,7 @@ def _render_hitter_projections_tab(
                 opp_bf_mu = float(bp_last["mu_bf"])
                 opp_bf_sigma = float(bp_last["sigma_bf"])
 
-        # Header — include opposing pitcher context
+        # Header | include opposing pitcher context
         opp_ctx = ""
         if opp_pid:
             opp_ctx = (
@@ -881,7 +881,7 @@ def _render_matchup_tab(
     gpk: int,
     pos_lookup: dict[int, str] | None = None,
 ) -> None:
-    """Pitcher vs opposing lineup — MLB-style card layout with matchup advantage."""
+    """Pitcher vs opposing lineup | MLB-style card layout with matchup advantage."""
     from scipy.special import expit, logit as sp_logit
     from lib.matchup import score_matchup, score_matchup_bb, score_matchup_hr
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
@@ -1218,7 +1218,7 @@ def _render_archetype_tab(
 
 
 # ---------------------------------------------------------------------------
-# Matchup Analysis — individual pitcher-vs-batter breakdowns
+# Matchup Analysis | individual pitcher-vs-batter breakdowns
 # ---------------------------------------------------------------------------
 
 def _render_matchup_analysis(
@@ -1388,7 +1388,7 @@ def _render_matchup_analysis(
                     )
                     st.plotly_chart(
                         fig_density, use_container_width=True,
-                        config={"displayModeBar": False},
+                        config={"displayModeBar": False, "scrollZoom": False},
                         key=f"mu_density_{gpk}_{bid}_{pt}",
                     )
                 with matchup_cols[1]:
@@ -1401,7 +1401,7 @@ def _render_matchup_analysis(
                         )
                         st.plotly_chart(
                             fig_xwoba, use_container_width=True,
-                            config={"displayModeBar": False},
+                            config={"displayModeBar": False, "scrollZoom": False},
                             key=f"mu_xwoba_{gpk}_{bid}_{pt}",
                         )
                     else:
@@ -1418,7 +1418,7 @@ def _render_matchup_analysis(
             ]
             st.markdown(
                 f'<div class="tdd-context" style="margin:0.3rem 0 0.8rem;">'
-                f'Also throws: {", ".join(sec_parts)} — limited usage, not shown above'
+                f'Also throws: {", ".join(sec_parts)} | limited usage, not shown above'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -1478,7 +1478,7 @@ def _heatmap_color(
     """Interpolate cell background color for the matchup heatmap.
 
     For K%: sage (low/hitter advantage) -> ember (high/pitcher advantage).
-    For BB% and HR%: reversed — high values favor the hitter.
+    For BB% and HR%: reversed | high values favor the hitter.
     """
     t = max(0.0, min(1.0, (val - vmin) / (vmax - vmin))) if vmax != vmin else 0.5
     if stat in ("bb_pct", "hr_pct"):
@@ -1509,9 +1509,9 @@ def _render_matchup_heatmap(
     stat_label : str
         Display label (K%, BB%, HR%).
     pitcher_arch : str | None
-        Current pitcher's archetype name — its row gets highlighted.
+        Current pitcher's archetype name | its row gets highlighted.
     lineup_archetypes : set[str]
-        Hitter archetypes present in the opposing lineup — their columns
+        Hitter archetypes present in the opposing lineup | their columns
         get highlighted.
     """
     # Color ranges per stat
@@ -1770,7 +1770,7 @@ def _render_sim_tab(
     pos_lookup: dict[int, str] | None = None,
     sides_all: list[dict] | None = None,
 ) -> None:
-    """Multi-stat game simulator — pitcher and batter posteriors."""
+    """Multi-stat game simulator | pitcher and batter posteriors."""
     from lib.game_sim.simulator import simulate_game
     from lib.game_sim.batter_simulator import simulate_batter_game
     from lib.game_sim.exit_model import ExitModel
@@ -1994,7 +1994,7 @@ def _render_sim_tab(
             f'<span class="tdd-team-abbr" data-team="{side_abbr}">{side_abbr}</span>'
             f' SP: {pitcher_name}{arch_tag}'
             f'<span style="color:var(--tdd-slate); font-size:0.85rem; font-weight:400;">'
-            f' — {" | ".join(exp_parts)} | {lineup_tag}</span>'
+            f' | {" | ".join(exp_parts)} | {lineup_tag}</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -2077,17 +2077,17 @@ def _render_sim_tab(
                 annotation_font=dict(color=GOLD, size=13),
             )
             pfig.update_layout(
-                barmode="stack", showlegend=False,
+                barmode="stack", showlegend=False, dragmode=False,
                 xaxis_title=cfg["xlabel"], yaxis_title="",
-                yaxis=dict(showticklabels=False, showgrid=False),
-                xaxis=dict(dtick=1, gridcolor="rgba(0,0,0,0)"),
+                yaxis=dict(showticklabels=False, showgrid=False, fixedrange=True),
+                xaxis=dict(dtick=1, gridcolor="rgba(0,0,0,0)", fixedrange=True),
                 plot_bgcolor="rgba(0,0,0,0)",
                 paper_bgcolor="rgba(0,0,0,0)",
                 font=dict(color=CREAM),
                 margin=dict(l=10, r=10, t=30, b=40),
                 height=300,
             )
-            st.plotly_chart(pfig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(pfig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
 
         with notes_col:
             mean_val = float(np.mean(stat_samples))
@@ -2294,17 +2294,17 @@ def _render_sim_tab(
                                 annotation_font=dict(color=GOLD, size=13),
                             )
                             bfig.update_layout(
-                                barmode="stack", showlegend=False,
+                                barmode="stack", showlegend=False, dragmode=False,
                                 xaxis_title=b_cfg["xlabel"], yaxis_title="",
-                                yaxis=dict(showticklabels=False, showgrid=False),
-                                xaxis=dict(dtick=1, gridcolor="rgba(0,0,0,0)"),
+                                yaxis=dict(showticklabels=False, showgrid=False, fixedrange=True),
+                                xaxis=dict(dtick=1, gridcolor="rgba(0,0,0,0)", fixedrange=True),
                                 plot_bgcolor="rgba(0,0,0,0)",
                                 paper_bgcolor="rgba(0,0,0,0)",
                                 font=dict(color=CREAM),
                                 margin=dict(l=10, r=10, t=30, b=40),
                                 height=280,
                             )
-                            st.plotly_chart(bfig, use_container_width=True, config={"displayModeBar": False})
+                            st.plotly_chart(bfig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
 
                         with b_notes_col:
                             b_std = float(np.std(b_samples))
@@ -2436,7 +2436,7 @@ def _render_game_browser() -> None:
         date_str = str(g["game_date"])[:10]
         home = g["home_team_name"] or "?"
         away = g["away_team_name"] or "?"
-        label = f"{date_str} — {away} @ {home}"
+        label = f"{date_str} | {away} @ {home}"
         game_options[label] = gpk
 
     selected_game_label = st.selectbox(
@@ -2463,7 +2463,7 @@ def _render_game_browser() -> None:
         role = "SP" if pr.get("is_starter") else "RP"
         ks = int(pr["strike_outs"]) if pd.notna(pr.get("strike_outs")) else 0
         ip = pr.get("innings_pitched", 0)
-        dname = f"{pname} ({team}, {role}) — {ks} K, {ip} IP" if team else f"{pname} ({role}) — {ks} K, {ip} IP"
+        dname = f"{pname} ({team}, {role}) | {ks} K, {ip} IP" if team else f"{pname} ({role}) | {ks} K, {ip} IP"
         pitcher_opts[dname] = pid
 
     selected_pitcher_display = st.selectbox(
@@ -2570,7 +2570,7 @@ def _render_game_browser() -> None:
         f'<div class="brand-header">'
         f'<div>'
         f'<div class="brand-title">{pitcher_name}{pitcher_team_tag}</div>'
-        f'<div class="brand-subtitle">{date_str} — {away_name} @ {home_name} | {ip} IP, {bf} BF</div>'
+        f'<div class="brand-subtitle">{date_str} | {away_name} @ {home_name} | {ip} IP, {bf} BF</div>'
         f'</div>'
         f'<div style="font-size:1.2rem; font-weight:600;">'
         f'<span style="color:var(--tdd-gold);">{total_actual_k} K</span>'
@@ -2625,9 +2625,13 @@ def _render_game_browser() -> None:
 
 
 def page_schedule() -> None:
-    """Schedule page — browse games by date with projections."""
-    st.markdown('<div class="section-header">Schedule</div>',
-                unsafe_allow_html=True)
+    """Schedule page | browse games by date with projections."""
+    st.markdown(
+        '<div class="section-header">Schedule</div>'
+        '<div class="tdd-meta" style="margin-top:-0.5rem; margin-bottom:0.8rem;">'
+        'Pregame analytics &amp; projections | not a live scores app.</div>',
+        unsafe_allow_html=True,
+    )
 
     today = date.today()
 

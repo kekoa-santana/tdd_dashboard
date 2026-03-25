@@ -1,4 +1,4 @@
-"""Player Profile page — Deep dive into a single player's projections."""
+"""Player Profile page |Deep dive into a single player's projections."""
 from __future__ import annotations
 
 import base64
@@ -191,7 +191,7 @@ def render_approach_efficiency(
                 if pd.notna(_aval):
                     _disp = f"{_aval:.1%}" if _is_pct else f"{_aval:.1f}"
                 else:
-                    _disp = "--"
+                    _disp = ""
                 _pct = None
                 if pd.notna(_aval) and _hib is not None and _acol in _agg_pop.columns:
                     _pct = percentile_rank(_agg_pop[_acol], float(_aval), _hib)
@@ -239,7 +239,7 @@ def render_approach_efficiency(
                 if pd.notna(_eval):
                     _disp = f"{_eval:.1%}" if _is_pct else f"{_eval:.1f}"
                 else:
-                    _disp = "--"
+                    _disp = ""
                 _pct = None
                 if pd.notna(_eval) and _ecol in _eff_pop.columns:
                     _pct = percentile_rank(_eff_pop[_ecol], float(_eval), _hib)
@@ -266,7 +266,7 @@ def render_pitch_profiles(
             key="hist_pitcher_platoon_split",
         )
         _platoon_stand = {"vs LHH": "L", "vs RHH": "R"}.get(platoon_choice)
-        _platoon_suffix = f" — {platoon_choice}" if _platoon_stand else ""
+        _platoon_suffix = f" |{platoon_choice}" if _platoon_stand else ""
 
         # Arsenal
         if is_career:
@@ -323,7 +323,7 @@ def render_pitch_profiles(
             donut_col, table_col = st.columns([2, 3])
             with donut_col:
                 donut_fig = create_arsenal_donut(p_arsenal, season_label=f"{season_label}{_platoon_suffix}")
-                st.plotly_chart(donut_fig, use_container_width=True, config={"displayModeBar": False})
+                st.plotly_chart(donut_fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
             with table_col:
                 table_html = build_pitcher_profile_table(p_arsenal)
                 if table_html:
@@ -343,9 +343,9 @@ def render_pitch_profiles(
                 arch_rows = []
                 for _, row in p_off.iterrows():
                     pt_name = PITCH_DISPLAY.get(row.get("pitch_type", ""), row.get("pitch_name", ""))
-                    velo = f'{row["release_speed"]:.1f} mph' if pd.notna(row.get("release_speed")) else "--"
-                    ivb = f'{row["pfx_z"]:.1f}"' if pd.notna(row.get("pfx_z")) else "--"
-                    hb = f'{row["pfx_x"]:.1f}"' if pd.notna(row.get("pfx_x")) else "--"
+                    velo = f'{row["release_speed"]:.1f} mph' if pd.notna(row.get("release_speed")) else ""
+                    ivb = f'{row["pfx_z"]:.1f}"' if pd.notna(row.get("pfx_z")) else ""
+                    hb = f'{row["pfx_x"]:.1f}"' if pd.notna(row.get("pfx_x")) else ""
                     arch_rows.append({
                         "Pitch": pt_name,
                         "Archetype": row.get("archetype_name", f'Cluster {row["pitch_archetype"]}'),
@@ -358,16 +358,16 @@ def render_pitch_profiles(
                                 unsafe_allow_html=True)
                     st.dataframe(pd.DataFrame(arch_rows), width='stretch', hide_index=True)
 
-        # Location heatmap — prefer raw coordinates, fall back to grid
+        # Location heatmap |prefer raw coordinates, fall back to grid
         from services.data_loader import load_pitcher_pitch_locations
         _raw_locs = load_pitcher_pitch_locations()
         _has_raw = not _raw_locs.empty and player_id in _raw_locs["pitcher_id"].values
 
         if _has_raw and (is_career or selected_season is None):
-            # Raw coordinates — projection or career view
+            # Raw coordinates |projection or career view
             p_loc = _raw_locs[_raw_locs["pitcher_id"] == player_id]
         else:
-            # Grid data — historical seasons or raw not available
+            # Grid data |historical seasons or raw not available
             if is_career:
                 ploc_all = load_pitcher_location_grid_all()
                 if not ploc_all.empty:
@@ -400,7 +400,7 @@ def render_pitch_profiles(
                 )
             stand_filter = {"vs LHH": "L", "vs RHH": "R"}.get(loc_stand)
 
-            # Pitch-type filter — works for both raw and grid data
+            # Pitch-type filter |works for both raw and grid data
             if "plate_x" in p_loc.columns:
                 _avail_pts = p_loc.groupby("pitch_type").size().sort_values(ascending=False)
             else:
@@ -431,7 +431,7 @@ def render_pitch_profiles(
                 pitcher_name=selected_name, batter_stand=stand_filter,
                 pitch_hand=_p_hand,
             )
-            st.plotly_chart(fig_loc, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig_loc, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
 
     else:
         # Hitter vulnerability
@@ -611,14 +611,14 @@ def render_pitch_profiles(
                         batter_name=selected_name, batter_stand=zone_stand,
                         pitch_types=_hz_selected_pts or None,
                     )
-                    st.plotly_chart(fig_whiff, use_container_width=True, config={"displayModeBar": False}, key="hzone_whiff")
+                    st.plotly_chart(fig_whiff, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False}, key="hzone_whiff")
                 with zone_cols[1]:
                     fig_xwoba = create_hitter_zone_plotly(
                         h_zone, metric="xwoba",
                         batter_name=selected_name, batter_stand=zone_stand,
                         pitch_types=_hz_selected_pts or None,
                     )
-                    st.plotly_chart(fig_xwoba, use_container_width=True, config={"displayModeBar": False}, key="hzone_xwoba")
+                    st.plotly_chart(fig_xwoba, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False}, key="hzone_xwoba")
 
                 if selected_season and selected_season in UNRELIABLE_BB_SEASONS:
                     st.caption(
@@ -890,7 +890,7 @@ def render_season_trends(
     n_cols = min(3, n_stats)
     trend_fig = _build_trend_plotly(available_stats, n_cols=n_cols, row_height=200)
 
-    st.plotly_chart(trend_fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(trend_fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
     st.caption(
         f"Year-over-year trends for {selected_name}. "
         f"{'Green dot' if selected_season else 'Gold line'} = {'selected season' if selected_season else 'trajectory'}. "
@@ -942,10 +942,10 @@ def render_arsenal_evolution(
 
         def _delta_fmt(curr_v, prev_v, is_pct=True, decimals=1):
             if pd.isna(curr_v) and pd.isna(prev_v):
-                return "--", "--", ""
+                return "", "", ""
             if pd.isna(prev_v):
                 val_str = f"{curr_v*100:.{decimals}f}%" if is_pct else f"{curr_v:.{decimals}f}"
-                return val_str, "--", "NEW"
+                return val_str, "", "NEW"
             if pd.isna(curr_v):
                 return "DROPPED", f"{prev_v*100:.{decimals}f}%" if is_pct else f"{prev_v:.{decimals}f}", ""
             d = curr_v - prev_v
@@ -1004,7 +1004,7 @@ def page_player_profile() -> None:
     team_lookup = get_team_lookup()
 
     # Build unified player list: (display_name, player_id, player_type)
-    # Two-way players (e.g. Ohtani) appear in both dataframes — detect and
+    # Two-way players (e.g. Ohtani) appear in both dataframes |detect and
     # merge into a single "Two-Way" entry instead of showing duplicates.
     pitcher_ids = set(pitcher_df["pitcher_id"].astype(int))
     hitter_ids = set(hitter_df["batter_id"].astype(int))
@@ -1247,7 +1247,7 @@ def page_player_profile() -> None:
         inj_color = EMBER if inj_info["severity"] == "major" else GOLD
         injury_html = (
             f'<div class="tdd-meta" style="color:{inj_color}; margin-top:4px;">'
-            f'{inj_info["status"]} — {inj_info["injury"]} '
+            f'{inj_info["status"]} |{inj_info["injury"]} '
             f'(est. return: {inj_info["est_return"]}, ~{inj_info["missed_games"]}G missed)'
             f'</div>'
         )
@@ -1284,7 +1284,7 @@ def page_player_profile() -> None:
         if not h_row.empty:
             hr = h_row.iloc[0]
             h_dr = hr.get("diamond_rating", "")
-            h_dr_s = f"{h_dr:.1f}" if pd.notna(h_dr) else "--"
+            h_dr_s = f"{h_dr:.1f}" if pd.notna(h_dr) else ""
             tw_parts.append(
                 f'<span style="color:var(--tdd-gold); font-weight:700;">Batting: {h_dr_s}</span>'
                 f' <span style="color:var(--tdd-slate); font-size:0.85em;">'
@@ -1294,7 +1294,7 @@ def page_player_profile() -> None:
         if not p_row.empty:
             pr = p_row.iloc[0]
             p_dr = pr.get("diamond_rating", "")
-            p_dr_s = f"{p_dr:.1f}" if pd.notna(p_dr) else "--"
+            p_dr_s = f"{p_dr:.1f}" if pd.notna(p_dr) else ""
             tw_parts.append(
                 f'<span style="color:var(--tdd-gold); font-weight:700;">Pitching: {p_dr_s}</span>'
                 f' <span style="color:var(--tdd-slate); font-size:0.85em;">'
@@ -1312,306 +1312,359 @@ def page_player_profile() -> None:
             )
             st.markdown(tw_html, unsafe_allow_html=True)
 
-    # --- Historical / Career stats view (non-projection) ---
-    if show_trad:
-        _trad_season_label = "Career" if is_career else str(selected_season)
+    # ===================================================================
+    # RESTRUCTURED LAYOUT: Temporal zones
+    #   1. Career Context (compact, always visible)
+    #   2. Side-by-side: Recent Season | 2026 Projections
+    #   3. Scouting / Tools
+    #   4. Deep Dive (season selector controls pitch profiles, trends)
+    # ===================================================================
 
-        # Load traditional stats for the selected season or career
-        trad_all_df = load_traditional_stats_all(player_type.lower())
-        if not trad_all_df.empty:
-            if is_career:
-                trad_player = trad_all_df[trad_all_df[id_col] == player_id]
-            else:
-                trad_player = trad_all_df[
-                    (trad_all_df[id_col] == player_id)
-                    & (trad_all_df["season"] == selected_season)
-                ]
+    # Load data needed for multiple sections
+    trad_all_df = load_traditional_stats_all(player_type.lower())
+    counting_df = load_counting(player_type.lower())
 
-            if not trad_player.empty:
-                if is_career:
-                    # Aggregate career: sum counting, weighted-average rates
-                    trad_data = career_aggregate_trad(trad_player, player_type)
-                else:
-                    trad_data = trad_player.iloc[0]
+    # Detect in-season state: if current season has games, show that instead
+    _current_season_games = 0
+    if not trad_all_df.empty:
+        _cs_data = trad_all_df[
+            (trad_all_df[id_col] == player_id)
+            & (trad_all_df["season"] == CURRENT_SEASON)
+        ]
+        if not _cs_data.empty and "games" in _cs_data.columns:
+            _current_season_games = int(_cs_data.iloc[0].get("games", 0))
 
-                if player_type == "Hitter":
-                    rate_configs_t = HITTER_TRAD_STATS
-                    counting_configs_t = HITTER_TRAD_COUNTING
-                else:
-                    rate_configs_t = PITCHER_TRAD_STATS
-                    counting_configs_t = PITCHER_TRAD_COUNTING
+    _in_season = _current_season_games >= 5
+    _recent_season = CURRENT_SEASON if _in_season else PRIOR_SEASON
+    _recent_label = f"{CURRENT_SEASON} ({_current_season_games}G)" if _in_season else str(PRIOR_SEASON)
 
-                # Build season population for percentiles
-                if is_career:
-                    _trad_pop = trad_all_df  # rank against all player-seasons
-                else:
-                    _trad_pop = trad_all_df[trad_all_df["season"] == selected_season]
+    # ── 1. CAREER CONTEXT (compact) ──────────────────────────────────
+    # Derive rates from counting stats since trad parquet has counts not rates
+    if not trad_all_df.empty:
+        career_player = trad_all_df[trad_all_df[id_col] == player_id]
+        if not career_player.empty and len(career_player) >= 1:
+            n_seasons = career_player["season"].nunique()
+            _exp_col = "pa" if "pa" in career_player.columns else "bf"
+            _c_pa = career_player[_exp_col].sum()
+            _c_k = career_player["k"].sum() if "k" in career_player.columns else 0
+            _c_bb = career_player["bb"].sum() if "bb" in career_player.columns else 0
+            _c_hr = int(career_player.get("hr", career_player.get("hr_allowed", pd.Series([0]))).sum())
+            _c_k_pct = _c_k / _c_pa if _c_pa > 0 else 0
+            _c_bb_pct = _c_bb / _c_pa if _c_pa > 0 else 0
+            # PA/BF-weighted averages for rate stats
+            _wt = career_player[_exp_col]
+            _c_avg = (_wt * career_player["avg"]).sum() / _c_pa if _c_pa > 0 and "avg" in career_player.columns else 0
+            _c_obp = (_wt * career_player["obp"]).sum() / _c_pa if _c_pa > 0 and "obp" in career_player.columns else 0
+            _c_slg = (_wt * career_player["slg"]).sum() / _c_pa if _c_pa > 0 and "slg" in career_player.columns else 0
+            _c_woba = (_wt * career_player["woba"]).sum() / _c_pa if _c_pa > 0 and "woba" in career_player.columns else 0
 
-                # Rate stat cards
-                st.markdown(
-                    f'<div class="tdd-section-hdr" style="margin-top:1rem;">'
-                    f'{_trad_season_label} Rate Stats</div>',
-                    unsafe_allow_html=True,
+            if player_type in ("Hitter", "Two-Way"):
+                career_line = (
+                    f'<span style="color:{CREAM}; font-weight:600;">{n_seasons} seasons</span>'
+                    f' <span style="color:{SLATE};">|</span> '
+                    f'.{int(_c_avg * 1000):03d}'
+                    f'/.{int(_c_obp * 1000):03d}'
+                    f'/.{int(_c_slg * 1000):03d}'
+                    f' <span style="color:{SLATE};">|</span> '
+                    f'.{int(_c_woba * 1000):03d} wOBA'
+                    f' <span style="color:{SLATE};">|</span> '
+                    f'{_c_k_pct:.1%} K'
+                    f' <span style="color:{SLATE};">|</span> '
+                    f'{_c_bb_pct:.1%} BB'
+                    f' <span style="color:{SLATE};">|</span> '
+                    f'{_c_hr} HR'
                 )
-                rate_cols = st.columns(len(rate_configs_t))
-                for col, (label, col_name, higher_better, fmt) in zip(rate_cols, rate_configs_t):
-                    val = trad_data.get(col_name) if hasattr(trad_data, 'get') else trad_data[col_name] if col_name in trad_data.index else None
-                    _pct = None
-                    if pd.notna(val) and col_name in _trad_pop.columns:
-                        _pct = percentile_rank(_trad_pop[col_name], float(val), higher_better)
-                    with col:
-                        st.markdown(
-                            metric_card(label, fmt_trad(val, fmt), pctile=_pct),
-                            unsafe_allow_html=True,
-                        )
-
-                # Counting stat higher_is_better lookup
-                _counting_hib = {
-                    "games": True, "pa": True, "ab": True, "hits": True,
-                    "doubles": True, "triples": True, "hr": True, "runs": True,
-                    "rbi": True, "bb": True, "k": player_type == "Pitcher",
-                    "sb": True, "cs": False,
-                    "starts": True, "w": True, "l": False, "sv": True,
-                    "hld": True, "ip": True, "bf": True, "hits_allowed": False,
-                    "er": False, "hr_allowed": False, "hbp": False,
-                }
-
-                # Counting stat cards
-                st.markdown(
-                    f'<div class="tdd-section-hdr" style="margin-top:1rem;">'
-                    f'{_trad_season_label} Counting Stats</div>',
-                    unsafe_allow_html=True,
-                )
-                for i in range(0, len(counting_configs_t), 7):
-                    chunk = counting_configs_t[i:i + 7]
-                    c_cols = st.columns(len(chunk))
-                    for col, (label, col_name) in zip(c_cols, chunk):
-                        val = trad_data.get(col_name) if hasattr(trad_data, 'get') else trad_data[col_name] if col_name in trad_data.index else None
-                        if pd.notna(val):
-                            display_val = f"{val:.1f}" if col_name == "ip" else str(int(val))
-                        else:
-                            display_val = "--"
-                        _pct = None
-                        if pd.notna(val) and col_name in _trad_pop.columns:
-                            _pct = percentile_rank(
-                                _trad_pop[col_name], float(val),
-                                _counting_hib.get(col_name, True),
-                            )
-                        with col:
-                            st.markdown(
-                                metric_card(label, display_val, pctile=_pct),
-                                unsafe_allow_html=True,
-                            )
-
-                # Batted ball data warning for pre-2022
-                if selected_season is not None and selected_season in UNRELIABLE_BB_SEASONS:
-                    st.caption(
-                        f"Note: Batted ball data coverage was limited in {selected_season} "
-                        f"(Statcast coverage ~{21 + (selected_season - 2018) * 15}%). "
-                        "Barrel rate, xwOBA, and hard-hit metrics may be unreliable."
-                    )
             else:
-                st.info(f"No stats found for {selected_name} in {_trad_season_label}.")
-        else:
-            st.info("No traditional stats data found. Run precompute with multi-season data first.")
+                _c_ip = career_player["ip"].sum() if "ip" in career_player.columns else 0
+                _c_er = career_player["er"].sum() if "er" in career_player.columns else 0
+                _c_era = (_c_er * 9 / _c_ip) if _c_ip > 0 else 0
+                career_line = (
+                    f'<span style="color:{CREAM}; font-weight:600;">{n_seasons} seasons</span>'
+                    f' <span style="color:{SLATE};">|</span> '
+                    f'{_c_era:.2f} ERA'
+                    f' <span style="color:{SLATE};">|</span> '
+                    f'{_c_k_pct:.1%} K'
+                    f' <span style="color:{SLATE};">|</span> '
+                    f'{_c_bb_pct:.1%} BB'
+                    f' <span style="color:{SLATE};">|</span> '
+                    f'{_c_ip:.0f} IP'
+                )
 
-        # --- Approach & Efficiency cards ---
-        render_approach_efficiency(
-            player_type, player_id, id_col,
-            selected_season=selected_season, is_career=is_career,
-        )
+            st.markdown(
+                f'<div style="padding:6px 0; margin:4px 0;">'
+                f'<span style="color:{SLATE}; font-size:0.7rem; font-weight:600; '
+                f'letter-spacing:1px;">CAREER</span>'
+                f'<div style="font-size:0.9rem; margin-top:2px;">{career_line}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
-        # --- Observed percentiles for selected season ---
-        render_observed_percentiles(
-            player_type, player_id,
-            selected_season=selected_season, is_career=is_career,
-        )
-
-        # --- Season Trends ---
-        render_season_trends(
-            player_type, player_id, selected_name,
-            selected_season=selected_season,
-        )
-
-        # --- Pitch profile + zone charts for the selected season ---
-        render_pitch_profiles(
-            player_type, player_id, selected_name,
-            selected_season=selected_season, is_career=is_career,
-        )
-
-        # --- Arsenal evolution (pitcher only, specific season) ---
-        if player_type == "Pitcher" and selected_season and not is_career:
-            render_arsenal_evolution(player_id, selected_name, selected_season)
-
-        return  # Skip the projection view below
-
-    # --- Comparison baseline toggle ---
-    compare_to = st.radio(
-        "Compare projection to",
-        ["Career Avg", str(PRIOR_SEASON)],
-        horizontal=True,
-        key="compare_baseline",
-    )
-
-    # --- 2026 Bayesian Rate Projections (high confidence: K%, BB%) ---
+    # ── 2. PROJECTIONS (compact, above season) ──────────────────────
+    _proj_label = f"{CURRENT_SEASON} Updated Projection" if _in_season else f"{CURRENT_SEASON} Projection"
     st.markdown(
-        '<div class="tdd-section-hdr">2026 Projected Rates '
-        f'<span style="color:{SAGE}; font-size:0.7rem;">&#10003; Bayesian — beats Marcel baseline</span></div>',
+        f'<div style="text-align:center; color:{GOLD}; font-size:0.9rem; '
+        f'font-weight:600; margin:12px 0 4px;">{_proj_label}</div>',
         unsafe_allow_html=True,
     )
-    cols = st.columns(len(stat_configs))
-    for col, (label, key, higher_better, _) in zip(cols, stat_configs):
-        obs_col = f"observed_{key}"
-        career_col = f"career_{key}"
+
+    # Build all projection chips in one row
+    _proj_chips: list[str] = []
+
+    # Bayesian rate projections (K%, BB%)
+    for label, key, higher_better, desc in stat_configs:
         proj_col = f"projected_{key}"
-
-        if compare_to == "Career Avg" and career_col in player_row.index and pd.notna(player_row.get(career_col)):
-            baseline = player_row[career_col]
-            baseline_label = "Career"
-        elif obs_col in player_row.index and pd.notna(player_row.get(obs_col)):
-            baseline = player_row[obs_col]
-            baseline_label = str(PRIOR_SEASON)
-        else:
-            baseline = None
-            baseline_label = ""
-
-        if baseline is not None and proj_col in player_row.index and pd.notna(player_row.get(proj_col)):
-            proj_str = fmt_stat(player_row[proj_col], key)
-            delta = player_row[proj_col] - baseline
-            base_str = fmt_stat(baseline, key)
-            delta_str = (
-                f"{baseline_label}: {base_str} ({delta_html(delta, higher_better)})"
+        sd_col = f"projected_{key}_sd"
+        if proj_col in player_row.index and pd.notna(player_row.get(proj_col)):
+            proj_val = player_row[proj_col]
+            sd_val = player_row.get(sd_col)
+            display = fmt_stat(proj_val, key)
+            ci_tip = ""
+            if pd.notna(sd_val):
+                lo = proj_val - 1.96 * sd_val
+                hi = proj_val + 1.96 * sd_val
+                ci_tip = f" (95% CI: {fmt_stat(lo, key)} to {fmt_stat(hi, key)})"
+            tip = f"{desc}{ci_tip}"
+            _proj_chips.append(
+                f'<div style="text-align:center; padding:4px 10px;" title="{tip}">'
+                f'<div style="color:{SAGE}; font-size:1.4rem; font-weight:700; cursor:help;">{display}</div>'
+                f'<div style="color:{SLATE}; font-size:0.65rem; text-transform:uppercase; '
+                f'letter-spacing:1px;">{label}</div></div>'
             )
-            _pct = None
-            if proj_col in df.columns:
-                _pct = percentile_rank(df[proj_col], float(player_row[proj_col]), higher_better)
-            with col:
-                st.markdown(
-                    metric_card(f"Proj. {label}", proj_str, delta_str, pctile=_pct),
-                    unsafe_allow_html=True,
-                )
-        else:
-            with col:
-                st.markdown(
-                    metric_card(f"Proj. {label}", "--"),
-                    unsafe_allow_html=True,
-                )
 
-    # --- Counting Stat Cards ---
-    counting_display = PITCHER_COUNTING_DISPLAY if player_type == "Pitcher" else HITTER_COUNTING_DISPLAY
-    counting_df = load_counting(player_type.lower())
+    # Counting stat projections
     if not counting_df.empty:
         c_row = counting_df[counting_df[id_col] == player_id]
         if not c_row.empty:
             c_data = c_row.iloc[0]
-            st.markdown(
-                '<div class="tdd-section-hdr" style="margin-top:1rem;">2026 Projected Counting Stats</div>',
-                unsafe_allow_html=True,
-            )
-            c_cols = st.columns(len(counting_display))
+            counting_display = PITCHER_COUNTING_DISPLAY if player_type == "Pitcher" else HITTER_COUNTING_DISPLAY
 
-            # Unpack with optional confidence field (pitchers don't have it yet)
-            for col, item in zip(c_cols, counting_display):
-                if len(item) == 5:
-                    c_label, c_prefix, c_actual, c_hb, confidence = item
-                else:
-                    c_label, c_prefix, c_actual, c_hb = item
-                    confidence = "med"
+            # Filter out SV/HLD for starting pitchers
+            if player_type == "Pitcher" and role == "SP":
+                counting_display = [
+                    item for item in counting_display
+                    if not any(x in item[0].lower() for x in ("sv", "hld", "save", "hold"))
+                ]
 
+            _stat_tips = {
+                "K": "Projected strikeouts", "BB": "Projected walks",
+                "HR": "Projected home runs", "R": "Projected runs scored",
+                "RBI": "Projected runs batted in", "IP": "Projected innings pitched",
+                "wRC+": "Weighted runs created plus (100 = league average)",
+                "FIP-ERA": "Fielding independent pitching minus ERA",
+            }
+
+            for item in counting_display:
+                c_label = item[0]
+                c_prefix, c_actual, c_hb = item[1], item[2], item[3]
+                confidence = item[4] if len(item) == 5 else "med"
                 mean_col = f"{c_prefix}_mean"
                 p10_col = f"{c_prefix}_p10"
                 p90_col = f"{c_prefix}_p90"
-                if mean_col in c_data.index and pd.notna(c_data.get(mean_col)):
-                    val = int(round(c_data[mean_col]))
-                    lo = int(round(c_data.get(p10_col, val)))
-                    hi = int(round(c_data.get(p90_col, val)))
+                if mean_col not in c_data.index or pd.isna(c_data.get(mean_col)):
+                    continue
+                val = int(round(c_data[mean_col]))
+                lo = int(round(c_data.get(p10_col, val)))
+                hi = int(round(c_data.get(p90_col, val)))
 
-                    def _colored_count_delta(d: int, higher_better: bool) -> str:
-                        improving = (d > 0 and higher_better) or (d < 0 and not higher_better)
-                        if d == 0:
-                            clr = SLATE
-                        elif improving:
-                            clr = POSITIVE
-                        else:
-                            clr = NEGATIVE
-                        return f'<span style="color:{clr};">{d:+d}</span>'
+                val_color = {
+                    "high": SAGE, "med": GOLD, "range": CREAM, "low": SLATE,
+                }.get(confidence, GOLD)
 
-                    # wRC+ as range only (r=0.44, not reliable as point estimate)
-                    if confidence == "range":
-                        display_val = f"{lo} – {hi}"
-                        delta_str = f"Mean: {val}"
-                    else:
-                        display_val = str(val)
+                short_label = c_label.replace("Proj. ", "")
+                tip_base = _stat_tips.get(short_label, short_label)
+                tip = f"{tip_base}. 80% range: {lo} to {hi}"
 
-                        # Baseline: Career Avg or prior season
-                        actual_val = c_data.get(c_actual)
-                        if compare_to == "Career Avg":
-                            rate_key = c_prefix.replace("total_", "") + "_rate"
-                            if rate_key == "sb_rate":
-                                rate_key = "sb_per_game"
-                            career_rate_col = f"career_{rate_key}"
-                            proj_pa = c_data.get("projected_pa_mean", c_data.get("projected_bf_mean"))
-                            if (career_rate_col in player_row.index
-                                    and pd.notna(player_row.get(career_rate_col))
-                                    and pd.notna(proj_pa)):
-                                career_count = int(round(player_row[career_rate_col] * proj_pa))
-                                delta = val - career_count
-                                delta_str = f"Career pace: {career_count} ({_colored_count_delta(delta, c_hb)}) | 80%: {lo} – {hi}"
-                            elif pd.notna(actual_val):
-                                actual_int = int(actual_val)
-                                delta = val - actual_int
-                                delta_str = f"{PRIOR_SEASON}: {actual_int} ({_colored_count_delta(delta, c_hb)}) | 80%: {lo} – {hi}"
-                            else:
-                                delta_str = f"80% range: {lo} – {hi}"
-                        elif c_actual and pd.notna(c_data.get(c_actual)):
-                            actual_int = int(c_data[c_actual])
-                            delta = val - actual_int
-                            delta_str = f"{PRIOR_SEASON}: {actual_int} ({_colored_count_delta(delta, c_hb)}) | 80%: {lo} – {hi}"
-                        else:
-                            delta_str = f"80% range: {lo} – {hi}"
-
-                    # Confidence badge
-                    badge = ""
-                    if confidence == "high":
-                        badge = f' <span style="color:{SAGE}; font-size:0.65rem;">&#10003;</span>'
-                    elif confidence == "med":
-                        badge = f' <span style="color:{GOLD}; font-size:0.55rem;">~</span>'
-                    elif confidence == "low":
-                        badge = f' <span style="color:{SLATE}; font-size:0.55rem;">?</span>'
-
-                    _pct = None
-                    if mean_col in counting_df.columns and confidence != "range":
-                        _pct = percentile_rank(counting_df[mean_col], float(c_data[mean_col]), c_hb)
-                    with col:
-                        st.markdown(
-                            metric_card(f"{c_label}{badge}", display_val, delta_str, pctile=_pct),
-                            unsafe_allow_html=True,
-                        )
+                if confidence == "range":
+                    disp = f"{lo} to {hi}"
+                    tip = f"{tip_base}. Mean: {val}"
                 else:
-                    with col:
+                    disp = str(val)
+
+                _proj_chips.append(
+                    f'<div style="text-align:center; padding:4px 10px;" title="{tip}">'
+                    f'<div style="color:{val_color}; font-size:1.4rem; font-weight:700; cursor:help;">{disp}</div>'
+                    f'<div style="color:{SLATE}; font-size:0.65rem; text-transform:uppercase; '
+                    f'letter-spacing:1px;">{short_label}</div></div>'
+                )
+
+    if _proj_chips:
+        st.markdown(
+            f'<div style="display:flex; flex-wrap:wrap; gap:8px; '
+            f'justify-content:center; margin-bottom:12px;">'
+            + "".join(_proj_chips) + '</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── 3. SEASON (full width, with dropdown) ────────────────────────
+    _player_seasons: list[int] = []
+    if not trad_all_df.empty:
+        _ps = trad_all_df[trad_all_df[id_col] == player_id]["season"].dropna().unique()
+        _player_seasons = sorted([int(s) for s in _ps], reverse=True)
+
+    if _player_seasons:
+        _season_opts = [f"{s} Season" for s in _player_seasons]
+        with st.container(key="gold_season_pick"):
+            _season_pick = st.selectbox(
+                "Season",
+                _season_opts,
+                index=0,
+                key="profile_season_pick",
+                label_visibility="collapsed",
+            )
+        _pick_season = int(_season_pick.split()[0])
+    else:
+        _pick_season = _recent_season
+
+    if not trad_all_df.empty:
+        recent_data = trad_all_df[
+            (trad_all_df[id_col] == player_id)
+            & (trad_all_df["season"] == _pick_season)
+        ]
+        if not recent_data.empty:
+            rd = recent_data.iloc[0]
+            _trad_pop = trad_all_df[trad_all_df["season"] == _pick_season]
+
+            if player_type in ("Hitter", "Two-Way"):
+                rate_configs_t = HITTER_TRAD_STATS
+                counting_configs_t = HITTER_TRAD_COUNTING
+            else:
+                rate_configs_t = PITCHER_TRAD_STATS
+                counting_configs_t = PITCHER_TRAD_COUNTING
+
+            # Stat tooltips
+            _rate_tips = {
+                "avg": "Batting average", "obp": "On-base percentage",
+                "slg": "Slugging percentage", "ops": "On-base plus slugging",
+                "woba": "Weighted on-base average", "babip": "Batting average on balls in play",
+                "iso": "Isolated power (SLG minus AVG)",
+                "era": "Earned run average", "fip": "Fielding independent pitching",
+                "whip": "Walks + hits per inning pitched",
+            }
+
+            # Build all stats as chips (rate + counting + advanced)
+            all_chips: list[str] = []
+
+            # Advanced stats first (most important: wRC+, xwOBA, K%, BB%)
+            _exp_col = "pa" if "pa" in rd.index else "bf"
+            _exp_v = rd.get(_exp_col, 0)
+            _k_v = rd.get("k", 0)
+            _bb_v = rd.get("bb", 0)
+
+            # Load advanced Statcast for this season
+            _adv_data: dict = {}
+            try:
+                from src.data.db import read_sql as _adv_sql
+                _adv_table = "fact_batting_advanced" if player_type != "Pitcher" else "fact_pitching_advanced"
+                _adv_id = "batter_id" if player_type != "Pitcher" else "pitcher_id"
+                _adv_pa = "pa" if player_type != "Pitcher" else "batters_faced"
+                _ar = _adv_sql(f"""
+                    SELECT xwoba, barrel_pct, hard_hit_pct, sweet_spot_pct, wrc_plus
+                    FROM production.{_adv_table}
+                    WHERE {_adv_id} = {player_id}
+                      AND season = {_pick_season} AND {_adv_pa} >= 50
+                    LIMIT 1
+                """, {})
+                if not _ar.empty:
+                    _adv_data = _ar.iloc[0].to_dict()
+            except Exception:
+                pass
+
+            # Priority-ordered stat chips for hitters
+            _ordered_stats: list[tuple[str, str, str]] = []  # (value, label, tooltip)
+            if player_type in ("Hitter", "Two-Way"):
+                if _adv_data.get("wrc_plus") and pd.notna(_adv_data["wrc_plus"]):
+                    _ordered_stats.append((str(int(_adv_data["wrc_plus"])), "wRC+", "Weighted runs created plus (100 = league avg)"))
+                if _exp_v > 0:
+                    _ordered_stats.append((f"{_k_v / _exp_v:.1%}", "K%", "Strikeout rate"))
+                    _ordered_stats.append((f"{_bb_v / _exp_v:.1%}", "BB%", "Walk rate"))
+                if _adv_data.get("xwoba") and pd.notna(_adv_data["xwoba"]):
+                    _ordered_stats.append((f".{int(_adv_data['xwoba'] * 1000):03d}", "xwOBA", "Expected weighted on-base average (Statcast)"))
+                if _adv_data.get("barrel_pct") and pd.notna(_adv_data["barrel_pct"]):
+                    _ordered_stats.append((f"{_adv_data['barrel_pct']:.1%}", "Brl%", "Barrel rate (95+ mph EV, optimal launch angle)"))
+                if _adv_data.get("hard_hit_pct") and pd.notna(_adv_data["hard_hit_pct"]):
+                    _ordered_stats.append((f"{_adv_data['hard_hit_pct']:.1%}", "HH%", "Hard hit rate (95+ mph exit velocity)"))
+            else:
+                # Pitcher priority
+                if _exp_v > 0:
+                    _ordered_stats.append((f"{_k_v / _exp_v:.1%}", "K%", "Strikeout rate"))
+                    _ordered_stats.append((f"{_bb_v / _exp_v:.1%}", "BB%", "Walk rate"))
+                if _adv_data.get("xwoba") and pd.notna(_adv_data["xwoba"]):
+                    _ordered_stats.append((f".{int(_adv_data['xwoba'] * 1000):03d}", "xwOBA", "Expected wOBA against"))
+
+            for _sv, _sl, _st in _ordered_stats:
+                all_chips.append(
+                    f'<div style="text-align:center; padding:4px 10px;" title="{_st}">'
+                    f'<div style="color:{CREAM}; font-size:1.4rem; font-weight:700; cursor:help;">{_sv}</div>'
+                    f'<div style="color:{SLATE}; font-size:0.65rem; text-transform:uppercase; '
+                    f'letter-spacing:1px;">{_sl}</div></div>'
+                )
+
+            if all_chips:
+                st.markdown(
+                    f'<div style="display:flex; flex-wrap:wrap; gap:8px; '
+                    f'justify-content:center; margin:4px 0 8px;">'
+                    + "".join(all_chips) + '</div>',
+                    unsafe_allow_html=True,
+                )
+
+            # Traditional rate stats with percentiles
+            for i in range(0, len(rate_configs_t), 4):
+                chunk = rate_configs_t[i:i + 4]
+                r_cols = st.columns(len(chunk))
+                for rc, (label, col_name, higher_better, fmt) in zip(r_cols, chunk):
+                    val = rd.get(col_name) if hasattr(rd, 'get') else rd[col_name] if col_name in rd.index else None
+                    _pct = None
+                    if pd.notna(val) and col_name in _trad_pop.columns:
+                        _pct = percentile_rank(_trad_pop[col_name], float(val), higher_better)
+                    tip = _rate_tips.get(col_name, label)
+                    with rc:
                         st.markdown(
-                            metric_card(c_label, "--"),
+                            metric_card(
+                                f'<span title="{tip}" style="cursor:help;">{label}</span>',
+                                fmt_trad(val, fmt) if pd.notna(val) else "N/A",
+                                pctile=_pct,
+                            ),
                             unsafe_allow_html=True,
                         )
 
-    # --- Scouting Report (plain English) ---
+            # Counting stats (compact centered row)
+            count_vals = []
+            for label, col_name in counting_configs_t[:8]:
+                val = rd.get(col_name) if hasattr(rd, 'get') else rd[col_name] if col_name in rd.index else None
+                if pd.notna(val):
+                    v = f"{val:.1f}" if col_name == "ip" else str(int(val))
+                    count_vals.append(
+                        f'<span style="color:{CREAM}; font-weight:600;">{v}</span> '
+                        f'<span style="color:{SLATE}; font-size:0.7rem;">{label}</span>'
+                    )
+            if count_vals:
+                st.markdown(
+                    f'<div style="display:flex; flex-wrap:wrap; gap:12px; margin-top:6px; '
+                    f'justify-content:center;">'
+                    + "".join(f"<div>{v}</div>" for v in count_vals)
+                    + '</div>',
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.caption(f"No stats found for {_pick_season}.")
+
+    # ── 3. SCOUTING / TOOLS ──────────────────────────────────────────
+    # Scouting report bullets
     st.markdown("<div style='margin-top: 1.5rem;'></div>", unsafe_allow_html=True)
     bullets = generate_scouting_bullets(stat_configs, player_row, df, player_type)
 
-    # Add park factor scouting note for hitters
-    if player_type == "Hitter":
+    if player_type in ("Hitter", "Two-Way"):
         _cnt = load_counting("hitter")
         if not _cnt.empty:
             _c_r = _cnt[_cnt["batter_id"] == player_id]
             if not _c_r.empty and "hr_park_factor" in _c_r.columns:
                 _pf = _c_r.iloc[0].get("hr_park_factor")
                 if pd.notna(_pf) and _pf > 1.03:
-                    bullets.append((POSITIVE, f"Home park boosts HR rate (park factor {_pf:.3f}). Projected HRs adjusted up."))
+                    bullets.append((POSITIVE, f"Home park boosts HR rate (park factor {_pf:.3f})."))
                 elif pd.notna(_pf) and _pf < 0.97:
-                    bullets.append((NEGATIVE, f"Home park suppresses HR rate (park factor {_pf:.3f}). Projected HRs adjusted down."))
+                    bullets.append((NEGATIVE, f"Home park suppresses HR rate (park factor {_pf:.3f})."))
 
-    # Breakout hole (hitters only)
-    if player_type == "Hitter" and _breakout_hole:
+    if player_type in ("Hitter", "Two-Way") and _breakout_hole:
         _bo_df_scout = load_hitter_breakout_candidates()
         if not _bo_df_scout.empty:
             _bo_r = _bo_df_scout[_bo_df_scout["batter_id"] == player_id]
@@ -1623,31 +1676,28 @@ def page_player_profile() -> None:
                 bullets.append((
                     _tier_color,
                     f"<b>{_bo_tier} breakout candidate</b> ({_bo_type}, score {_bo_score:.2f}). "
-                    f"Key hole to address: <b>{_breakout_hole}</b>.",
+                    f"Key hole: <b>{_breakout_hole}</b>.",
                 ))
 
-    # Archetype classification + matchup insight
-    _arch_df_scout = load_hitter_archetypes() if player_type == "Hitter" else load_pitcher_archetypes()
-    _id_col_arch = "batter_id" if player_type == "Hitter" else "pitcher_id"
+    _arch_df_scout = load_hitter_archetypes() if player_type in ("Hitter", "Two-Way") else load_pitcher_archetypes()
+    _id_col_arch = "batter_id" if player_type in ("Hitter", "Two-Way") else "pitcher_id"
     if not _arch_df_scout.empty:
         _arch_match = _arch_df_scout[_arch_df_scout[_id_col_arch] == player_id]
         if not _arch_match.empty:
             _a_name = _arch_match.iloc[0]["archetype_name"]
             _a_desc = _arch_match.iloc[0]["archetype_desc"]
-            bullets.append((GOLD, f"Classified as <b>{_a_name}</b> — {_a_desc.lower()}."))
+            bullets.append((GOLD, f"Classified as <b>{_a_name}</b> |{_a_desc.lower()}."))
 
-            # Matchup edge from matrix
             _mm = load_archetype_matchup_matrix()
             if not _mm.empty:
-                if player_type == "Hitter":
+                if player_type in ("Hitter", "Two-Way"):
                     _mm_sub = _mm[_mm["hitter_archetype_name"] == _a_name]
                     if not _mm_sub.empty:
                         _worst = _mm_sub.loc[_mm_sub["k_pct"].idxmax()]
                         _best = _mm_sub.loc[_mm_sub["k_pct"].idxmin()]
                         bullets.append((
                             SLATE,
-                            f"{_a_name} hitters see highest K% vs "
-                            f"<b>{_worst['pitcher_archetype_name']}</b> ({_worst['k_pct']:.1%}), "
+                            f"Highest K% vs <b>{_worst['pitcher_archetype_name']}</b> ({_worst['k_pct']:.1%}), "
                             f"lowest vs <b>{_best['pitcher_archetype_name']}</b> ({_best['k_pct']:.1%})."
                         ))
                 else:
@@ -1657,8 +1707,7 @@ def page_player_profile() -> None:
                         _worst_k = _mm_sub.loc[_mm_sub["k_pct"].idxmin()]
                         bullets.append((
                             SLATE,
-                            f"{_a_name} pitchers get highest K% vs "
-                            f"<b>{_best_k['hitter_archetype_name']}</b> ({_best_k['k_pct']:.1%}), "
+                            f"Highest K% vs <b>{_best_k['hitter_archetype_name']}</b> ({_best_k['k_pct']:.1%}), "
                             f"lowest vs <b>{_worst_k['hitter_archetype_name']}</b> ({_worst_k['k_pct']:.1%})."
                         ))
 
@@ -1676,96 +1725,50 @@ def page_player_profile() -> None:
         </div>
         """, unsafe_allow_html=True)
 
-    # --- Approach & Efficiency (on default projection view -- shows prior season) ---
+    # Approach & efficiency
     render_approach_efficiency(
         player_type, player_id, id_col,
-        selected_season=PRIOR_SEASON, is_career=False,
+        selected_season=_recent_season, is_career=False,
     )
 
-    # --- Prior Season Observed Percentiles ---
-    obs_stat_configs = PITCHER_OBSERVED_STATS if player_type == "Pitcher" else HITTER_OBSERVED_STATS
-    obs_bars_html = ""
-    for label, key, higher_better, _ in obs_stat_configs:
-        if key not in player_row.index or pd.isna(player_row.get(key)):
-            continue
-        val = player_row[key]
-        # Rank among all players in the projection set
-        if key in df.columns:
-            pctile = percentile_rank(df[key], val, higher_better)
-        else:
-            continue
-        obs_bars_html += observed_pctile_bar_html(label, pctile, val, key)
+    # (Observed + projected percentile bars are now inline in the columns above)
 
-    if obs_bars_html:
-        st.markdown(f'<div class="tdd-section-hdr">{PRIOR_SEASON} Observed Percentiles</div>',
-                    unsafe_allow_html=True)
-        st.markdown(
-            f'<div class="insight-card">{obs_bars_html}</div>',
-            unsafe_allow_html=True,
+    # ── 4. DEEP DIVE (season selector controls this) ─────────────────
+    st.markdown(
+        f'<div class="tdd-section-hdr" style="margin-top:1.5rem;">Deep Dive</div>',
+        unsafe_allow_html=True,
+    )
+    with st.container(key="gold_deep_season"):
+        deep_season = st.selectbox(
+            "Season", [str(s) for s in AVAILABLE_SEASONS] + ["Career"],
+            index=len(AVAILABLE_SEASONS) - 1,  # default to most recent
+            key="profile_deep_dive_season",
+            label_visibility="collapsed",
         )
-        st.caption(
-            f"Current skill profile based on {PRIOR_SEASON} observed data. "
-            "100th = best, 1st = worst. "
-            "Green = elite (80+), gold = above-avg (60-79), "
-            "gray = mid-tier (40-59), orange = below-avg (<40)."
-        )
+    _deep_is_career = deep_season == "Career"
+    _deep_season = None if _deep_is_career else int(deep_season)
 
-    # --- Projected Percentiles ---
-    proj_bars_html = ""
-    for label, key, higher_better, _ in stat_configs:
-        proj_col = f"projected_{key}"
-        obs_col = f"observed_{key}"
-        ci_lo_col = f"projected_{key}_2_5"
-        ci_hi_col = f"projected_{key}_97_5"
-
-        if proj_col not in player_row.index or pd.isna(player_row.get(proj_col)):
-            continue
-
-        pctile = percentile_rank(df[proj_col], player_row[proj_col], higher_better)
-        ci_lo = player_row.get(ci_lo_col, player_row[proj_col])
-        ci_hi = player_row.get(ci_hi_col, player_row[proj_col])
-
-        # Prior season observed percentile as reference line
-        pctile_prior = None
-        if obs_col in player_row.index and pd.notna(player_row.get(obs_col)):
-            pctile_prior = percentile_rank(
-                df[obs_col], player_row[obs_col], higher_better,
-            )
-
-        proj_bars_html += pctile_bar_html(label, pctile, ci_lo, ci_hi, key, pctile_prior)
-
-    if proj_bars_html:
-        st.markdown(f'<div class="tdd-section-hdr">{CURRENT_SEASON} Projected Percentiles</div>',
-                    unsafe_allow_html=True)
-        st.markdown(
-            f'<div class="insight-card">{proj_bars_html}</div>',
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            f"Bayesian-projected K% and BB% for {CURRENT_SEASON}. "
-            "100th = best, 1st = worst. "
-            f"Dashed line = {PRIOR_SEASON} observed percentile. "
-            "Green = elite (80+), gold = above-avg (60-79), "
-            "gray = mid-tier (40-59), orange = below-avg (<40). "
-            "Range = 95% credible interval (the range we expect the true value to fall within)."
-        )
-
-    # --- Season Trends (also on projection view) ---
+    # Season trends (multi-year chart)
     render_season_trends(player_type, player_id, selected_name)
 
-    # --- Pitch profile + zone charts (reuse the season-aware renderer) ---
+    # Pitch profiles, zones, vulnerabilities
     render_pitch_profiles(
         player_type, player_id, selected_name,
-        selected_season=PRIOR_SEASON, is_career=False,
+        selected_season=_deep_season, is_career=_deep_is_career,
     )
 
-    # --- Posterior KDE (for pitchers with K% samples) ---
+    # Arsenal evolution (pitcher only)
+    if player_type == "Pitcher" and _deep_season and not _deep_is_career:
+        render_arsenal_evolution(player_id, selected_name, _deep_season)
+
+    # K% posterior distribution (pitcher only)
     k_samples = load_k_samples()
     sample_key = str(player_id)
-
     if player_type == "Pitcher" and sample_key in k_samples:
-        st.markdown('<div class="tdd-section-hdr">K% Posterior Distribution</div>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            '<div class="tdd-section-hdr">K% Posterior Distribution</div>',
+            unsafe_allow_html=True,
+        )
         samples = k_samples[sample_key]
         obs_k = player_row.get("observed_k_rate")
         fig = create_posterior_fig(
@@ -1775,17 +1778,13 @@ def page_player_profile() -> None:
         )
         _, chart_col, _ = st.columns([1, 3, 1])
         with chart_col:
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
 
-        ci_lo, ci_hi = np.percentile(samples * 100, [2.5, 97.5])
-        st.caption(
-            f"Dashed gold = projected mean | Dotted gray = {PRIOR_SEASON} observed | "
-            f"Shaded = 95% credible interval [{ci_lo:.1f}%, {ci_hi:.1f}%]"
-        )
-
-    # --- Stat detail table ---
-    st.markdown('<div class="tdd-section-hdr">Stat Breakdown</div>',
-                unsafe_allow_html=True)
+    # Stat breakdown table
+    st.markdown(
+        '<div class="tdd-section-hdr">Stat Breakdown</div>',
+        unsafe_allow_html=True,
+    )
     detail_rows = []
     for label, key, higher_better, desc in stat_configs:
         obs_col = f"observed_{key}"
@@ -1803,45 +1802,11 @@ def page_player_profile() -> None:
                     f"[{fmt_stat(player_row[lo_col], key)}, "
                     f"{fmt_stat(player_row[hi_col], key)}]"
                     if lo_col in player_row.index and pd.notna(player_row.get(lo_col))
-                    else "--"
+                    else ""
                 ),
                 "Description": desc,
             })
-    # Add counting stat rows to detail table
-    counting_df_detail = load_counting(player_type.lower())
-    if not counting_df_detail.empty:
-        c_row_detail = counting_df_detail[counting_df_detail[id_col] == player_id]
-        if not c_row_detail.empty:
-            c_data_detail = c_row_detail.iloc[0]
-            for c_label, c_prefix, c_actual, c_hb in counting_display:
-                mean_col = f"{c_prefix}_mean"
-                p2_5_col = f"{c_prefix}_p2_5"
-                p97_5_col = f"{c_prefix}_p97_5"
-                if mean_col in c_data_detail.index and pd.notna(c_data_detail.get(mean_col)):
-                    proj_val = int(round(c_data_detail[mean_col]))
-                    ci_lo = int(round(c_data_detail.get(p2_5_col, proj_val)))
-                    ci_hi = int(round(c_data_detail.get(p97_5_col, proj_val)))
-                    actual_val = c_data_detail.get(c_actual)
-                    if pd.notna(actual_val):
-                        actual_int = int(actual_val)
-                        delta = proj_val - actual_int
-                        delta_str = f"{delta:+d}"
-                        obs_str = str(actual_int)
-                    else:
-                        delta_str = "--"
-                        obs_str = "--"
-                    detail_rows.append({
-                        "Stat": c_label,
-                        f"{PRIOR_SEASON} Observed": obs_str,
-                        f"{CURRENT_SEASON} Projected": str(proj_val),
-                        "Delta": delta_str,
-                        "95% Cred. Int.": f"[{ci_lo}, {ci_hi}]",
-                        "Description": "Season total (Bayesian rate x playing time)",
-                    })
-
     if detail_rows:
-        st.dataframe(
-            pd.DataFrame(detail_rows),
-            width='stretch',
-            hide_index=True,
-        )
+        st.dataframe(pd.DataFrame(detail_rows), width='stretch', hide_index=True)
+
+    return  # End of profile page

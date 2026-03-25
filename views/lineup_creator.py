@@ -238,7 +238,7 @@ def page_lineup_creator() -> None:
                 pid = int(r["batter_id"])
                 if pid == current_pid:
                     continue
-                label = f"{r['batter_name']} ({r['team_abbr']}) — {r['diamond_rating']:.1f}"
+                label = f"{r['batter_name']} ({r['team_abbr']}) | {r['diamond_rating']:.1f}"
                 options.append(label)
                 pid_map[label] = pid
 
@@ -247,7 +247,7 @@ def page_lineup_creator() -> None:
                 pid = int(r["batter_id"])
                 if pid == current_pid:
                     continue
-                label = f"{r['batter_name']} ({r['team_abbr']}) — {r['diamond_rating']:.1f}"
+                label = f"{r['batter_name']} ({r['team_abbr']}) | {r['diamond_rating']:.1f}"
                 if label not in pid_map:
                     options.append(label)
                     pid_map[label] = pid

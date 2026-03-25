@@ -163,71 +163,74 @@ def _render_team_profile_tab(
         unsafe_allow_html=True,
     )
 
-    # ── ELO breakdown ────────────────────────────────────────────────
-    if not te.empty:
+    # ── Profile scores (diamond scale, from team_profiles) ──────────
+    if not tp.empty:
+        # Compute league ranks from team_profiles
+        all_tp = load_team_profiles()
+        _rank_cols = {
+            "lineup_diamond": "Offense",
+            "rotation_diamond": "Rotation",
+            "bullpen_diamond": "Bullpen",
+        }
+        _ranks: dict[str, int] = {}
+        for col in _rank_cols:
+            if col in all_tp.columns:
+                ranked = all_tp[col].rank(ascending=False, method="min")
+                idx = all_tp.index[all_tp["abbreviation"] == selected_team]
+                _ranks[col] = int(ranked.loc[idx].iloc[0]) if len(idx) > 0 else 0
+
+        # Defense/depth ranks from team_rankings
+        all_tr = load_team_rankings()
+        for col, label in [("defense_score", "Fielding"), ("health_depth_score", "Depth")]:
+            if col in all_tr.columns:
+                ranked = all_tr[col].rank(ascending=False, method="min")
+                idx = all_tr.index[all_tr["abbreviation"] == selected_team]
+                _ranks[col] = int(ranked.loc[idx].iloc[0]) if len(idx) > 0 else 0
+
         st.markdown(
-            '<div class="tdd-section-hdr" style="margin-bottom:8px;">Component ELO</div>',
+            '<div class="tdd-section-hdr" style="margin-top:16px; margin-bottom:8px;">'
+            'Profile Scores</div>',
             unsafe_allow_html=True,
         )
 
-        composite_elo = te.get("composite_elo", 1500)
-        offense_elo = te.get("offense_elo", 1500)
-        pitching_elo = te.get("pitching_elo", 1500)
-        off_rank = int(te["offense_rank"]) if pd.notna(te.get("offense_rank")) else None
-        pit_rank = int(te["pitching_rank"]) if pd.notna(te.get("pitching_rank")) else None
-        comp_rank = int(te["composite_rank"]) if pd.notna(te.get("composite_rank")) else None
-
-        bars = (
-            _elo_bar("Composite", composite_elo, comp_rank)
-            + _elo_bar("Offense", offense_elo, off_rank)
-            + _elo_bar("Pitching", pitching_elo, pit_rank)
-        )
-        st.markdown(
-            f'<div class="insight-card">{bars}</div>',
-            unsafe_allow_html=True,
-        )
-
-        # Offense-pitching balance insight
-        diff = offense_elo - pitching_elo
-        if abs(diff) > 30:
-            stronger = "offense" if diff > 0 else "pitching"
-            weaker = "pitching" if diff > 0 else "offense"
-            insight_color = GOLD if abs(diff) > 60 else SLATE
-            st.markdown(
-                f'<div style="padding:6px 12px; border-left:3px solid {insight_color}; '
-                f'margin-bottom:12px; font-size:0.85rem;">'
-                f'<span class="tdd-player-name" style="font-weight:400;">{stronger.title()}-first team</span> '
-                f'<span class="tdd-context">\u2014 {abs(diff):.0f} ELO gap over {weaker}</span>'
-                f'</div>',
-                unsafe_allow_html=True,
+        def _diamond_gauge(label: str, val: float, rank: int = 0) -> str:
+            pct = max(0, min(100, val / 10 * 100))
+            color = GOLD if val >= 6.5 else SAGE if val >= 5.0 else EMBER if val < 3.5 else SLATE
+            rank_html = (
+                f' <span class="tdd-context" style="margin-left:4px;">#{rank}</span>'
+                if rank else ""
             )
-
-    # ── Sub-score gauges ─────────────────────────────────────────────
-    if not tr.empty:
-        st.markdown(
-            '<div class="tdd-section-hdr" style="margin-top:16px; margin-bottom:8px;">Profile Scores</div>',
-            unsafe_allow_html=True,
-        )
+            return (
+                f'<div style="margin-bottom:8px;">'
+                f'<div style="display:flex; justify-content:space-between; margin-bottom:2px;">'
+                f'<span class="tdd-meta" style="color:var(--tdd-cream);">{label}</span>'
+                f'<span class="tdd-stat-value" style="color:{color};">'
+                f'{val:.1f}{rank_html}</span>'
+                f'</div>'
+                f'<div style="height:8px; background:var(--tdd-dark-card); border-radius:4px;">'
+                f'<div style="width:{pct:.1f}%; height:100%; background:{color}; '
+                f'border-radius:4px;"></div></div></div>'
+            )
 
         col1, col2 = st.columns(2)
         with col1:
             gauges_l = ""
-            off_score = tr.get("offense_score", 0.5)
-            gauges_l += _score_gauge("Offense", off_score)
-            pit_score = tr.get("pitching_score", 0.5)
-            gauges_l += _score_gauge("Pitching", pit_score)
-            def_score = tr.get("defense_score", 0.5)
-            gauges_l += _score_gauge("Defense", def_score)
+            lu_d = float(tp.get("lineup_diamond", 5.0) or 5.0)
+            gauges_l += _diamond_gauge("Offense", lu_d, _ranks.get("lineup_diamond", 0))
+            rot_d = float(tp.get("rotation_diamond", 5.0) or 5.0)
+            gauges_l += _diamond_gauge("Rotation", rot_d, _ranks.get("rotation_diamond", 0))
+            bp_d = float(tp.get("bullpen_diamond", 5.0) or 5.0)
+            gauges_l += _diamond_gauge("Bullpen", bp_d, _ranks.get("bullpen_diamond", 0))
             st.markdown(f'<div class="insight-card">{gauges_l}</div>', unsafe_allow_html=True)
 
         with col2:
             gauges_r = ""
-            hd_score = tr.get("health_depth_score", 0.5)
-            gauges_r += _score_gauge("Health & Depth", hd_score)
-            tdd_score = tr.get("tdd_score", tr.get("composite_score", 0.5))
-            gauges_r += _score_gauge("TDD Score", tdd_score / 10 if tdd_score > 1 else tdd_score)
+            def_s = float(tr.get("defense_score", 0.5) or 0.5) * 10
+            gauges_r += _diamond_gauge("Fielding", def_s, _ranks.get("defense_score", 0))
+            hd_s = float(tr.get("health_depth_score", 0.5) or 0.5) * 10
+            gauges_r += _diamond_gauge("Depth", hd_s, _ranks.get("health_depth_score", 0))
 
-            # Add style pills
+            # Style pills
             styles = []
             off_style = tr.get("offense_style")
             if pd.notna(off_style):
@@ -419,12 +422,33 @@ def _render_team_profile_tab(
                 '<div class="tdd-section-hdr" style="margin-top:16px; margin-bottom:8px;">ELO Trend</div>',
                 unsafe_allow_html=True,
             )
-            # Aggregate to weekly for a cleaner chart
+            import plotly.graph_objects as go
             chart_data = team_hist[["game_date", "composite_elo"]].copy()
             chart_data["game_date"] = pd.to_datetime(chart_data["game_date"])
             chart_data = chart_data.set_index("game_date").resample("W").last().dropna()
-            chart_data = chart_data.rename(columns={"composite_elo": "ELO"})
-            st.line_chart(chart_data, use_container_width=True, height=200)
+
+            elo_fig = go.Figure()
+            elo_fig.add_trace(go.Scatter(
+                x=chart_data.index, y=chart_data["composite_elo"],
+                mode="lines", line=dict(color=GOLD, width=2),
+                hovertemplate="ELO: %{y:.0f}<extra></extra>",
+            ))
+            elo_fig.add_hline(y=1500, line_dash="dot", line_color=SLATE, line_width=1)
+            elo_fig.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                margin=dict(l=10, r=10, t=10, b=10),
+                height=200, showlegend=False, dragmode=False,
+                xaxis=dict(showgrid=False, fixedrange=True,
+                           tickfont=dict(color=SLATE, size=9)),
+                yaxis=dict(showgrid=True, gridcolor="rgba(123,143,166,0.12)",
+                           fixedrange=True, tickfont=dict(color=SLATE, size=9)),
+                font=dict(color=CREAM),
+            )
+            st.plotly_chart(
+                elo_fig, use_container_width=True,
+                config={"displayModeBar": False, "scrollZoom": False},
+            )
 
     # ── League-wide rankings table ───────────────────────────────────
     if not rankings.empty:
@@ -437,7 +461,7 @@ def _render_team_profile_tab(
                 "rank": "Rank", "abbreviation": "Team", "tier": "Tier",
                 "composite_score": "Score", "projected_wins": "Proj W",
                 "offense_score": "Off", "pitching_score": "Pit",
-                "defense_score": "Def",
+                "defense_score": "Field",
             }
             display = display.rename(columns={k: v for k, v in rename_map.items() if k in display.columns})
 
@@ -569,63 +593,120 @@ def _player_row_html(
     )
 
 
-def _render_depth_chart_tab(selected_team: str, teams_df: pd.DataFrame) -> None:
-    """Render the Depth Chart tab."""
-    team_h, team_p = _build_depth_chart(selected_team, teams_df)
-    if team_h.empty and team_p.empty:
-        st.info("No rankings data available. Run the rankings precompute first.")
+def _render_depth_chart_tab(
+    selected_team: str,
+    teams_df: pd.DataFrame,
+    *,
+    team_pitchers: pd.DataFrame | None = None,
+    p_proj: pd.DataFrame | None = None,
+) -> None:
+    """Render a true depth chart based on actual playing time."""
+    from services.data_loader import load_lineup_priors
+    if team_pitchers is None:
+        team_pitchers = pd.DataFrame()
+    if p_proj is None:
+        p_proj = pd.DataFrame()
+
+    # Current roster for this team
+    team_pids = set(
+        teams_df[teams_df["team_abbr"] == selected_team]["player_id"].astype(int)
+    )
+    if not team_pids:
+        st.info("No roster data available.")
         return
 
-    probable = load_probable_starters()
-    if not probable.empty:
-        team_starters = probable[probable["team_abbr"] == selected_team]
-        if not team_starters.empty:
-            from components.depth_chart_diamond import render_diamond_chart
-            render_diamond_chart(team_starters, selected_team)
+    # Name lookup from roster
+    roster = load_roster()
+    name_map: dict[int, str] = {}
+    if not roster.empty:
+        for _, r in roster.iterrows():
+            name_map[int(r["player_id"])] = r["player_name"]
 
-    if not team_h.empty:
-        if "is_primary" in team_h.columns:
-            primary_h = team_h[team_h["is_primary"]].copy()
-        else:
-            primary_h = team_h.copy()
+    # Lineup priors — position history for all players (team-agnostic)
+    priors = load_lineup_priors()
 
-        if not primary_h.empty:
-            best_per_pos = primary_h.loc[
-                primary_h.groupby("position")["tdd_value_score"].idxmax()
-            ]
-        else:
-            best_per_pos = pd.DataFrame(columns=team_h.columns)
+    # Filter to current team roster
+    team_priors = priors[priors["player_id"].isin(team_pids)].copy() if not priors.empty else pd.DataFrame()
 
-        filled_positions = set(best_per_pos["position"]) if not best_per_pos.empty else set()
-        non_dh = best_per_pos[best_per_pos["position"] != "DH"] if not best_per_pos.empty else best_per_pos
+    # Pitcher rankings for rotation/bullpen
+    p_rank = load_rankings("pitchers")
+    team_p = p_rank[p_rank["pitcher_id"].isin(team_pids)].copy() if not p_rank.empty else pd.DataFrame()
+    p_arch = load_pitcher_archetypes()
+    if not p_arch.empty and not team_p.empty:
+        team_p = team_p.merge(
+            p_arch[["pitcher_id", "archetype_name"]].drop_duplicates("pitcher_id"),
+            on="pitcher_id", how="left",
+        )
 
-        strongest = non_dh.loc[non_dh["tdd_value_score"].idxmax()] if not non_dh.empty else None
-        weakest = non_dh.loc[non_dh["tdd_value_score"].idxmin()] if not non_dh.empty else None
-        avg_score = non_dh["tdd_value_score"].mean() if not non_dh.empty else 0
-        gaps = [p for p in _HITTER_POSITIONS if p != "DH" and p not in filled_positions]
+    # --- Position Depth Chart ---
+    st.markdown("### Position Players")
 
-        cols = st.columns(4)
-        with cols[0]:
-            if strongest is not None:
-                s_rank = int(strongest["pos_rank"]) if pd.notna(strongest.get("pos_rank")) else None
-                val = f'{strongest["position"]} (#{s_rank})' if s_rank else f'{strongest["position"]}'
+    for pos in _HITTER_POSITIONS:
+        pos_players = team_priors[team_priors["position"] == pos].sort_values(
+            "starts", ascending=False,
+        ) if not team_priors.empty else pd.DataFrame()
+
+        if pos_players.empty:
+            st.markdown(
+                f'<div style="display:flex; align-items:center; gap:0.5rem; '
+                f'padding:0.4rem 0; border-bottom:1px solid var(--tdd-dark-border-faint);">'
+                f'<span style="color:var(--tdd-gold); font-weight:700; '
+                f'min-width:2.2rem; font-size:0.9rem;">{pos}</span>'
+                f'<span class="tdd-context">No data</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            continue
+
+        player_parts: list[str] = []
+        for i, (_, row) in enumerate(pos_players.head(4).iterrows()):
+            pid = int(row["player_id"])
+            name = name_map.get(pid, f"ID {pid}")
+            starts = int(row["starts"])
+            is_starter = i == 0
+
+            if is_starter:
+                player_parts.append(
+                    f'<span style="color:var(--tdd-cream); font-weight:600; '
+                    f'font-size:0.88rem;">{name}</span>'
+                    f'<span class="tdd-context" style="margin-left:4px;">'
+                    f'({starts}g)</span>'
+                )
             else:
-                val = "--"
-            st.metric("Strongest Position", val)
-        with cols[1]:
-            if weakest is not None:
-                w_rank = int(weakest["pos_rank"]) if pd.notna(weakest.get("pos_rank")) else None
-                val = f'{weakest["position"]} (#{w_rank})' if w_rank else f'{weakest["position"]}'
-            else:
-                val = "--"
-            st.metric("Weakest Position", val)
-        with cols[2]:
-            st.metric("Avg Value Score", f"{avg_score:.2f}" if avg_score else "--")
-        with cols[3]:
-            st.metric("Position Gaps", str(len(gaps)) if gaps else "0")
+                player_parts.append(
+                    f'<span class="tdd-context">{name} ({starts}g)</span>'
+                )
 
-    _render_hitter_depth(team_h)
+        st.markdown(
+            f'<div style="display:flex; align-items:center; gap:0.5rem; '
+            f'padding:0.4rem 0; border-bottom:1px solid var(--tdd-dark-border-faint); '
+            f'flex-wrap:wrap;">'
+            f'<span style="color:var(--tdd-gold); font-weight:700; '
+            f'min-width:2.2rem; font-size:0.9rem;">{pos}</span>'
+            + " <span style='color:var(--tdd-slate); margin:0 0.2rem;'>\u2192</span> ".join(player_parts)
+            + '</div>',
+            unsafe_allow_html=True,
+        )
+
+    # --- Pitching Depth ---
     _render_pitching_depth(team_p)
+
+    # --- Rotation / Bullpen Profiles ---
+    if not team_pitchers.empty and not p_proj.empty:
+        team_sp = team_pitchers[team_pitchers["is_starter"] == True]  # noqa: E712
+        team_rp = team_pitchers[team_pitchers["is_starter"] == False]  # noqa: E712
+        lg_sp = p_proj[p_proj["is_starter"] == True]  # noqa: E712
+        lg_rp = p_proj[p_proj["is_starter"] == False]  # noqa: E712
+
+        _k_col = "projected_k_rate"
+        _bb_col = "projected_bb_rate"
+
+        if not team_sp.empty:
+            st.markdown(f"### Rotation Profile")
+            _render_staff_metrics(team_sp, lg_sp, _k_col, _bb_col)
+        if not team_rp.empty:
+            st.markdown(f"### Bullpen Profile")
+            _render_staff_metrics(team_rp, lg_rp, _k_col, _bb_col)
 
 
 def _render_hitter_depth(team_h: pd.DataFrame) -> None:
@@ -1535,23 +1616,19 @@ def page_team_overview() -> None:
     st.markdown(team_header_html, unsafe_allow_html=True)
 
     # ── Tabs ────────────────────────────────────────────────────────
-    tab_profile, tab_roster, tab_depth, tab_trade = st.tabs(
-        ["Team Profile", "Roster", "Depth Chart", "Trade Simulator"],
+    tab_profile, tab_depth, tab_trade = st.tabs(
+        ["Team Profile", "Depth Chart", "Trade Simulator"],
     )
 
     with tab_profile:
         _render_team_profile_tab(selected_team, teams_df)
 
-    with tab_roster:
-        _render_roster_tab(
-            selected_team, team_hitters, team_pitchers,
-            h_proj, p_proj, injury_lookup,
-            missing_hitters=missing_hitters,
-            missing_pitchers=missing_pitchers,
-        )
-
     with tab_depth:
-        _render_depth_chart_tab(selected_team, teams_df)
+        _render_depth_chart_tab(
+            selected_team, teams_df,
+            team_pitchers=team_pitchers,
+            p_proj=p_proj,
+        )
 
     with tab_trade:
         _render_trade_simulator_tab(selected_team, teams_df)

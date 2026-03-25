@@ -282,7 +282,7 @@ def create_projection_timeline(
     ax.set_xticks(range(len(valid_dates)))
     ax.set_xticklabels(valid_dates, rotation=45, ha="right", fontsize=8)
     ax.set_ylabel("Rate (%)", color=SLATE, fontsize=10)
-    title = f"{player_name} -- Projection Timeline" if player_name else "Projection Timeline"
+    title = f"{player_name} | Projection Timeline" if player_name else "Projection Timeline"
     ax.set_title(title, color=CREAM, fontsize=12, fontweight="bold", pad=10)
     if len(stat_cols) > 1:
         ax.legend(fontsize=8, framealpha=0.3)

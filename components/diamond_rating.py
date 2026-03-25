@@ -43,7 +43,7 @@ def render_diamond_rating(score: float, size: str = "md", show_numeric: bool = T
     numeric = f" {rating:.1f}" if show_numeric else ""
 
     html = (
-        f'<span title="Diamond Rating: {rating:.1f} / 10.0 — {tier}" '
+        f'<span title="Diamond Rating: {rating:.1f} / 10.0 | {tier}" '
         f'style="font-size:{font_size}; letter-spacing:2px; cursor:help;">'
         f'{diamonds}<span style="color:var(--tdd-gold); font-size:0.8em;">{numeric}</span>'
         f'</span>'
@@ -89,7 +89,7 @@ def diamond_rating_html(
     diamonds = _build_diamonds(rating, font_size)
 
     return (
-        f'<span title="Diamond Rating: {rating:.1f} / 10.0 — {tier}" '
+        f'<span title="Diamond Rating: {rating:.1f} / 10.0 | {tier}" '
         f'style="font-size:{font_size}; letter-spacing:2px; cursor:help;">'
         f'{diamonds} <span style="color:var(--tdd-gold); font-size:0.8em;">{rating:.1f}</span>'
         f'</span>'

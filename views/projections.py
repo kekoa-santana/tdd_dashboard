@@ -208,7 +208,7 @@ _CSS = f"""
 
 def _fmt(val: float, fmt: str) -> str:
     if pd.isna(val):
-        return "--"
+        return ""
     if fmt == "int":
         return str(int(round(val)))
     if fmt == "dec0":
