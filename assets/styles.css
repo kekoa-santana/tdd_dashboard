@@ -1031,6 +1031,16 @@ div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
     .js-plotly-plot, .plotly {
         max-width: 100% !important;
     }
+
+    /* Center headshots + brand headers when columns stack */
+    [data-testid="stImage"] {
+        display: flex !important;
+        justify-content: center !important;
+    }
+    .brand-header {
+        text-align: center;
+        flex-direction: column;
+    }
 }
 
 /* =========================================================================

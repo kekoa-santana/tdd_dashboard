@@ -31,8 +31,7 @@ from services.data_loader import (
     fetch_live_schedule, fetch_live_lineups,
 )
 from utils.helpers import get_team_lookup
-from components.metric_cards import metric_card
-from components.charts import create_game_stat_fig
+from components.charts import _STAT_CHART_CONFIG
 from components.diamond_rating import diamond_rating_html
 from components.team_logo import team_logo_html
 from components.headshot import headshot_html
@@ -122,6 +121,7 @@ def _build_projection_lookup() -> dict:
             "pitcher_name": row.get("pitcher_name", ""),
             "projected_bb_rate": row.get("projected_bb_rate"),
             "projected_hr_per_bf": row.get("projected_hr_per_bf"),
+            "pitch_hand": row.get("pitch_hand", ""),
         }
     return lookup
 
@@ -274,22 +274,6 @@ def _render_schedule_cards(
         f'{n_games} games</div>',
         unsafe_allow_html=True,
     )
-
-    all_teams = sorted(set(
-        schedule["away_abbr"].dropna().tolist() +
-        schedule["home_abbr"].dropna().tolist()
-    ))
-    team_filter = st.selectbox(
-        "Filter by team",
-        ["All Teams"] + all_teams,
-        key="today_team_filter",
-    )
-
-    if team_filter != "All Teams":
-        schedule = schedule[
-            (schedule["away_abbr"] == team_filter) |
-            (schedule["home_abbr"] == team_filter)
-        ]
 
     for _, game in schedule.iterrows():
         gpk = game["game_pk"]
@@ -498,6 +482,7 @@ def _render_game_drilldown(
             game_lu[game_lu["team_id"] == side_team_id].sort_values("batting_order")
             if not game_lu.empty and pd.notna(side_team_id) else pd.DataFrame()
         )
+
         sides.append({
             "side": side,
             "abbr": side_abbr,
@@ -515,8 +500,8 @@ def _render_game_drilldown(
 
     # --- Inline toolbar: Section | Team | (Matchup picker) ---
     _SECTIONS = [
-        "Lineup Matchups", "Hitter Projections",
-        "Matchup Analysis", "Game Simulator",
+        "Lineups", "Game Simulator",
+        "Matchup Analysis",
     ]
     team_options = [away_abbr, home_abbr]
 
@@ -532,7 +517,7 @@ def _render_game_drilldown(
             "Team", team_options,
             key=f"dd_team_{gpk}",
             label_visibility="collapsed",
-            disabled=section == "Lineup Matchups",
+            disabled=section == "Lineups",
         )
     side_idx = 0 if selected_team == away_abbr else 1
     active_side = sides[side_idx]
@@ -558,24 +543,11 @@ def _render_game_drilldown(
                 )
 
     # --- Render selected section ---
-    if section == "Lineup Matchups":
+    if section == "Lineups":
         _render_matchup_tab_sidebyside(
             sides, h_arch_lookup, h_stat_lookup,
             arsenal_df, vuln_df, gpk,
             pos_lookup=pos_lookup or {},
-        )
-
-    elif section == "Hitter Projections":
-        _render_hitter_projections_tab(
-            [active_side], h_arch_lookup, h_stat_lookup, gpk,
-            hitter_k_samples=hitter_k_samples or {},
-            hitter_bb_samples=hitter_bb_samples or {},
-            hitter_hr_samples=hitter_hr_samples or {},
-            bf_priors=bf_priors,
-            arsenal_df=arsenal_df,
-            vuln_df=vuln_df,
-            pos_lookup=pos_lookup or {},
-            sides_all=sides,
         )
 
     elif section == "Matchup Analysis":
@@ -605,6 +577,12 @@ def _render_game_drilldown(
             batter_pc=batter_pc if batter_pc is not None else pd.DataFrame(),
             tto_profiles=tto_profiles if tto_profiles is not None else pd.DataFrame(),
             exit_tendencies=exit_tendencies if exit_tendencies is not None else pd.DataFrame(),
+            hitter_k_samples=hitter_k_samples or {},
+            hitter_bb_samples=hitter_bb_samples or {},
+            hitter_hr_samples=hitter_hr_samples or {},
+            h_arch_lookup=h_arch_lookup,
+            pos_lookup=pos_lookup or {},
+            sides_all=sides,
         )
 
 
@@ -1785,15 +1763,28 @@ def _render_sim_tab(
     batter_pc: pd.DataFrame | None = None,
     tto_profiles: pd.DataFrame | None = None,
     exit_tendencies: pd.DataFrame | None = None,
+    hitter_k_samples: dict[str, np.ndarray] | None = None,
+    hitter_bb_samples: dict[str, np.ndarray] | None = None,
+    hitter_hr_samples: dict[str, np.ndarray] | None = None,
+    h_arch_lookup: dict[int, str] | None = None,
+    pos_lookup: dict[int, str] | None = None,
+    sides_all: list[dict] | None = None,
 ) -> None:
-    """Multi-stat game simulator using PA-by-PA engine (Layer 3 v2)."""
+    """Multi-stat game simulator — pitcher and batter posteriors."""
     from lib.game_sim.simulator import simulate_game
+    from lib.game_sim.batter_simulator import simulate_batter_game
     from lib.game_sim.exit_model import ExitModel
     from lib.game_sim.tto_model import build_all_tto_lifts
     from lib.game_sim.pitch_count_model import build_pitch_count_features
-    from lib.game_sim.fantasy_scoring import compute_pitcher_fantasy
     from lib.matchup import score_matchup, score_matchup_bb, score_matchup_hr
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
+
+    hitter_k_samples = hitter_k_samples or {}
+    hitter_bb_samples = hitter_bb_samples or {}
+    hitter_hr_samples = hitter_hr_samples or {}
+    h_arch_lookup = h_arch_lookup or {}
+    pos_lookup = pos_lookup or {}
+    _all_sides = sides_all if sides_all is not None else sides
 
     if not k_samples_dict:
         st.info("K% posterior samples are not yet available.")
@@ -1979,17 +1970,15 @@ def _render_sim_tab(
             random_seed=42 + gpk + (0 if side_info["side"] == "away" else 1),
         )
 
-        # Fantasy points
-        fantasy = compute_pitcher_fantasy(result)
-        dk = fantasy.dk_summary()
-
-        # Pitcher header with multi-stat expectations
+        # Pitcher header
         arch = side_info.get("pitcher_arch")
         arch_tag = f" ({arch})" if arch else ""
-        lineup_tag = (
-            f'vs <span class="tdd-team-abbr" data-team="{opp_abbr}">{opp_abbr}</span> lineup'
-            if has_lineup else "league-avg baseline"
-        )
+        if has_lineup:
+            lineup_tag = (
+                f'vs <span class="tdd-team-abbr" data-team="{opp_abbr}">{opp_abbr}</span> lineup'
+            )
+        else:
+            lineup_tag = "league-avg baseline"
 
         exp_parts = [
             f"E[K]: {np.mean(result.k_samples):.1f}",
@@ -2010,128 +1999,356 @@ def _render_sim_tab(
             unsafe_allow_html=True,
         )
 
-        # DK fantasy line
-        st.markdown(
-            f'<div style="font-size:0.85rem; color:var(--tdd-slate); margin-bottom:0.5rem;">'
-            f'DK: {dk["mean"]:.1f} pts (median {dk["median"]:.1f}, '
-            f'10th {dk["q10"]:.1f}, 90th {dk["q90"]:.1f})</div>',
-            unsafe_allow_html=True,
-        )
-
-        # Stat selector
-        selected_stat_label = st.radio(
-            "Stat", ["K", "BB", "H", "HR"], horizontal=True,
-            key=f"sim_stat_{side_info['side']}_{gpk}",
-        )
+        # --- Inline toolbar: Stat + Line ---
+        _side_key = f"{side_info['side']}_{gpk}"
+        tb_stat, tb_line, _ = st.columns([1, 2, 3])
+        with tb_stat:
+            selected_stat_label = st.selectbox(
+                "Stat", ["K", "BB", "H", "HR"],
+                key=f"sim_stat_{_side_key}", label_visibility="collapsed",
+            )
         stat_key = selected_stat_label.lower()
         stat_samples = getattr(result, f"{stat_key}_samples")
         meta = _STAT_META[stat_key]
 
-        # Distribution chart
-        fig = create_game_stat_fig(stat_samples, pitcher_name, stat=stat_key)
-        st.pyplot(fig, width='stretch')
-        plt.close(fig)
+        # Build line options for this stat
+        lo, hi = meta["lines"]
+        line_opts = [x + 0.5 for x in range(int(lo - 0.5), int(hi - 0.5) + 1)]
+        line_labels = [f"Over {v:.1f}" for v in line_opts]
+        # Default to line closest to (but below) the mean
+        _mean = float(np.mean(stat_samples))
+        _default_idx = 0
+        for i, v in enumerate(line_opts):
+            if v <= _mean:
+                _default_idx = i
+        with tb_line:
+            selected_line = st.selectbox(
+                "Line", line_labels, index=_default_idx,
+                key=f"sim_line_{_side_key}", label_visibility="collapsed",
+            )
+        threshold = line_opts[line_labels.index(selected_line)]
 
-        # Combined prop table for all stats
-        prop_rows = []
-        for skey, smeta in _STAT_META.items():
-            s_samples = getattr(result, f"{skey}_samples")
-            lo, hi = smeta["lines"]
-            lines = [x + 0.5 for x in range(int(lo - 0.5), int(hi - 0.5) + 1)]
-            over_df = result.over_probs(skey, lines=lines)
+        # Compute probabilities
+        p_over = float(np.mean(stat_samples > threshold))
+        p_under = 1.0 - p_over
 
-            for _, row in over_df.iterrows():
-                p = row["p_over"]
-                signal = (
-                    "Strong Over" if p > 0.65 else
-                    "Lean Over" if p > 0.55 else
-                    "Strong Under" if p < 0.35 else
-                    "Lean Under" if p < 0.45 else
-                    "Toss-up"
-                )
-                prop_rows.append({
-                    "Stat": smeta["label"],
-                    "Line": f"Over {row['line']:.1f}",
-                    "P(Over)": f"{p:.1%}",
-                    "P(Under)": f"{1 - p:.1%}",
-                    "Signal": signal,
-                })
+        # Signal classification
+        if p_over > 0.65:
+            signal, sig_color = "Strong Over", SAGE
+        elif p_over > 0.55:
+            signal, sig_color = "Lean Over", SAGE
+        elif p_over < 0.35:
+            signal, sig_color = "Strong Under", EMBER
+        elif p_over < 0.45:
+            signal, sig_color = "Lean Under", EMBER
+        else:
+            signal, sig_color = "Toss-up", SLATE
 
-        st.dataframe(
-            pd.DataFrame(prop_rows), width='stretch', hide_index=True,
-        )
+        # --- Two-column layout: chart + scouting notes ---
+        chart_col, notes_col = st.columns([3, 2])
 
-        # Summary cards for selected stat
-        summary_cols = st.columns(4)
-        stat_label = meta["label"]
-        cards = [
-            (f"Expected {stat_label}", f"{np.mean(stat_samples):.1f}"),
-            ("Std Dev", f"{np.std(stat_samples):.1f}"),
-            (f"Median {stat_label}", f"{np.median(stat_samples):.0f}"),
-            ("90th Pctile", f"{np.percentile(stat_samples, 90):.0f}"),
-        ]
-        for col, (label, val) in zip(summary_cols, cards):
-            with col:
-                st.markdown(metric_card(label, val), unsafe_allow_html=True)
+        with chart_col:
+            import plotly.graph_objects as go
+            cfg = _STAT_CHART_CONFIG.get(stat_key, _STAT_CHART_CONFIG["k"])
+            bar_color = cfg["color"]
+            max_val = int(stat_samples.max()) + 1
+            bins = np.arange(0, max_val + 2)
+            counts, edges = np.histogram(stat_samples, bins=bins - 0.5, density=True)
 
-        # Insight box
-        mean_val = float(np.mean(stat_samples))
-        p_hi = float((stat_samples >= meta["hi"]).sum() / len(stat_samples) * 100)
-        p_vhi = float((stat_samples >= meta["vhi"]).sum() / len(stat_samples) * 100)
+            over_counts = np.where(bins[:-1] > threshold, counts, 0)
+            under_counts = np.where(bins[:-1] <= threshold, counts, 0)
 
-        st.markdown(f"""
-        <div class="insight-card">
-            <div class="insight-bullet">
-                <span class="dot" style="background:{GOLD};"></span>
-                Expect around <strong>{mean_val:.0f} {meta['word']}</strong>
-                (±{np.std(stat_samples):.0f}).
-            </div>
-            <div class="insight-bullet">
-                <span class="dot" style="background:{SAGE};"></span>
-                <strong>{p_hi:.0f}%</strong> chance of {meta['hi']}+ {meta['word']},
-                <strong>{p_vhi:.0f}%</strong> chance of {meta['vhi']}+.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+            pfig = go.Figure()
+            pfig.add_trace(go.Bar(
+                x=bins[:-1], y=under_counts, name="Under",
+                marker_color=f"rgba(123,143,166,0.53)", width=0.85,
+                hovertemplate="%{x} " + meta["label"] + ": %{y:.1%}<extra></extra>",
+            ))
+            pfig.add_trace(go.Bar(
+                x=bins[:-1], y=over_counts, name="Over",
+                marker_color=bar_color, width=0.85,
+                hovertemplate="%{x} " + meta["label"] + ": %{y:.1%}<extra></extra>",
+            ))
+            # Threshold line
+            pfig.add_vline(
+                x=threshold, line_dash="dash", line_color=GOLD, line_width=2,
+                annotation_text=f"P(Over {threshold:.1f}) = {p_over:.1%}",
+                annotation_position="top left",
+                annotation_font=dict(color=GOLD, size=13),
+            )
+            pfig.update_layout(
+                barmode="stack", showlegend=False,
+                xaxis_title=cfg["xlabel"], yaxis_title="",
+                yaxis=dict(showticklabels=False, showgrid=False),
+                xaxis=dict(dtick=1, gridcolor="rgba(0,0,0,0)"),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                font=dict(color=CREAM),
+                margin=dict(l=10, r=10, t=30, b=40),
+                height=300,
+            )
+            st.plotly_chart(pfig, use_container_width=True, config={"displayModeBar": False})
 
-        # Per-batter matchup breakdown
-        if per_batter_details:
-            with st.expander(f"Lineup Matchup Breakdown — {pitcher_name} vs {opp_abbr}"):
-                bd_rows = []
-                for d in per_batter_details:
-                    bname = d.get("batter_name", "Unknown")
-                    mwhiff = d.get("matchup_whiff_rate", np.nan)
-                    bwhiff = d.get("baseline_whiff_rate", np.nan)
-                    lift = d.get("matchup_k_logit_lift", 0.0)
-                    rel = d.get("avg_reliability", 0.0)
-                    bd_rows.append({
-                        "#": d.get("batting_order", ""),
-                        "Batter": bname,
-                        "Matchup Whiff%": f"{mwhiff:.1%}" if pd.notna(mwhiff) else "--",
-                        "Baseline Whiff%": f"{bwhiff:.1%}" if pd.notna(bwhiff) else "--",
-                        "K Lift": f"{lift:+.3f}",
-                        "Reliability": f"{rel:.0%}",
-                    })
-                st.dataframe(
-                    pd.DataFrame(bd_rows), width='stretch',
-                    hide_index=True,
-                )
+        with notes_col:
+            mean_val = float(np.mean(stat_samples))
+            std_val = float(np.std(stat_samples))
+            p_hi = float((stat_samples >= meta["hi"]).sum() / len(stat_samples) * 100)
+            p_vhi = float((stat_samples >= meta["vhi"]).sum() / len(stat_samples) * 100)
 
-                avg_lift = float(np.mean([
-                    d.get("matchup_k_logit_lift", 0.0) for d in per_batter_details
-                ]))
-                if avg_lift > 0.05:
-                    color, word = POSITIVE, "favorable"
-                elif avg_lift < -0.05:
-                    color, word = NEGATIVE, "unfavorable"
-                else:
-                    color, word = SLATE, "neutral"
+            st.markdown(
+                f'<div style="margin-bottom:1rem;">'
+                f'<span style="background:{sig_color}22; color:{sig_color}; '
+                f'border:1px solid {sig_color}44; padding:4px 12px; border-radius:12px; '
+                f'font-size:0.9rem; font-weight:700;">{signal}</span>'
+                f'</div>'
+                f'<div style="display:flex; gap:1.5rem; margin-bottom:1rem;">'
+                f'<div>'
+                f'<div style="color:var(--tdd-cream); font-size:1.4rem; font-weight:700;">{p_over:.1%}</div>'
+                f'<div style="color:var(--tdd-slate); font-size:0.75rem;">P(Over {threshold:.1f})</div>'
+                f'</div>'
+                f'<div>'
+                f'<div style="color:var(--tdd-cream); font-size:1.4rem; font-weight:700;">{p_under:.1%}</div>'
+                f'<div style="color:var(--tdd-slate); font-size:0.75rem;">P(Under {threshold:.1f})</div>'
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+            st.markdown(
+                f'<div class="insight-card">'
+                f'<div class="insight-bullet">'
+                f'<span class="dot" style="background:{GOLD};"></span>'
+                f'Expect around <strong>{mean_val:.0f} {meta["word"]}</strong> '
+                f'(\u00b1{std_val:.0f}).'
+                f'</div>'
+                f'<div class="insight-bullet">'
+                f'<span class="dot" style="background:{SAGE};"></span>'
+                f'<strong>{p_hi:.0f}%</strong> chance of {meta["hi"]}+ {meta["word"]}, '
+                f'<strong>{p_vhi:.0f}%</strong> chance of {meta["vhi"]}+.'
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+
+        # --- Batter Projections (only when actual lineup is set) ---
+        opp_lu = side_info["opp_lineup"]
+        if not opp_lu.empty:
+            name_col_b = "batter_name" if "batter_name" in opp_lu.columns else "player_name"
+            id_col_b = "batter_id" if "batter_id" in opp_lu.columns else "player_id"
+
+            # Find opposing pitcher for context
+            opp_side = next((s for s in _all_sides if s["side"] != side_info["side"]), None)
+            opp_pid = opp_side["pitcher_id"] if opp_side else None
+            opp_proj = opp_side["pitcher_proj"] if opp_side else {}
+            opp_pitcher_name = opp_side["pitcher_name"] if opp_side else "TBD"
+
+            opp_k_rate = float(opp_proj.get("projected_k_rate", 0.22) or 0.22)
+            opp_bb_rate = float(opp_proj.get("projected_bb_rate", 0.08) or 0.08)
+            opp_hr_rate = float(opp_proj.get("projected_hr_per_bf", 0.03) or 0.03)
+
+            opp_bf_mu, opp_bf_sigma = 22.0, 4.5
+            if opp_pid and not bf_priors.empty:
+                bp_row = bf_priors[bf_priors["pitcher_id"] == opp_pid]
+                if not bp_row.empty:
+                    bp_last = bp_row.sort_values("season").iloc[-1]
+                    opp_bf_mu = float(bp_last["mu_bf"])
+                    opp_bf_sigma = float(bp_last["sigma_bf"])
+
+            # Build batter options
+            batter_opts = []
+            for _, brow in opp_lu.head(9).iterrows():
+                bid = int(brow[id_col_b]) if pd.notna(brow.get(id_col_b)) else None
+                bname = brow.get(name_col_b, "Unknown")
+                order = int(brow["batting_order"])
+                if bid:
+                    batter_opts.append((f"{order}. {bname}", bid, order))
+
+            if batter_opts:
                 st.markdown(
-                    f'<div style="color:{color}; font-size:0.85rem;">'
-                    f'Avg K Lift: {avg_lift:+.3f} — this lineup is {word} '
-                    f'for strikeouts</div>',
+                    f'<div class="tdd-section-hdr" style="margin-top:1rem;">'
+                    f'<span class="tdd-team-abbr" data-team="{opp_abbr}">{opp_abbr}</span>'
+                    f' Batters vs {pitcher_name}</div>',
                     unsafe_allow_html=True,
                 )
+
+                sel_batter = st.selectbox(
+                    "Batter", [b[0] for b in batter_opts],
+                    key=f"sim_batter_{_side_key}", label_visibility="collapsed",
+                )
+                sel_bid = next(b[1] for b in batter_opts if b[0] == sel_batter)
+                sel_order = next(b[2] for b in batter_opts if b[0] == sel_batter)
+                sel_bname = sel_batter.split(". ", 1)[1]
+
+                bid_key = str(sel_bid)
+                has_batter_samp = (
+                    bid_key in hitter_k_samples
+                    and bid_key in hitter_bb_samples
+                    and bid_key in hitter_hr_samples
+                    and opp_pid is not None
+                )
+
+                if has_batter_samp:
+                    try:
+                        # Matchup lifts
+                        mk_lift = mb_lift = mh_lift = 0.0
+                        if opp_pid and not arsenal_df.empty and not vuln_df.empty:
+                            mk_lift = score_matchup(opp_pid, sel_bid, arsenal_df, vuln_df, baselines_pt).get("matchup_k_logit_lift", 0.0)
+                            mb_lift = score_matchup_bb(opp_pid, sel_bid, arsenal_df, vuln_df, baselines_pt).get("matchup_bb_logit_lift", 0.0)
+                            mh_lift = score_matchup_hr(opp_pid, sel_bid, arsenal_df, vuln_df, baselines_pt).get("matchup_hr_logit_lift", 0.0)
+
+                        b_result = simulate_batter_game(
+                            batter_k_rate_samples=hitter_k_samples[bid_key],
+                            batter_bb_rate_samples=hitter_bb_samples[bid_key],
+                            batter_hr_rate_samples=hitter_hr_samples[bid_key],
+                            batting_order=sel_order,
+                            starter_k_rate=opp_k_rate,
+                            starter_bb_rate=opp_bb_rate,
+                            starter_hr_rate=opp_hr_rate,
+                            starter_bf_mu=opp_bf_mu,
+                            starter_bf_sigma=opp_bf_sigma,
+                            matchup_k_lift=mk_lift if not np.isnan(mk_lift) else 0.0,
+                            matchup_bb_lift=mb_lift if not np.isnan(mb_lift) else 0.0,
+                            matchup_hr_lift=mh_lift if not np.isnan(mh_lift) else 0.0,
+                            bullpen_k_rate=0.23,
+                            bullpen_bb_rate=0.09,
+                            bullpen_hr_rate=0.03,
+                            n_sims=5_000,
+                            random_seed=gpk + sel_bid,
+                        )
+
+                        # Batter stat/line toolbar
+                        _BATTER_STAT_META = {
+                            "k":  {"label": "K",  "word": "strikeouts", "lines": (0.5, 3.5), "hi": 2, "vhi": 3},
+                            "bb": {"label": "BB", "word": "walks",      "lines": (0.5, 2.5), "hi": 1, "vhi": 2},
+                            "h":  {"label": "H",  "word": "hits",       "lines": (0.5, 3.5), "hi": 2, "vhi": 3},
+                            "hr": {"label": "HR", "word": "home runs",  "lines": (0.5, 1.5), "hi": 1, "vhi": 2},
+                        }
+
+                        btb_stat, btb_line, _ = st.columns([1, 2, 3])
+                        with btb_stat:
+                            b_stat_label = st.selectbox(
+                                "Stat", ["H", "HR", "K", "BB"],
+                                key=f"bsim_stat_{_side_key}", label_visibility="collapsed",
+                            )
+                        b_stat_key = b_stat_label.lower()
+                        b_samples = getattr(b_result, f"{b_stat_key}_samples")
+                        b_meta = _BATTER_STAT_META[b_stat_key]
+
+                        blo, bhi = b_meta["lines"]
+                        b_line_opts = [x + 0.5 for x in range(int(blo - 0.5), int(bhi - 0.5) + 1)]
+                        b_line_labels = [f"Over {v:.1f}" for v in b_line_opts]
+                        b_mean = float(np.mean(b_samples))
+                        b_def_idx = 0
+                        for bi, bv in enumerate(b_line_opts):
+                            if bv <= b_mean:
+                                b_def_idx = bi
+                        with btb_line:
+                            b_sel_line = st.selectbox(
+                                "Line", b_line_labels, index=b_def_idx,
+                                key=f"bsim_line_{_side_key}", label_visibility="collapsed",
+                            )
+                        b_threshold = b_line_opts[b_line_labels.index(b_sel_line)]
+
+                        b_p_over = float(np.mean(b_samples > b_threshold))
+                        b_p_under = 1.0 - b_p_over
+
+                        if b_p_over > 0.65:
+                            b_signal, b_sig_color = "Strong Over", SAGE
+                        elif b_p_over > 0.55:
+                            b_signal, b_sig_color = "Lean Over", SAGE
+                        elif b_p_over < 0.35:
+                            b_signal, b_sig_color = "Strong Under", EMBER
+                        elif b_p_over < 0.45:
+                            b_signal, b_sig_color = "Lean Under", EMBER
+                        else:
+                            b_signal, b_sig_color = "Toss-up", SLATE
+
+                        # Two-column: chart + notes
+                        b_chart_col, b_notes_col = st.columns([3, 2])
+
+                        with b_chart_col:
+                            import plotly.graph_objects as go
+                            b_cfg = _STAT_CHART_CONFIG.get(b_stat_key, _STAT_CHART_CONFIG["k"])
+                            b_max_val = int(b_samples.max()) + 1
+                            b_bins = np.arange(0, b_max_val + 2)
+                            b_counts, _ = np.histogram(b_samples, bins=b_bins - 0.5, density=True)
+                            b_over_c = np.where(b_bins[:-1] > b_threshold, b_counts, 0)
+                            b_under_c = np.where(b_bins[:-1] <= b_threshold, b_counts, 0)
+
+                            bfig = go.Figure()
+                            bfig.add_trace(go.Bar(
+                                x=b_bins[:-1], y=b_under_c, name="Under",
+                                marker_color="rgba(123,143,166,0.53)", width=0.85,
+                                hovertemplate="%{x} " + b_meta["label"] + ": %{y:.1%}<extra></extra>",
+                            ))
+                            bfig.add_trace(go.Bar(
+                                x=b_bins[:-1], y=b_over_c, name="Over",
+                                marker_color=b_cfg["color"], width=0.85,
+                                hovertemplate="%{x} " + b_meta["label"] + ": %{y:.1%}<extra></extra>",
+                            ))
+                            bfig.add_vline(
+                                x=b_threshold, line_dash="dash", line_color=GOLD, line_width=2,
+                                annotation_text=f"P(Over {b_threshold:.1f}) = {b_p_over:.1%}",
+                                annotation_position="top left",
+                                annotation_font=dict(color=GOLD, size=13),
+                            )
+                            bfig.update_layout(
+                                barmode="stack", showlegend=False,
+                                xaxis_title=b_cfg["xlabel"], yaxis_title="",
+                                yaxis=dict(showticklabels=False, showgrid=False),
+                                xaxis=dict(dtick=1, gridcolor="rgba(0,0,0,0)"),
+                                plot_bgcolor="rgba(0,0,0,0)",
+                                paper_bgcolor="rgba(0,0,0,0)",
+                                font=dict(color=CREAM),
+                                margin=dict(l=10, r=10, t=30, b=40),
+                                height=280,
+                            )
+                            st.plotly_chart(bfig, use_container_width=True, config={"displayModeBar": False})
+
+                        with b_notes_col:
+                            b_std = float(np.std(b_samples))
+                            b_p_hi = float((b_samples >= b_meta["hi"]).sum() / len(b_samples) * 100)
+                            b_p_vhi = float((b_samples >= b_meta["vhi"]).sum() / len(b_samples) * 100)
+
+                            st.markdown(
+                                f'<div style="margin-bottom:1rem;">'
+                                f'<span style="background:{b_sig_color}22; color:{b_sig_color}; '
+                                f'border:1px solid {b_sig_color}44; padding:4px 12px; border-radius:12px; '
+                                f'font-size:0.9rem; font-weight:700;">{b_signal}</span>'
+                                f'</div>'
+                                f'<div style="display:flex; gap:1.5rem; margin-bottom:1rem;">'
+                                f'<div>'
+                                f'<div style="color:var(--tdd-cream); font-size:1.4rem; font-weight:700;">{b_p_over:.1%}</div>'
+                                f'<div style="color:var(--tdd-slate); font-size:0.75rem;">P(Over {b_threshold:.1f})</div>'
+                                f'</div>'
+                                f'<div>'
+                                f'<div style="color:var(--tdd-cream); font-size:1.4rem; font-weight:700;">{b_p_under:.1%}</div>'
+                                f'<div style="color:var(--tdd-slate); font-size:0.75rem;">P(Under {b_threshold:.1f})</div>'
+                                f'</div>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
+
+                            st.markdown(
+                                f'<div class="insight-card">'
+                                f'<div class="insight-bullet">'
+                                f'<span class="dot" style="background:{GOLD};"></span>'
+                                f'Expect around <strong>{b_mean:.1f} {b_meta["word"]}</strong> '
+                                f'(\u00b1{b_std:.1f}).'
+                                f'</div>'
+                                f'<div class="insight-bullet">'
+                                f'<span class="dot" style="background:{SAGE};"></span>'
+                                f'<strong>{b_p_hi:.0f}%</strong> chance of {b_meta["hi"]}+ {b_meta["word"]}, '
+                                f'<strong>{b_p_vhi:.0f}%</strong> chance of {b_meta["vhi"]}+.'
+                                f'</div>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
+                    except Exception:
+                        st.info(f"Simulation data not available for {sel_bname}.")
+                else:
+                    st.info(f"No posterior samples available for {sel_bname}.")
 
         st.markdown("---")
 
@@ -2435,30 +2652,10 @@ def page_schedule() -> None:
     meta = load_update_metadata()
 
     if is_today:
-        # Today: use cached parquets (sims + lineups) with refresh button
+        # Today: use cached parquets (sims + lineups)
         sims = load_todays_sims()
-        if st.session_state.get("schedule_refreshed"):
-            schedule = fetch_live_schedule()
-            lineups = fetch_live_lineups(schedule) if not schedule.empty else pd.DataFrame()
-            st.session_state["schedule_refreshed"] = False
-        else:
-            schedule = load_todays_games()
-            lineups = load_todays_lineups()
-
-        col_info, col_btn = st.columns([4, 1])
-        with col_info:
-            proj_ts = meta.get("last_updated")
-            st.markdown(
-                f'<div style="color:var(--tdd-slate); font-size:0.85rem;">'
-                f'Projections from: {_staleness_indicator(proj_ts)}'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-        with col_btn:
-            if st.button("Refresh Lineups", key="schedule_refresh"):
-                st.session_state["schedule_refreshed"] = True
-                st.cache_data.clear()
-                st.rerun()
+        schedule = load_todays_games()
+        lineups = load_todays_lineups()
     else:
         # Other dates: fetch schedule from MLB API, no sims
         schedule = fetch_live_schedule(selected_date.isoformat())

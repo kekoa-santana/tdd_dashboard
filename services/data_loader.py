@@ -200,6 +200,14 @@ def load_probable_starters() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_DATA_TTL)
+def load_probable_starters_by_hand() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "probable_starters_by_hand.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
 def load_pitcher_location_grid() -> pd.DataFrame:
     path = DASHBOARD_DIR / "pitcher_location_grid.parquet"
     if not path.exists():

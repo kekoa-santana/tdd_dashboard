@@ -1192,7 +1192,7 @@ def page_player_profile() -> None:
                     header_parts.append(pf_label)
 
     # Use pre-computed diamond_rating from rankings as single source of truth.
-    # Falls back to composite_score conversion only if rankings unavailable.
+    # Shows both Overall Rating (gold) and Projected Value (sage) side by side.
     _ranks = load_rankings("hitters") if player_type != "Pitcher" else load_rankings("pitchers")
     _id_col = "batter_id" if player_type != "Pitcher" else "pitcher_id"
     _rank_row = _ranks[_ranks[_id_col] == player_id] if not _ranks.empty else pd.DataFrame()
@@ -1202,6 +1202,26 @@ def page_player_profile() -> None:
     else:
         composite = player_row["composite_score"]
         diamond_html = diamond_rating_html_composite(composite, size="lg")
+
+    # Projected Value rating (SAGE colored, side by side with overall)
+    _proj_html = ""
+    if not _rank_row.empty and "current_value_score" in _rank_row.columns:
+        from lib.diamond_rating import score_to_diamonds
+        _proj_score = float(_rank_row["current_value_score"].iloc[0])
+        _proj_rating = score_to_diamonds(_proj_score)
+        _proj_diamonds = ""
+        for _di in range(10):
+            if _di < int(_proj_rating) or (_di == int(_proj_rating) and _proj_rating - int(_proj_rating) >= 0.5):
+                _proj_diamonds += f'<span style="color:{SAGE}">&#9670;</span>'
+            else:
+                _proj_diamonds += f'<span style="color:{SLATE}; opacity:0.35">&#9671;</span>'
+        _proj_html = (
+            f'<div style="margin-top:4px; font-size:0.85rem;">'
+            f'<span style="color:{SLATE}; font-size:0.7rem;">PROJECTED </span>'
+            f'<span style="letter-spacing:2px;">{_proj_diamonds}</span>'
+            f' <span style="color:{SAGE}; font-size:0.8rem;">{_proj_rating:.1f}</span>'
+            f'</div>'
+        )
 
     # Enrich role/position in header with rank from rankings data
     if not _rank_row.empty:
@@ -1242,6 +1262,7 @@ def page_player_profile() -> None:
         f'</div>'
         f'<div style="text-align:right;">'
         f'{diamond_html}'
+        f'{_proj_html}'
         f'</div>'
         f'</div>'
     )
@@ -1432,7 +1453,12 @@ def page_player_profile() -> None:
         key="compare_baseline",
     )
 
-    # --- Stat metric cards ---
+    # --- 2026 Bayesian Rate Projections (high confidence: K%, BB%) ---
+    st.markdown(
+        '<div class="tdd-section-hdr">2026 Projected Rates '
+        f'<span style="color:{SAGE}; font-size:0.7rem;">&#10003; Bayesian — beats Marcel baseline</span></div>',
+        unsafe_allow_html=True,
+    )
     cols = st.columns(len(stat_configs))
     for col, (label, key, higher_better, _) in zip(cols, stat_configs):
         obs_col = f"observed_{key}"
@@ -1478,9 +1504,20 @@ def page_player_profile() -> None:
         c_row = counting_df[counting_df[id_col] == player_id]
         if not c_row.empty:
             c_data = c_row.iloc[0]
-            st.markdown("<div style='margin-top: 1rem;'></div>", unsafe_allow_html=True)
+            st.markdown(
+                '<div class="tdd-section-hdr" style="margin-top:1rem;">2026 Projected Counting Stats</div>',
+                unsafe_allow_html=True,
+            )
             c_cols = st.columns(len(counting_display))
-            for col, (c_label, c_prefix, c_actual, c_hb) in zip(c_cols, counting_display):
+
+            # Unpack with optional confidence field (pitchers don't have it yet)
+            for col, item in zip(c_cols, counting_display):
+                if len(item) == 5:
+                    c_label, c_prefix, c_actual, c_hb, confidence = item
+                else:
+                    c_label, c_prefix, c_actual, c_hb = item
+                    confidence = "med"
+
                 mean_col = f"{c_prefix}_mean"
                 p10_col = f"{c_prefix}_p10"
                 p90_col = f"{c_prefix}_p90"
@@ -1499,39 +1536,55 @@ def page_player_profile() -> None:
                             clr = NEGATIVE
                         return f'<span style="color:{clr};">{d:+d}</span>'
 
-                    # Baseline: Career Avg uses rate x projected PA, prior season uses actual
-                    actual_val = c_data.get(c_actual)
-                    if compare_to == "Career Avg":
-                        # Derive career-pace counting total from career rate x projected PA
-                        rate_key = c_prefix.replace("total_", "") + "_rate"
-                        if rate_key == "sb_rate":
-                            rate_key = "sb_per_game"  # SB uses games not PA
-                        career_rate_col = f"career_{rate_key}"
-                        proj_pa = c_data.get("projected_pa_mean", c_data.get("projected_bf_mean"))
-                        if (career_rate_col in player_row.index
-                                and pd.notna(player_row.get(career_rate_col))
-                                and pd.notna(proj_pa)):
-                            career_count = int(round(player_row[career_rate_col] * proj_pa))
-                            delta = val - career_count
-                            delta_str = f"Career pace: {career_count} ({_colored_count_delta(delta, c_hb)}) | 80%: {lo} – {hi}"
-                        elif pd.notna(actual_val):
-                            actual_int = int(actual_val)
+                    # wRC+ as range only (r=0.44, not reliable as point estimate)
+                    if confidence == "range":
+                        display_val = f"{lo} – {hi}"
+                        delta_str = f"Mean: {val}"
+                    else:
+                        display_val = str(val)
+
+                        # Baseline: Career Avg or prior season
+                        actual_val = c_data.get(c_actual)
+                        if compare_to == "Career Avg":
+                            rate_key = c_prefix.replace("total_", "") + "_rate"
+                            if rate_key == "sb_rate":
+                                rate_key = "sb_per_game"
+                            career_rate_col = f"career_{rate_key}"
+                            proj_pa = c_data.get("projected_pa_mean", c_data.get("projected_bf_mean"))
+                            if (career_rate_col in player_row.index
+                                    and pd.notna(player_row.get(career_rate_col))
+                                    and pd.notna(proj_pa)):
+                                career_count = int(round(player_row[career_rate_col] * proj_pa))
+                                delta = val - career_count
+                                delta_str = f"Career pace: {career_count} ({_colored_count_delta(delta, c_hb)}) | 80%: {lo} – {hi}"
+                            elif pd.notna(actual_val):
+                                actual_int = int(actual_val)
+                                delta = val - actual_int
+                                delta_str = f"{PRIOR_SEASON}: {actual_int} ({_colored_count_delta(delta, c_hb)}) | 80%: {lo} – {hi}"
+                            else:
+                                delta_str = f"80% range: {lo} – {hi}"
+                        elif c_actual and pd.notna(c_data.get(c_actual)):
+                            actual_int = int(c_data[c_actual])
                             delta = val - actual_int
                             delta_str = f"{PRIOR_SEASON}: {actual_int} ({_colored_count_delta(delta, c_hb)}) | 80%: {lo} – {hi}"
                         else:
                             delta_str = f"80% range: {lo} – {hi}"
-                    elif pd.notna(actual_val):
-                        actual_int = int(actual_val)
-                        delta = val - actual_int
-                        delta_str = f"{PRIOR_SEASON}: {actual_int} ({_colored_count_delta(delta, c_hb)}) | 80%: {lo} – {hi}"
-                    else:
-                        delta_str = f"80% range: {lo} – {hi}"
+
+                    # Confidence badge
+                    badge = ""
+                    if confidence == "high":
+                        badge = f' <span style="color:{SAGE}; font-size:0.65rem;">&#10003;</span>'
+                    elif confidence == "med":
+                        badge = f' <span style="color:{GOLD}; font-size:0.55rem;">~</span>'
+                    elif confidence == "low":
+                        badge = f' <span style="color:{SLATE}; font-size:0.55rem;">?</span>'
+
                     _pct = None
-                    if mean_col in counting_df.columns:
+                    if mean_col in counting_df.columns and confidence != "range":
                         _pct = percentile_rank(counting_df[mean_col], float(c_data[mean_col]), c_hb)
                     with col:
                         st.markdown(
-                            metric_card(c_label, str(val), delta_str, pctile=_pct),
+                            metric_card(f"{c_label}{badge}", display_val, delta_str, pctile=_pct),
                             unsafe_allow_html=True,
                         )
                 else:

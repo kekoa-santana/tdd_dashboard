@@ -114,7 +114,13 @@ _CSS = """
     margin-left: 0.4rem;
 }
 .lb-scroll {
+    overflow: visible;
+}
+.lb-scroll[style*="max-height"] {
     overflow-y: auto;
+    padding-top: 3.5rem;
+    margin-top: -3.5rem;
+    padding-bottom: 1rem;
 }
 .lb-scroll::-webkit-scrollbar {
     width: 6px;
@@ -265,28 +271,40 @@ _CSS = """
 
 # ── Diamond rating display helpers ──────────────────────────────────────────
 
-def _diamonds_html(rating: float) -> str:
-    """Build filled/empty diamond symbols for a 0-5 rating."""
+def _diamonds_html(rating: float, fill_color: str = "var(--tdd-gold)") -> str:
+    """Build filled/empty diamond symbols for a 0-10 rating."""
     parts = []
     for i in range(10):
         if i < int(rating) or (i == int(rating) and rating - int(rating) >= 0.5):
-            parts.append(f'<span style="color:var(--tdd-gold)">&#9670;</span>')
+            parts.append(f'<span style="color:{fill_color}">&#9670;</span>')
         else:
             parts.append(f'<span style="color:var(--tdd-slate); opacity:0.35">&#9671;</span>')
     return "".join(parts)
 
 
-def _rating_val_html(score: float, precomputed_rating: float | None = None) -> str:
+def _rating_val_html(
+    score: float,
+    precomputed_rating: float | None = None,
+    projected: bool = False,
+) -> str:
     """Format diamond rating as diamond symbols + numeric value for card rows.
 
     Uses pre-computed diamond_rating from scouting grades when available,
-    falls back to converting tdd_value_score via score_to_diamonds.
+    falls back to converting the score via score_to_diamonds.
+
+    When *projected* is True, diamonds render in SAGE (teal-green) instead
+    of gold to visually distinguish the 2-3 year projected view.
     """
     rating = precomputed_rating if precomputed_rating is not None else score_to_diamonds(score)
-    color = GOLD if rating >= 7.5 else SAGE if rating >= 5.0 else SLATE
+    if projected:
+        fill = SAGE
+        num_color = SAGE
+    else:
+        fill = "var(--tdd-gold)"
+        num_color = GOLD if rating >= 7.5 else SAGE if rating >= 5.0 else SLATE
     return (
-        f'<span class="lb-diamonds">{_diamonds_html(rating)}</span>'
-        f'<span class="lb-rating-num" style="color:{color}">{rating:.1f}</span>'
+        f'<span class="lb-diamonds">{_diamonds_html(rating, fill_color=fill)}</span>'
+        f'<span class="lb-rating-num" style="color:{num_color}">{rating:.1f}</span>'
     )
 
 
@@ -303,6 +321,7 @@ _NL_TEAMS = {"ATL", "MIA", "NYM", "PHI", "WSH",
 # ── Detail stat configs for overall cards ──────────────────────────────────
 # (label, column_name, format)
 
+# --- Current Value mode (production-focused) ---
 BATTER_DETAIL_STATS: list[tuple[str, str, str]] = [
     ("wRC+", "wrc_plus", "int"),
     ("wOBA", "woba", ".000"),
@@ -321,6 +340,27 @@ PITCHER_DETAIL_STATS: list[tuple[str, str, str]] = [
     ("ERA", "observed_era", "0.00"),
     ("FIP", "observed_fip", "0.00"),
     ("Stuff", "stuff_score", "dec3"),
+]
+
+# --- Talent Potential mode (scouting/tools-focused) ---
+BATTER_TALENT_STATS: list[tuple[str, str, str]] = [
+    ("Contact", "contact_skill", "dec3"),
+    ("Decisions", "decision_skill", "dec3"),
+    ("Damage", "damage_skill", "dec3"),
+    ("Proj K%", "projected_k_rate", "pct"),
+    ("Proj BB%", "projected_bb_rate", "pct"),
+    ("Traj", "trajectory_score", "dec3"),
+    ("Fld", "fielding_combined", "dec3"),
+]
+
+PITCHER_TALENT_STATS: list[tuple[str, str, str]] = [
+    ("Stuff", "stuff_score", "dec3"),
+    ("Cmd", "command_score", "dec3"),
+    ("Traj", "trajectory_score", "dec3"),
+    ("Proj K%", "projected_k_rate", "pct"),
+    ("Proj BB%", "projected_bb_rate", "pct"),
+    ("pERA", "projected_era", "0.00"),
+    ("Hlth", "health_adj", "dec3"),
 ]
 
 
@@ -356,6 +396,7 @@ def _render_ranking_card(
     score_col: str,
     teams_lookup: dict[int, str],
     *,
+    projected: bool = False,
     info_col: str | None = None,
     max_height: int = 0,
     n_headshots: int = 5,
@@ -378,12 +419,15 @@ def _render_ranking_card(
     if df.empty:
         return
 
-    # Sort by diamond_rating (descending) when available — this is the TDD
-    # scouting grade and should be the display order. Fall back to rank_col.
-    if "diamond_rating" in df.columns and df["diamond_rating"].notna().any():
-        work = df.sort_values("diamond_rating", ascending=False)
-    else:
+    # Sort by the requested score column (descending).
+    # For current_value mode this is tdd_value_score; for talent mode it is
+    # talent_upside_score.  Falls back to rank_col numeric sort.
+    if score_col in df.columns and df[score_col].notna().any():
+        work = df.sort_values(score_col, ascending=False)
+    elif rank_col in df.columns:
         work = df.sort_values(rank_col)
+    else:
+        work = df.copy()
     has_detail = detail_stats is not None
 
     rows_html = []
@@ -404,8 +448,14 @@ def _render_ranking_card(
         if info_col and info_col in row.index and pd.notna(row[info_col]):
             info_html = f'<span class="lb-info">{row[info_col]}</span>'
 
-        precomputed = row.get("diamond_rating") if "diamond_rating" in row.index else None
-        val_html = _rating_val_html(row[score_col], precomputed_rating=precomputed)
+        # Diamond display uses the selected score column's value, converted
+        # to 0-10 scale.  Only uses precomputed diamond_rating for overall mode.
+        # Projected mode forces re-conversion and renders in SAGE color.
+        if not projected and score_col not in ("current_value_score",):
+            precomputed = row.get("diamond_rating") if "diamond_rating" in row.index else None
+        else:
+            precomputed = None
+        val_html = _rating_val_html(row[score_col], precomputed_rating=precomputed, projected=projected)
 
         # Inline stats (if detail_stats provided)
         stat_inline = ""
@@ -551,6 +601,7 @@ def _render_ranking_card(
 def _render_batter_rankings(
     df: pd.DataFrame, teams_lookup: dict[int, str],
     league_filter: str = "All", search: str = "",
+    value_mode: str = "overall",
 ) -> None:
     """Render batter rankings as leaderboard cards with positional breakdowns."""
     if search:
@@ -566,6 +617,25 @@ def _render_batter_rankings(
         st.info("No matching batters found.")
         return
 
+    # Resolve columns based on value mode
+    # "overall" (default) = scouting-informed comprehensive ranking (talent_upside_score)
+    # "projected" = forward-looking 2-3 year projection (current_value_score)
+    is_projected = value_mode == "projected"
+    if is_projected:
+        score_col = "current_value_score" if "current_value_score" in df.columns else "tdd_value_score"
+        rank_col = "overall_rank"
+        detail_stats = BATTER_TALENT_STATS
+    else:
+        score_col = "talent_upside_score" if "talent_upside_score" in df.columns else "tdd_value_score"
+        rank_col = "talent_rank" if "talent_rank" in df.columns else "overall_rank"
+        detail_stats = BATTER_DETAIL_STATS
+
+    pos_rank_col = "pos_rank"
+
+    # Re-sort by selected score for non-default mode
+    if is_projected:
+        df = df.sort_values(score_col, ascending=False).copy()
+
     # Build archetype lookup
     arch_df = load_hitter_archetypes()
     arch_lookup: dict[int, tuple[str, str]] = {}
@@ -577,11 +647,13 @@ def _render_batter_rankings(
             )
 
     # Overall rankings — expandable cards
+    section_title = "Overall" if not is_projected else "Projected Value (2-3 Year Outlook)"
     _render_ranking_card(
-        df, "Overall", "overall_rank", "batter_name", "batter_id",
-        "tdd_value_score", teams_lookup,
+        df, section_title, rank_col, "batter_name", "batter_id",
+        score_col, teams_lookup,
+        projected=is_projected,
         info_col="position", max_height=600, n_headshots=10,
-        detail_stats=BATTER_DETAIL_STATS, wide=True, link_type="hitter",
+        detail_stats=detail_stats, wide=True, link_type="hitter",
         expandable=True, archetype_lookup=arch_lookup,
     )
 
@@ -596,10 +668,11 @@ def _render_batter_rankings(
             with col_st:
                 pos_df = df[df["position"] == pos].copy()
                 _render_ranking_card(
-                    pos_df, pos, "pos_rank", "batter_name", "batter_id",
-                    "tdd_value_score", teams_lookup,
-                    max_height=400, n_headshots=3, link_type="hitter",
-                    hover_stats=BATTER_DETAIL_STATS,
+                    pos_df, pos, pos_rank_col, "batter_name", "batter_id",
+                    score_col, teams_lookup,
+                    projected=is_projected,
+                    max_height=520, n_headshots=3, link_type="hitter",
+                    hover_stats=detail_stats,
                 )
 
 
@@ -608,6 +681,7 @@ def _render_batter_rankings(
 def _render_pitcher_rankings(
     df: pd.DataFrame, teams_lookup: dict[int, str],
     league_filter: str = "All", search: str = "",
+    value_mode: str = "overall",
 ) -> None:
     """Render pitcher rankings as leaderboard cards with role breakdowns."""
     if search:
@@ -623,6 +697,25 @@ def _render_pitcher_rankings(
         st.info("No matching pitchers found.")
         return
 
+    # Resolve columns based on value mode
+    is_projected = value_mode == "projected"
+    if is_projected:
+        score_col = "current_value_score" if "current_value_score" in df.columns else "tdd_value_score"
+        rank_col = "role_rank"
+        detail_stats = PITCHER_TALENT_STATS
+    else:
+        score_col = "talent_upside_score" if "talent_upside_score" in df.columns else "tdd_value_score"
+        rank_col = "talent_rank" if "talent_rank" in df.columns else "role_rank"
+        detail_stats = PITCHER_DETAIL_STATS
+
+    # Fallback
+    if score_col not in df.columns:
+        score_col = "tdd_value_score"
+
+    # Re-sort by selected score for non-default mode
+    if is_projected:
+        df = df.sort_values(score_col, ascending=False).copy()
+
     # Build archetype lookup
     arch_df = load_pitcher_archetypes()
     arch_lookup: dict[int, tuple[str, str]] = {}
@@ -634,24 +727,28 @@ def _render_pitcher_rankings(
             )
 
     # Starting Pitchers — expandable cards
+    sp_label = "Starting Pitchers" if not is_projected else "SP — Projected Value (2-3 Year Outlook)"
     sp_df = df[df["role"] == "SP"].copy()
     if not sp_df.empty:
         _render_ranking_card(
-            sp_df, "Starting Pitchers", "role_rank", "pitcher_name", "pitcher_id",
-            "tdd_value_score", teams_lookup,
+            sp_df, sp_label, rank_col, "pitcher_name", "pitcher_id",
+            score_col, teams_lookup,
+            projected=is_projected,
             max_height=600, n_headshots=10,
-            detail_stats=PITCHER_DETAIL_STATS, wide=True, link_type="pitcher",
+            detail_stats=detail_stats, wide=True, link_type="pitcher",
             expandable=True, archetype_lookup=arch_lookup,
         )
 
     # Relief Pitchers — expandable cards
+    rp_label = "Relief Pitchers" if not is_projected else "RP — Projected Value (2-3 Year Outlook)"
     rp_df = df[df["role"] == "RP"].copy()
     if not rp_df.empty:
         _render_ranking_card(
-            rp_df, "Relief Pitchers", "role_rank", "pitcher_name", "pitcher_id",
-            "tdd_value_score", teams_lookup,
+            rp_df, rp_label, rank_col, "pitcher_name", "pitcher_id",
+            score_col, teams_lookup,
+            projected=is_projected,
             max_height=600, n_headshots=10,
-            detail_stats=PITCHER_DETAIL_STATS, wide=True, link_type="pitcher",
+            detail_stats=detail_stats, wide=True, link_type="pitcher",
             expandable=True, archetype_lookup=arch_lookup,
         )
 
@@ -1012,8 +1109,8 @@ def page_player_rankings() -> None:
     st.markdown(_CSS, unsafe_allow_html=True)
     st.markdown(EXPANDABLE_CARD_CSS, unsafe_allow_html=True)
 
-    # Inline toolbar: Category | League | Search
-    tb1, tb2, tb3 = st.columns([1.5, 1, 3])
+    # Inline toolbar: Category | Value Mode | League | Search
+    tb1, tb2, tb3, tb4 = st.columns([1.5, 1.5, 0.7, 2.5])
     with tb1:
         category = st.selectbox(
             "Category",
@@ -1022,17 +1119,29 @@ def page_player_rankings() -> None:
             label_visibility="collapsed",
         )
     with tb2:
+        _mode_options = ["Overall Rating", "Projected Value"]
+        value_mode_label = st.selectbox(
+            "Mode", _mode_options,
+            key="rankings_value_mode",
+            label_visibility="collapsed",
+            disabled=category not in ("Batters", "Pitchers"),
+        )
+    with tb3:
         league_filter = st.selectbox(
             "League", ["All", "AL", "NL"],
             key="rank_league",
             label_visibility="collapsed",
             disabled=category not in ("Batters", "Pitchers"),
         )
-    with tb3:
+    with tb4:
         search = st.text_input(
             "Search", placeholder="Search player...",
             key="rank_search", label_visibility="collapsed",
         )
+
+    # "Overall Rating" = scouting-informed comprehensive ranking (default)
+    # "Projected Value" = forward-looking 2-3 year outlook (trajectory, age, production)
+    value_mode = "projected" if "Projected" in value_mode_label else "overall"
 
     # Team lookup for MLB sections
     teams_df = load_player_teams()
@@ -1047,14 +1156,14 @@ def page_player_rankings() -> None:
         if df.empty:
             st.warning("No batter rankings data found. Run precompute first.")
             return
-        _render_batter_rankings(df, teams_lookup, league_filter, search)
+        _render_batter_rankings(df, teams_lookup, league_filter, search, value_mode=value_mode)
 
     elif category == "Pitchers":
         df = load_rankings("pitchers")
         if df.empty:
             st.warning("No pitcher rankings data found. Run precompute first.")
             return
-        _render_pitcher_rankings(df, teams_lookup, league_filter, search)
+        _render_pitcher_rankings(df, teams_lookup, league_filter, search, value_mode=value_mode)
 
     elif category == "Hitting Prospects":
         df = load_rankings("prospect")
