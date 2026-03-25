@@ -156,7 +156,7 @@ _CSS = f"""
 
 def _fmt_stat(val, fmt: str) -> str:
     if pd.isna(val):
-        return "--"
+        return ""
     if fmt == ".000":
         s = f"{val:.3f}"
         return s.lstrip("0") if abs(val) < 1.0 else s

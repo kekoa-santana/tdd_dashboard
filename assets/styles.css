@@ -37,6 +37,14 @@
 [data-testid="stDecoration"] { display: none; }
 header[data-testid="stHeader"] { display: none; }
 
+/* Disable drag-to-zoom and pinch-to-zoom on all Plotly charts.
+   The .nsewdrag overlay handles drag interactions; disabling pointer
+   events on it prevents zoom while preserving hover tooltips. */
+.js-plotly-plot .nsewdrag,
+.js-plotly-plot .drag {
+    pointer-events: none !important;
+}
+
 /* Palette-aware Streamlit overrides (use CSS vars so palette switcher works) */
 .stApp, [data-testid="stAppViewContainer"] {
     background-color: var(--tdd-dark) !important;
@@ -58,6 +66,52 @@ hr {
 .stMultiSelect div[data-baseweb="select"] > div {
     background-color: transparent !important;
     border-color: var(--tdd-dark-border) !important;
+}
+
+/* Minimal gold season selector — no border, centered gold text, just arrow */
+.st-key-gold_season_pick,
+.st-key-gold_deep_season {
+    display: flex;
+    justify-content: center;
+}
+.st-key-gold_season_pick .stSelectbox,
+.st-key-gold_deep_season .stSelectbox {
+    width: 100% !important;
+    display: flex !important;
+    justify-content: center !important;
+}
+.st-key-gold_season_pick .stSelectbox > div,
+.st-key-gold_deep_season .stSelectbox > div {
+    width: auto !important;
+    min-width: 0 !important;
+}
+.st-key-gold_season_pick .stSelectbox div[data-baseweb="select"],
+.st-key-gold_deep_season .stSelectbox div[data-baseweb="select"] {
+    width: auto !important;
+    display: inline-flex !important;
+}
+.st-key-gold_season_pick .stSelectbox div[data-baseweb="select"] > div,
+.st-key-gold_deep_season .stSelectbox div[data-baseweb="select"] > div {
+    border: none !important;
+    background: transparent !important;
+    padding: 0 4px !important;
+    cursor: pointer;
+    width: auto !important;
+    min-width: 0 !important;
+    display: inline-flex !important;
+    gap: 4px;
+}
+.st-key-gold_season_pick .stSelectbox div[data-baseweb="select"] > div > div,
+.st-key-gold_deep_season .stSelectbox div[data-baseweb="select"] > div > div {
+    color: var(--tdd-gold) !important;
+    font-weight: 600 !important;
+    font-size: 0.9rem !important;
+    flex: 0 0 auto !important;
+}
+.st-key-gold_season_pick .stSelectbox svg,
+.st-key-gold_deep_season .stSelectbox svg {
+    fill: var(--tdd-gold) !important;
+    color: var(--tdd-gold) !important;
 }
 
 /* Push page content below the fixed topbar */
@@ -529,12 +583,14 @@ hr {
 
 /* Metric cards — borderless, numbers speak for themselves */
 .metric-card {
-    background: transparent;
+    background: var(--tdd-dark);
     border: none;
     border-radius: 0;
     padding: 1rem 0.5rem;
     text-align: center;
     margin-bottom: 0.5rem;
+    position: relative;
+    z-index: 1;
 }
 .metric-value {
     color: var(--tdd-gold);
@@ -554,6 +610,11 @@ hr {
 .metric-delta {
     font-size: 0.85rem;
     margin-top: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    position: relative;
+    z-index: 1;
 }
 .metric-pctile {
     font-size: 0.7rem;

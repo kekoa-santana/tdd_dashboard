@@ -242,7 +242,7 @@ def _render_backtest_summary(
             "rmse_improvement_pct": "{:+.1f}%",
             "coverage_95": "{:.1%}",
             "coverage_80": "{:.1%}",
-        }, na_rep="—"),
+        }, na_rep=""),
         width='stretch',
         hide_index=True,
     )
@@ -755,16 +755,16 @@ def _render_preseason_comparison_tab() -> None:
                 if pre_col in row.index and pd.notna(row.get(pre_col)):
                     r[f"Pre {label}"] = fmt_stat(row[pre_col], key)
                 else:
-                    r[f"Pre {label}"] = "--"
+                    r[f"Pre {label}"] = ""
                 if proj_col in row.index and pd.notna(row.get(proj_col)):
                     r[f"Now {label}"] = fmt_stat(row[proj_col], key)
                 else:
-                    r[f"Now {label}"] = "--"
+                    r[f"Now {label}"] = ""
                 if delta_col in row.index and pd.notna(row.get(delta_col)):
                     d = row[delta_col] * 100
                     r[f"{label} Chg"] = f"{d:+.1f}pp"
                 else:
-                    r[f"{label} Chg"] = "--"
+                    r[f"{label} Chg"] = ""
             display_rows.append(r)
 
         display_df = pd.DataFrame(display_rows)
@@ -932,7 +932,7 @@ def _render_preseason_comparison_tab() -> None:
                 ax.set_xticklabels(dates, rotation=30, ha="right", fontsize=8)
                 ax.set_ylabel(f"{stat_label} (%)", color=SLATE, fontsize=9)
                 ax.set_title(
-                    f"{selected_name} — {stat_label} Evolution",
+                    f"{selected_name} | {stat_label} Evolution",
                     color=CREAM, fontsize=11, fontweight="bold", pad=8,
                 )
                 ax.tick_params(colors=SLATE, labelsize=8)
@@ -989,11 +989,11 @@ def _render_preseason_only_table(
             if proj_col in row.index and pd.notna(row.get(proj_col)):
                 r[f"Proj {label}"] = fmt_stat(row[proj_col], key)
             else:
-                r[f"Proj {label}"] = "--"
+                r[f"Proj {label}"] = ""
             if obs_col in row.index and pd.notna(row.get(obs_col)):
                 r[f"{PRIOR_SEASON} {label}"] = fmt_stat(row[obs_col], key)
             else:
-                r[f"{PRIOR_SEASON} {label}"] = "--"
+                r[f"{PRIOR_SEASON} {label}"] = ""
         display_rows.append(r)
 
     display_df = pd.DataFrame(display_rows)
@@ -1001,7 +1001,7 @@ def _render_preseason_only_table(
 
     st.caption(
         f"Showing {len(display_df)} players from preseason projection. "
-        "These are locked in and won't change — use for end-of-season accuracy review."
+        "These are locked in and won't change | use for end-of-season accuracy review."
     )
 
 
@@ -1010,7 +1010,7 @@ def _render_preseason_only_table(
 # ---------------------------------------------------------------------------
 
 def _render_season_tracker_tab() -> None:
-    """In-season accuracy tracker — stub until games begin."""
+    """In-season accuracy tracker | stub until games begin."""
     st.markdown(
         f'<div class="tdd-section-hdr">In-Season Accuracy Tracker</div>',
         unsafe_allow_html=True,
@@ -1029,10 +1029,10 @@ def _render_season_tracker_tab() -> None:
     )
 
     st.markdown(f"""
-- **Running MAE** for K% and BB% projections — updated weekly as new data arrives
-- **Projected vs Actual scatter plots** — one point per player, diagonal = perfect accuracy
-- **Calibration curve** — predicted probability vs actual frequency across deciles
-- **Weekly accuracy snapshots** — trend line showing whether the model improves as the season progresses
+- **Running MAE** for K% and BB% projections | updated weekly as new data arrives
+- **Projected vs Actual scatter plots** | one point per player, diagonal = perfect accuracy
+- **Calibration curve** | predicted probability vs actual frequency across deciles
+- **Weekly accuracy snapshots** | trend line showing whether the model improves as the season progresses
     """)
 
     st.markdown(

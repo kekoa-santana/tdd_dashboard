@@ -59,7 +59,7 @@ _PRIMARY_METRIC = {
 def _fmt(val: float | None, fmt: str) -> str:
     """Format a stat value according to its format type."""
     if val is None or pd.isna(val):
-        return "--"
+        return ""
     if fmt == "int":
         return f"{val:.0f}"
     if fmt == "dec1":

@@ -1,4 +1,4 @@
-"""Matchup Explorer page — head-to-head pitcher vs hitter breakdown."""
+"""Matchup Explorer page | head-to-head pitcher vs hitter breakdown."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from config import EMBER, GOLD, SAGE, SLATE, CREAM, DARK_BORDER, PITCH_DISPLAY
+from config import EMBER, GOLD, SAGE, SLATE, CREAM, DARK_BORDER, PITCH_DISPLAY, PITCH_TYPE_COLORS
 from services.data_loader import (
     load_baselines_arch,
     load_cluster_metadata,
@@ -18,10 +18,12 @@ from services.data_loader import (
     load_pitcher_arsenal,
     load_pitcher_location_grid,
     load_pitcher_offerings,
+    load_pitcher_pitch_locations,
     load_projections,
     load_hitter_archetypes, load_pitcher_archetypes,
     load_archetype_matchup_matrix,
 )
+from components.charts import create_pitch_density_plotly, create_hitter_zone_plotly
 from utils.formatters import delta_html, fmt_pct
 from utils.helpers import get_team_lookup
 from components.metric_cards import metric_card
@@ -269,14 +271,14 @@ def page_matchup_explorer() -> None:
         st.markdown(
             metric_card(
                 "Matchup Whiff",
-                fmt_pct(mwhiff) if pd.notna(mwhiff) else "--",
+                fmt_pct(mwhiff) if pd.notna(mwhiff) else "",
                 whiff_delta_html,
             ),
             unsafe_allow_html=True,
         )
     with m_cols[1]:
         st.markdown(
-            metric_card("Baseline Whiff", fmt_pct(bwhiff) if pd.notna(bwhiff) else "--"),
+            metric_card("Baseline Whiff", fmt_pct(bwhiff) if pd.notna(bwhiff) else ""),
             unsafe_allow_html=True,
         )
     with m_cols[2]:
@@ -317,7 +319,7 @@ def page_matchup_explorer() -> None:
                     arch_label_map[aid] = str(label)
 
             # Aggregate offerings by archetype
-            # pitcher_offerings lacks swings/whiffs — join from arsenal
+            # pitcher_offerings lacks swings/whiffs | join from arsenal
             p_ars_for_arch = arsenal_df[
                 (arsenal_df["pitcher_id"] == pitcher_id) & (arsenal_df["pitches"] >= 10)
             ].copy()
@@ -374,8 +376,8 @@ def page_matchup_explorer() -> None:
                     edge_color_cell = SLATE
                     edge_sym = "="
 
-                p_whiff_str = f"{p_whiff:.1%}" if pd.notna(p_whiff) else "--"
-                h_whiff_str = f"{h_whiff:.1%}" if pd.notna(h_whiff) else "--"
+                p_whiff_str = f"{p_whiff:.1%}" if pd.notna(p_whiff) else ""
+                h_whiff_str = f"{h_whiff:.1%}" if pd.notna(h_whiff) else ""
 
                 rows_html += (
                     f"<tr>"
@@ -425,48 +427,90 @@ def page_matchup_explorer() -> None:
                 f"Edge: green = pitcher advantage, red = hitter advantage.{platoon_note}"
             )
 
-    # --- Location Matchup Overlay ---
+    # --- Location Matchup (Plotly contours — same as schedule matchup analysis) ---
     ploc_df = load_pitcher_location_grid()
     hzone_df = load_hitter_zone_grid(career=True)
+    _raw_locs = load_pitcher_pitch_locations()
+
     if not ploc_df.empty and not hzone_df.empty:
         p_loc = ploc_df[ploc_df["pitcher_id"] == pitcher_id]
         h_zone = hzone_df[hzone_df["batter_id"] == batter_id]
-        if not p_loc.empty and not h_zone.empty:
-            from lib.zone_charts import plot_matchup_overlay
+        _p_raw = _raw_locs[_raw_locs["pitcher_id"] == pitcher_id] if not _raw_locs.empty else pd.DataFrame()
+        _pitch_loc_data = _p_raw if not _p_raw.empty else p_loc
 
-            st.markdown('<div class="tdd-section-hdr">Location Matchup</div>',
-                        unsafe_allow_html=True)
-            st.markdown(
-                f'<div class="tdd-context">'
-                f"Gold dots = where the pitcher throws each pitch. "
-                f'Background = hitter whiff vulnerability '
-                f'(<span style="color:var(--tdd-ember);">orange</span> = exploitable, '
-                f'<span style="color:var(--tdd-sage);">green</span> = strong). '
-                f"Catcher's perspective."
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+        _pitch_hand = pitcher_hand if pitcher_hand in ("L", "R") else None
+        _batter_stand = hitter_hand if hitter_hand in ("L", "R") else None
 
-            # Show top pitch types by usage
-            pt_totals = p_loc.groupby("pitch_type")["pitches"].sum().sort_values(ascending=False)
-            top_pts = pt_totals.head(4).index.tolist()
+        p_arsenal_me = arsenal_df[arsenal_df["pitcher_id"] == pitcher_id] if not arsenal_df.empty else pd.DataFrame()
 
-            stand_for_overlay = hitter_hand if hitter_hand in ("L", "R") else None
+        if not _pitch_loc_data.empty and not p_arsenal_me.empty:
+            total_pitches = p_arsenal_me["pitches"].sum()
+            p_arsenal_sorted = p_arsenal_me.copy()
+            p_arsenal_sorted["usage"] = p_arsenal_sorted["pitches"] / total_pitches
+            p_arsenal_sorted = p_arsenal_sorted.sort_values("usage", ascending=False)
 
-            # 2x2 grid for zone overlays
-            for row_start in range(0, len(top_pts), 2):
-                row_pts = top_pts[row_start:row_start + 2]
-                overlay_cols = st.columns([1, 1], gap="medium")
-                for i, pt in enumerate(row_pts):
-                    with overlay_cols[i]:
-                        fig_ov = plot_matchup_overlay(
-                            p_loc, h_zone, pitch_type=pt,
-                            pitcher_name=selected_pitcher, hitter_name=selected_hitter,
-                            batter_stand=stand_for_overlay,
-                            pitch_display_name=PITCH_DISPLAY.get(pt, pt),
+            primary_pts = p_arsenal_sorted[p_arsenal_sorted["usage"] >= 0.10]["pitch_type"].tolist()
+
+            if primary_pts:
+                st.markdown(
+                    '<div class="tdd-section-hdr">Location Matchup</div>',
+                    unsafe_allow_html=True,
+                )
+
+                for rank, pt in enumerate(primary_pts, 1):
+                    pt_name = PITCH_DISPLAY.get(pt, pt)
+                    _pt_row = p_arsenal_sorted[p_arsenal_sorted["pitch_type"] == pt]
+                    _pt_usage = f" ({_pt_row.iloc[0]['usage']:.0%})" if not _pt_row.empty else ""
+                    st.markdown(
+                        f'<div class="tdd-meta" style="margin:0.8rem 0 0.2rem;">'
+                        f'#{rank} {pt_name}{_pt_usage}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    matchup_cols = st.columns(2, gap="medium")
+                    with matchup_cols[0]:
+                        fig_density = create_pitch_density_plotly(
+                            _pitch_loc_data, pitch_types=[pt],
+                            pitcher_name=selected_pitcher,
+                            batter_stand=_batter_stand,
+                            pitch_hand=_pitch_hand,
                         )
-                        st.pyplot(fig_ov, use_container_width=True)
-                        plt.close(fig_ov)
+                        st.plotly_chart(
+                            fig_density, use_container_width=True,
+                            config={"displayModeBar": False, "scrollZoom": False},
+                            key=f"me_density_{pitcher_id}_{batter_id}_{pt}",
+                        )
+                    with matchup_cols[1]:
+                        if not h_zone.empty:
+                            fig_xwoba = create_hitter_zone_plotly(
+                                h_zone, metric="xwoba",
+                                batter_name=selected_hitter,
+                                batter_stand=_batter_stand,
+                                pitch_types=[pt] if "pitch_type" in h_zone.columns else None,
+                            )
+                            st.plotly_chart(
+                                fig_xwoba, use_container_width=True,
+                                config={"displayModeBar": False, "scrollZoom": False},
+                                key=f"me_xwoba_{pitcher_id}_{batter_id}_{pt}",
+                            )
+                        else:
+                            st.markdown(
+                                f'<div class="tdd-meta">No zone data for {selected_hitter}</div>',
+                                unsafe_allow_html=True,
+                            )
+
+                # Secondary pitches
+                secondary_pts = p_arsenal_sorted[p_arsenal_sorted["usage"] < 0.10]
+                if not secondary_pts.empty:
+                    sec_parts = [
+                        f"{PITCH_DISPLAY.get(row['pitch_type'], row['pitch_type'])} ({row['usage']:.0%})"
+                        for _, row in secondary_pts.iterrows()
+                    ]
+                    st.markdown(
+                        f'<div class="tdd-context" style="margin:0.3rem 0 0.8rem;">'
+                        f'Also throws: {", ".join(sec_parts)} | limited usage, not shown above'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
 
     # --- Side-by-side profile tables ---
     st.markdown('<div class="tdd-section-hdr">Individual Profiles</div>',
@@ -476,7 +520,7 @@ def page_matchup_explorer() -> None:
     with prof_col1:
         st.markdown(
             f'<div class="tdd-section-hdr" style="margin-bottom:0.5rem;">'
-            f'{selected_pitcher} — Arsenal</div>',
+            f'{selected_pitcher} | Arsenal</div>',
             unsafe_allow_html=True,
         )
         if not p_arsenal.empty:
@@ -488,7 +532,7 @@ def page_matchup_explorer() -> None:
                 )
 
     with prof_col2:
-        vuln_label = f"{selected_hitter} — Vulnerabilities"
+        vuln_label = f"{selected_hitter} | Vulnerabilities"
         if is_switch:
             vuln_label += f" (batting {hitter_hand})"
         st.markdown(
@@ -605,7 +649,7 @@ def page_matchup_explorer() -> None:
     st.markdown('<div class="tdd-section-hdr">Matchup Scouting Report</div>',
                 unsafe_allow_html=True)
 
-    # Overall summary — use blended edge (whiff lift + contact quality)
+    # Overall summary | use blended edge (whiff lift + contact quality)
     bullets_html = ""
     if pd.notna(mwhiff) and pd.notna(bwhiff):
         whiff_delta_pp = (mwhiff - bwhiff) * 100
@@ -637,7 +681,7 @@ def page_matchup_explorer() -> None:
                 )
         else:
             summary = (
-                f"Neutral matchup — no strong edge either way. "
+                f"Neutral matchup | no strong edge either way. "
                 f"The whiff rate shifts by only {whiff_delta_pp:+.1f}pp from baseline."
             )
 

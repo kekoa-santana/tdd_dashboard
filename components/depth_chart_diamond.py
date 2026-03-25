@@ -120,7 +120,7 @@ def render_diamond_chart(
             )
         else:
             label = pos
-            display = "—"
+            display = ""
             hover = f"{pos}: No starter assigned"
 
         marker_x.append(px)

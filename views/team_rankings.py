@@ -301,7 +301,7 @@ def _render_power_rankings(
         radar_scores = {
             "Offense": float(row.get("offense_score", 0) or 0),
             "Pitching": float(row.get("pitching_score", 0) or 0),
-            "Defense": float(row.get("defense_score", 0) or 0),
+            "Fielding": float(row.get("defense_score", 0) or 0),
             "Org": float(row.get("org_score", 0) or 0),
             "Health": float(row.get("health_depth_score", 0) or 0),
             "Schedule": float(row.get("schedule_score", 0) or 0),
@@ -322,7 +322,7 @@ def _render_power_rankings(
         # Score gauges
         gauges = ""
         for label, col in [("Offense", "offense_score"), ("Pitching", "pitching_score"),
-                            ("Defense", "defense_score"), ("Health/Depth", "health_depth_score")]:
+                            ("Fielding", "defense_score"), ("Health/Depth", "health_depth_score")]:
             val = row.get(col, None)
             if val is not None and not np.isnan(val):
                 gauges += _score_gauge(label, val)

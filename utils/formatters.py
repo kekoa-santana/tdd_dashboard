@@ -32,7 +32,7 @@ def fmt_stat(val: float, key: str, decimals: int = 1) -> str:
 def fmt_trad(val: float, fmt: str) -> str:
     """Format a traditional stat value."""
     if pd.isna(val):
-        return "--"
+        return ""
     if fmt == ".000":
         return f"{val:.3f}"
     if fmt == "0.00":

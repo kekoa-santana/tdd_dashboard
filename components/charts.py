@@ -1,4 +1,4 @@
-"""Matplotlib chart builders for the TDD Dashboard."""
+"""Chart builders for the TDD Dashboard (matplotlib + plotly)."""
 from __future__ import annotations
 
 import matplotlib as mpl
@@ -227,7 +227,7 @@ def create_game_stat_fig(
     ax.set_xlabel(xlabel, color=SLATE, fontsize=11)
     ax.set_ylabel("Probability", color=SLATE, fontsize=10)
     ax.set_title(
-        f"{pitcher_name} -- Projected {title_stat} Distribution ({CURRENT_SEASON})",
+        f"{pitcher_name} | Projected {title_stat} Distribution ({CURRENT_SEASON})",
         color=CREAM, fontsize=13, fontweight="bold", pad=12,
     )
     ax.tick_params(colors=SLATE, labelsize=9)
@@ -315,7 +315,7 @@ def create_arsenal_fig(
     ax.set_ylim(-0.6, n - 0.4)
     ax.set_xlabel("Velocity (mph)", color=SLATE, fontsize=10)
     ax.set_title(
-        f"{pitcher_name} -- Pitch Arsenal ({PRIOR_SEASON})",
+        f"{pitcher_name} | Pitch Arsenal ({PRIOR_SEASON})",
         color=CREAM, fontsize=12, fontweight="bold", pad=10,
     )
     ax.tick_params(axis="y", colors=CREAM, labelsize=10)
@@ -505,7 +505,7 @@ def create_hitter_vuln_fig(
         spine.set_visible(False)
 
     fig.suptitle(
-        f"{hitter_name} -- Pitch-Type Profile",
+        f"{hitter_name} | Pitch-Type Profile",
         color=CREAM, fontsize=12, fontweight="bold", y=1.02,
     )
 

@@ -105,8 +105,8 @@ _BREAKOUT_CSS = """
 }
 .breakout-card-badge {
     display: inline-block;
-    padding: 0.1rem 0.45rem;
-    border-radius: 3px;
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
     font-size: 0.68rem;
     font-weight: 700;
     letter-spacing: 0.3px;
@@ -169,7 +169,7 @@ _BREAKOUT_CSS = """
 def _fmt(val: float, spec: str) -> str:
     """Format a stat value."""
     if pd.isna(val):
-        return "--"
+        return ""
     if spec == "pct":
         return f"{val:.1%}"
     if spec == "rate":
@@ -502,9 +502,9 @@ def _render_hitters() -> None:
     df, teams_lookup = _merge_teams(df, "batter_id")
 
     _render_ranking_card(
-        df, "Hitter Breakout Candidates", "breakout_rank",
+        df.nsmallest(10, "breakout_rank"), "Hitter Breakout Candidates", "breakout_rank",
         "batter_name", "batter_id", "breakout_score", teams_lookup,
-        info_col="breakout_type", max_height=600, n_headshots=10,
+        info_col="breakout_type", n_headshots=10,
         detail_stats=_HITTER_DETAIL_STATS, wide=True,
         link_type="hitter", expandable=True,
     )
@@ -539,9 +539,9 @@ def _render_pitchers(is_starter: bool) -> None:
 
     role_label = "SP" if is_starter else "RP"
     _render_ranking_card(
-        df, f"{role_label} Breakout Candidates", "breakout_rank",
+        df.nsmallest(10, "breakout_rank"), f"{role_label} Breakout Candidates", "breakout_rank",
         "pitcher_name", "pitcher_id", "breakout_score", teams_lookup,
-        info_col="breakout_type", max_height=600, n_headshots=10,
+        info_col="breakout_type", n_headshots=10,
         detail_stats=_PITCHER_DETAIL_STATS, wide=True,
         link_type="pitcher", expandable=True,
     )

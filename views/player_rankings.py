@@ -97,9 +97,13 @@ _CSS = """
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0;
     padding-bottom: 0.4rem;
     border-bottom: 1px solid var(--tdd-dark-border);
+    background: var(--tdd-dark);
+    position: sticky;
+    top: 0;
+    z-index: 10;
 }
 .lb-title {
     color: var(--tdd-gold);
@@ -118,9 +122,6 @@ _CSS = """
 }
 .lb-scroll[style*="max-height"] {
     overflow-y: auto;
-    padding-top: 3.5rem;
-    margin-top: -3.5rem;
-    padding-bottom: 1rem;
 }
 .lb-scroll::-webkit-scrollbar {
     width: 6px;
@@ -366,7 +367,7 @@ PITCHER_TALENT_STATS: list[tuple[str, str, str]] = [
 
 def _fmt_detail(val, fmt: str) -> str:
     if pd.isna(val):
-        return "--"
+        return ""
     if fmt == "int":
         return str(int(round(val)))
     if fmt == ".000":
@@ -575,10 +576,10 @@ def _render_ranking_card(
         scroll_style = f' style="max-height:{max_height}px;"' if max_height > 0 else ""
         html = (
             f'<div class="{card_class}">'
+            f'<div class="lb-scroll"{scroll_style}>'
             f'<div class="lb-title-row">'
             f'<span class="lb-title">{title}{count_html}</span>'
             f'</div>'
-            f'<div class="lb-scroll"{scroll_style}>'
             + "".join(rows_html)
             + '</div></div>'
         )
@@ -586,10 +587,10 @@ def _render_ranking_card(
         scroll_style = f' style="max-height:{max_height}px;"' if max_height > 0 else ""
         html = (
             f'<div class="{card_class}">'
+            f'<div class="lb-scroll"{scroll_style}>'
             f'<div class="lb-title-row">'
             f'<span class="lb-title">{title}{count_html}</span>'
             f'</div>'
-            f'<div class="lb-scroll"{scroll_style}>'
             + "".join(rows_html)
             + '</div></div>'
         )
@@ -845,7 +846,7 @@ def _render_prospect_rankings(df: pd.DataFrame) -> None:
         if col in display_df.columns:
             fmt[col] = f
 
-    styler = display_df.style.format(fmt, na_rep="—")
+    styler = display_df.style.format(fmt, na_rep="")
     if "Rating" in display_df.columns:
         styler = styler.map(_score_color, subset=["Rating"])
     if "Tier" in display_df.columns:
@@ -955,7 +956,7 @@ def _render_pitching_prospect_rankings(df: pd.DataFrame) -> None:
         if col in display_df.columns:
             fmt[col] = f
 
-    styler = display_df.style.format(fmt, na_rep="—")
+    styler = display_df.style.format(fmt, na_rep="")
     if "Rating" in display_df.columns:
         styler = styler.map(_score_color, subset=["Rating"])
     if "Tier" in display_df.columns:
@@ -1052,7 +1053,7 @@ def _render_prospect_readiness(df: pd.DataFrame) -> None:
         if col in display_df.columns:
             fmt[col] = f
 
-    styler = display_df.style.format(fmt, na_rep="—")
+    styler = display_df.style.format(fmt, na_rep="")
     if "Tier" in display_df.columns:
         styler = styler.map(_style_readiness_tier, subset=["Tier"])
 
@@ -1094,7 +1095,7 @@ def _render_prospect_readiness(df: pd.DataFrame) -> None:
                 f_display.style.format({
                     "Factor": "{:.3f}", "P25": "{:.3f}", "P75": "{:.3f}",
                     "Sample Size": "{:,.0f}",
-                }, na_rep="—"),
+                }, na_rep=""),
                 width='stretch',
                 hide_index=True,
             )
