@@ -450,8 +450,7 @@ def _render_hitter_table(df: pd.DataFrame, teams_lookup: dict[int, str]) -> None
     _render_ranking_card(
         filtered, "All Candidates", "breakout_rank",
         "batter_name", "batter_id", "breakout_score", teams_lookup,
-        info_col="breakout_type", max_height=500, n_headshots=5,
-        wide=True, link_type="hitter",
+        info_col="breakout_type", max_height=500,         wide=True, link_type="hitter",
         hover_stats=_HITTER_DETAIL_STATS,
     )
 
@@ -484,8 +483,7 @@ def _render_pitcher_table(df: pd.DataFrame, role_label: str, teams_lookup: dict[
     _render_ranking_card(
         filtered, "All Candidates", "breakout_rank",
         "pitcher_name", "pitcher_id", "breakout_score", teams_lookup,
-        info_col="breakout_type", max_height=500, n_headshots=5,
-        wide=True, link_type="pitcher",
+        info_col="breakout_type", max_height=500,         wide=True, link_type="pitcher",
         hover_stats=_PITCHER_DETAIL_STATS,
     )
 
@@ -504,8 +502,7 @@ def _render_hitters() -> None:
     _render_ranking_card(
         df.nsmallest(10, "breakout_rank"), "Hitter Breakout Candidates", "breakout_rank",
         "batter_name", "batter_id", "breakout_score", teams_lookup,
-        info_col="breakout_type", n_headshots=10,
-        detail_stats=_HITTER_DETAIL_STATS, wide=True,
+        info_col="breakout_type",         detail_stats=_HITTER_DETAIL_STATS, wide=True,
         link_type="hitter", expandable=True,
     )
 
@@ -541,8 +538,7 @@ def _render_pitchers(is_starter: bool) -> None:
     _render_ranking_card(
         df.nsmallest(10, "breakout_rank"), f"{role_label} Breakout Candidates", "breakout_rank",
         "pitcher_name", "pitcher_id", "breakout_score", teams_lookup,
-        info_col="breakout_type", n_headshots=10,
-        detail_stats=_PITCHER_DETAIL_STATS, wide=True,
+        info_col="breakout_type",         detail_stats=_PITCHER_DETAIL_STATS, wide=True,
         link_type="pitcher", expandable=True,
     )
 

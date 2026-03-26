@@ -550,6 +550,35 @@ hr {
 .lb-card-wide {
     max-width: 520px;
 }
+.lb-card-full {
+    max-width: none;
+}
+
+/* Mobile: hide inline stats and team on all leaderboards.
+   Full-width cards: tap to expand for details.
+   Positional cards: hover tooltip still works on touch. */
+@media (max-width: 768px) {
+    .lb-card .lb-stat-cell,
+    .lb-card .lb-team,
+    .lb-card .lb-info {
+        display: none;
+    }
+
+    /* Force Streamlit columns to stack vertically on mobile */
+    div[data-testid="stHorizontalBlock"] {
+        flex-direction: column !important;
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+    }
+
+    /* Extra padding around leaderboard cards for easier finger scrolling */
+    .lb-card {
+        margin-bottom: 2.5rem;
+        padding-bottom: 1.2rem;
+    }
+}
 .lb-title-row {
     padding: 0 0 0.4rem;
     border-bottom: 1px solid var(--tdd-dark-border);
@@ -648,6 +677,24 @@ hr {
     color: var(--tdd-slate);
     font-size: 0.7rem;
     margin-left: 0.3rem;
+}
+.lb-stat-cell {
+    margin-left: 0.6rem;
+}
+.lb-stat-lbl {
+    color: var(--tdd-slate);
+    font-size: 0.62rem;
+    margin-right: 2px;
+}
+.lb-stat-val {
+    color: var(--tdd-cream);
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+.lb-info {
+    color: var(--tdd-slate);
+    font-size: 0.8rem;
+    margin-right: 0.3rem;
 }
 
 /* Brand header */
