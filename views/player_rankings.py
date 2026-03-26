@@ -400,7 +400,7 @@ def _render_ranking_card(
     projected: bool = False,
     info_col: str | None = None,
     max_height: int = 0,
-    n_headshots: int = 5,
+    n_headshots: int = 999,
     detail_stats: list[tuple[str, str, str]] | None = None,
     wide: bool = False,
     link_type: str = "",
@@ -439,9 +439,7 @@ def _render_ranking_card(
         rank = i  # display rank matches sort order
         rank_class = "lb-rank-top lb-rank" if i <= 5 else "lb-rank"
 
-        hs = ""
-        if i <= n_headshots:
-            hs = f'<span class="lb-headshot">{headshot_html(pid, size=50)}</span>'
+        hs = f'<span class="lb-headshot">{headshot_html(pid, size=50)}</span>'
 
         team = teams_lookup.get(pid, "")
         team_html = f'<span class="lb-team" data-team="{team}">{team}</span>' if team else ""
@@ -571,7 +569,7 @@ def _render_ranking_card(
             rows_html.append(summary_row)
 
     count_html = f'<span class="lb-subtitle">{len(work)}</span>'
-    card_class = "lb-card lb-card-wide" if wide else "lb-card"
+    card_class = "lb-card lb-card-full" if wide else "lb-card"
 
     if expandable:
         scroll_style = f' style="max-height:{max_height}px;"' if max_height > 0 else ""
@@ -654,8 +652,7 @@ def _render_batter_rankings(
         df, section_title, rank_col, "batter_name", "batter_id",
         score_col, teams_lookup,
         projected=is_projected,
-        info_col="position", max_height=600, n_headshots=10,
-        detail_stats=detail_stats, wide=True, link_type="hitter",
+        info_col="position", max_height=600,         detail_stats=detail_stats, wide=True, link_type="hitter",
         expandable=True, archetype_lookup=arch_lookup,
     )
 
@@ -673,7 +670,7 @@ def _render_batter_rankings(
                     pos_df, pos, pos_rank_col, "batter_name", "batter_id",
                     score_col, teams_lookup,
                     projected=is_projected,
-                    max_height=520, n_headshots=3, link_type="hitter",
+                    max_height=520,  link_type="hitter",
                     hover_stats=detail_stats,
                 )
 
@@ -738,8 +735,7 @@ def _render_pitcher_rankings(
             sp_df, sp_label, rank_col, "pitcher_name", "pitcher_id",
             score_col, teams_lookup,
             projected=is_projected,
-            max_height=600, n_headshots=10,
-            detail_stats=detail_stats, wide=True, link_type="pitcher",
+            max_height=600,             detail_stats=detail_stats, wide=True, link_type="pitcher",
             expandable=True, archetype_lookup=arch_lookup,
         )
 
@@ -751,8 +747,7 @@ def _render_pitcher_rankings(
             rp_df, rp_label, rank_col, "pitcher_name", "pitcher_id",
             score_col, teams_lookup,
             projected=is_projected,
-            max_height=600, n_headshots=10,
-            detail_stats=detail_stats, wide=True, link_type="pitcher",
+            max_height=600,             detail_stats=detail_stats, wide=True, link_type="pitcher",
             expandable=True, archetype_lookup=arch_lookup,
         )
 

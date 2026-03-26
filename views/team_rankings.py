@@ -214,6 +214,7 @@ def _render_power_rankings(
     df: pd.DataFrame,
     profiles: pd.DataFrame,
     elo_df: pd.DataFrame,
+    ceiling: bool = False,
 ) -> None:
     """Section 1: expandable power rankings 1-30."""
     # Merge profile scores not in rankings (org_score, schedule_score)
@@ -271,27 +272,20 @@ def _render_power_rankings(
             f'</span>'
         )
 
-        # Summary stats: projected wins + scouting diamond ratings
+        # Summary stats: projected wins + composition scores (×10 for 1-10 display)
         stats_parts = []
         if pyth_w is not None and not np.isnan(pyth_w):
             stats_parts.append(f'<span class="tr-stat">W: <b>{pyth_w:.0f}</b></span>')
 
-        # Use team scouting grades from profiles instead of ELO
-        prof_row = profiles[profiles["abbreviation"] == abbr]
-        if not prof_row.empty:
-            lu_d = prof_row["lineup_diamond"].iloc[0] if "lineup_diamond" in prof_row.columns else None
-            rot_d = prof_row["rotation_diamond"].iloc[0] if "rotation_diamond" in prof_row.columns else None
-            bp_d = prof_row["bullpen_diamond"].iloc[0] if "bullpen_diamond" in prof_row.columns else None
-            if lu_d is not None and not np.isnan(lu_d):
-                stats_parts.append(f'<span class="tr-stat">Lineup: <b>{lu_d:.1f}</b></span>')
-            if rot_d is not None and not np.isnan(rot_d):
-                stats_parts.append(f'<span class="tr-stat">Rotation: <b>{rot_d:.1f}</b></span>')
-            if bp_d is not None and not np.isnan(bp_d):
-                stats_parts.append(f'<span class="tr-stat">Bullpen: <b>{bp_d:.1f}</b></span>')
-        elif off_elo is not None and not np.isnan(off_elo):
-            stats_parts.append(f'<span class="tr-stat">Off: <b>{off_elo:.0f}</b></span>')
-            if pit_elo is not None and not np.isnan(pit_elo):
-                stats_parts.append(f'<span class="tr-stat">Pit: <b>{pit_elo:.0f}</b></span>')
+        off_s = float(row.get("offense_score", 0) or 0)
+        rot_s = float(row.get("rotation_score", 0) or 0)
+        bp_s = float(row.get("bullpen_score", 0) or 0)
+        if off_s > 0:
+            stats_parts.append(f'<span class="tr-stat">Lineup: <b>{off_s * 10:.1f}</b></span>')
+        if rot_s > 0:
+            stats_parts.append(f'<span class="tr-stat">Rotation: <b>{rot_s * 10:.1f}</b></span>')
+        if bp_s > 0:
+            stats_parts.append(f'<span class="tr-stat">Bullpen: <b>{bp_s * 10:.1f}</b></span>')
         stats_html = "".join(stats_parts)
 
         summary = (
@@ -307,13 +301,21 @@ def _render_power_rankings(
 
         # ── expanded detail ──
         # Composition bars with league rank (replaces radar chart)
-        _comp_dims = [
-            ("Offense", "offense_score"),
-            ("Rotation", "rotation_score"),
-            ("Bullpen", "bullpen_score"),
-            ("Fielding", "defense_score"),
-            ("Health/Depth", "health_depth_score"),
-        ]
+        if ceiling:
+            _comp_dims = [
+                ("Offense", "offense_ceiling", "offense_score"),
+                ("Pitching", "pitching_ceiling", "pitching_score"),
+                ("Fielding", "defense_score", "defense_score"),
+                ("Health/Depth", "health_depth_score", "health_depth_score"),
+            ]
+        else:
+            _comp_dims = [
+                ("Offense", "offense_score", "offense_ceiling"),
+                ("Rotation", "rotation_score", "rotation_score"),
+                ("Bullpen", "bullpen_score", "bullpen_score"),
+                ("Fielding", "defense_score", "defense_score"),
+                ("Health/Depth", "health_depth_score", "health_depth_score"),
+            ]
 
         def _comp_bar(label: str, score: float, league_rank: int) -> str:
             pct = max(0, min(100, score * 100))
@@ -332,11 +334,13 @@ def _render_power_rankings(
             )
 
         comp_html = ""
-        for label, col in _comp_dims:
-            val = float(row.get(col, 0) or 0)
+        for dim in _comp_dims:
+            label, col = dim[0], dim[1]
+            val = float(row.get(col, row.get(dim[2], 0)) or 0)
             # Compute league rank for this dimension
-            if col in df.columns:
-                lg_rank = int((df[col].rank(ascending=False, method="min")).loc[row.name])
+            rank_col = col if col in df.columns else dim[2]
+            if rank_col in df.columns:
+                lg_rank = int((df[rank_col].rank(ascending=False, method="min")).loc[row.name])
             else:
                 lg_rank = 0
             comp_html += _comp_bar(label, val, lg_rank)
@@ -591,25 +595,40 @@ def page_team_rankings() -> None:
 
     # ── Section 1: Power Rankings ──
     st.markdown('<div class="tr-section">Power Rankings</div>', unsafe_allow_html=True)
-    _render_power_rankings(filtered, profiles, elo_df)
 
-    # ── Section 2: TDD Scouting Grade Leaderboards ──
-    st.markdown('<div class="tr-section">Team Scouting Grades</div>', unsafe_allow_html=True)
+    view_mode = st.radio(
+        "View",
+        ["Current Roster", "Talent Ceiling"],
+        horizontal=True,
+        key="tr_view_mode",
+        label_visibility="collapsed",
+    )
 
-    # Use team_profiles which has the scouting-grade aggregations
-    grade_source = apply_division_filter(profiles, category)
+    _render_power_rankings(filtered, profiles, elo_df, ceiling=(view_mode == "Talent Ceiling"))
 
-    has_grades = all(c in grade_source.columns for c in ["lineup_diamond", "rotation_diamond", "bullpen_diamond"])
-    if has_grades:
+    # ── Section 2: Top Lineups / Rotations / Bullpens (composition scores) ──
+    # Use the same scores that drive the power ranking composition bars (×10)
+    lb_source = filtered.copy()
+    _score_map = {
+        "offense_10": "offense_score",
+        "rotation_10": "rotation_score",
+        "bullpen_10": "bullpen_score",
+    }
+    for dest, src in _score_map.items():
+        if src in lb_source.columns:
+            lb_source[dest] = lb_source[src].fillna(0) * 10
+
+    has_scores = all(dest in lb_source.columns for dest in _score_map)
+    if has_scores:
         c1, c2, c3 = st.columns(3)
         with c1:
-            _render_diamond_leaderboard(grade_source, "Top Lineups", "lineup_diamond")
+            _render_diamond_leaderboard(lb_source, "Top Lineups", "offense_10")
         with c2:
-            _render_diamond_leaderboard(grade_source, "Top Rotations", "rotation_diamond")
+            _render_diamond_leaderboard(lb_source, "Top Rotations", "rotation_10")
         with c3:
-            _render_diamond_leaderboard(grade_source, "Top Bullpens", "bullpen_diamond")
+            _render_diamond_leaderboard(lb_source, "Top Bullpens", "bullpen_10")
     else:
-        # Fallback to ELO if scouting grades not yet computed
+        # Fallback to ELO if composition scores not available
         elo_source = elo_df if not elo_df.empty else rankings
         elo_source = apply_division_filter(elo_source, category)
         c1, c2, c3 = st.columns(3)
