@@ -173,6 +173,14 @@ def load_game_info() -> pd.DataFrame:
 
 @st.cache_data(ttl=_DATA_TTL)
 def load_player_teams() -> pd.DataFrame:
+    """Load player-to-team mapping.
+
+    Prefers roster.parquet (has lineup positions + starter flags).
+    Falls back to player_teams.parquet for backwards compatibility.
+    """
+    roster_path = DASHBOARD_DIR / "roster.parquet"
+    if roster_path.exists():
+        return pd.read_parquet(roster_path)
     path = DASHBOARD_DIR / "player_teams.parquet"
     if not path.exists():
         return pd.DataFrame()

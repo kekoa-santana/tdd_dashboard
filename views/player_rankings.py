@@ -531,6 +531,26 @@ def _render_ranking_card(
                     f'</div>'
                 )
 
+            # Scouting grades (20-80 scale)
+            if link_type == "pitcher":
+                _grade_cols = [("Stuff", "grade_stuff"), ("Command", "grade_command"), ("Durability", "grade_durability")]
+            else:
+                _grade_cols = [("Hit", "grade_hit"), ("Power", "grade_power"), ("Speed", "grade_speed"), ("Fielding", "grade_fielding"), ("Discipline", "grade_discipline")]
+            _grade_parts = []
+            for _lbl, _col in _grade_cols:
+                _gv = row.get(_col)
+                if pd.notna(_gv):
+                    _grade_parts.append(
+                        f'<span style="color:var(--tdd-slate); font-size:0.78rem;">{_lbl}: </span>'
+                        f'<span style="color:var(--tdd-cream); font-size:0.78rem; font-weight:600;">{int(_gv)}</span>'
+                    )
+            if _grade_parts:
+                detail_parts.append(
+                    f'<div style="display:flex; flex-wrap:wrap; gap:0.8rem; margin-bottom:0.5rem;">'
+                    + "".join(_grade_parts)
+                    + '</div>'
+                )
+
             # Key stats from detail_stats
             if has_detail:
                 stat_cells: list[str] = []

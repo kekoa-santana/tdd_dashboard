@@ -629,33 +629,25 @@ def _render_depth_chart_tab(
     team_pitchers: pd.DataFrame | None = None,
     p_proj: pd.DataFrame | None = None,
 ) -> None:
-    """Render a true depth chart based on actual playing time."""
-    from services.data_loader import load_lineup_priors
+    """Render depth chart from roster.parquet lineup positions."""
     if team_pitchers is None:
         team_pitchers = pd.DataFrame()
     if p_proj is None:
         p_proj = pd.DataFrame()
 
-    # Current roster for this team
-    team_pids = set(
-        teams_df[teams_df["team_abbr"] == selected_team]["player_id"].astype(int)
-    )
-    if not team_pids:
+    # Load roster — contains lineup_position + is_depth_starter from
+    # actual current-season lineups (set by precompute run_roster).
+    roster = load_roster()
+    if roster.empty:
         st.info("No roster data available.")
         return
 
-    # Name lookup from roster
-    roster = load_roster()
-    name_map: dict[int, str] = {}
-    if not roster.empty:
-        for _, r in roster.iterrows():
-            name_map[int(r["player_id"])] = r["player_name"]
+    team_roster = roster[roster["team_abbr"] == selected_team].copy()
+    if team_roster.empty:
+        st.info("No roster data for this team.")
+        return
 
-    # Lineup priors — position history for all players (team-agnostic)
-    priors = load_lineup_priors()
-
-    # Filter to current team roster
-    team_priors = priors[priors["player_id"].isin(team_pids)].copy() if not priors.empty else pd.DataFrame()
+    team_pids = set(team_roster["player_id"].astype(int))
 
     # Pitcher rankings for rotation/bullpen
     p_rank = load_rankings("pitchers")
@@ -670,22 +662,30 @@ def _render_depth_chart_tab(
     # --- Position Depth Chart ---
     st.markdown("### Position Players")
 
-    # Determine each player's primary position (where they have the most starts).
-    # A player is only eligible to be the starter at their primary position.
-    primary_pos: dict[int, str] = {}  # player_id -> position with most starts
-    if not team_priors.empty:
-        for pid, grp in team_priors.groupby("player_id"):
-            best = grp.sort_values("starts", ascending=False).iloc[0]
-            primary_pos[int(pid)] = best["position"]
-
-    assigned_starters: set[int] = set()
+    has_lineup = "lineup_position" in team_roster.columns
+    has_starter = "is_depth_starter" in team_roster.columns
 
     for pos in _HITTER_POSITIONS:
-        pos_players = team_priors[team_priors["position"] == pos].sort_values(
-            "starts", ascending=False,
-        ) if not team_priors.empty else pd.DataFrame()
+        # Starter: player flagged is_depth_starter at this lineup_position
+        starter_row = None
+        bench_at_pos: list[pd.Series] = []
 
-        if pos_players.empty:
+        if has_lineup and has_starter:
+            starters_here = team_roster[
+                (team_roster["lineup_position"] == pos)
+                & (team_roster["is_depth_starter"] == True)  # noqa: E712
+            ]
+            if not starters_here.empty:
+                starter_row = starters_here.iloc[0]
+
+            # Bench players who have also started at this position
+            bench_here = team_roster[
+                (team_roster["lineup_position"] == pos)
+                & (team_roster["is_depth_starter"] == False)  # noqa: E712
+            ]
+            bench_at_pos = [row for _, row in bench_here.iterrows()]
+
+        if starter_row is None and not bench_at_pos:
             st.markdown(
                 f'<div style="display:flex; align-items:center; gap:0.5rem; '
                 f'padding:0.4rem 0; border-bottom:1px solid var(--tdd-dark-border-faint);">'
@@ -698,44 +698,16 @@ def _render_depth_chart_tab(
             continue
 
         player_parts: list[str] = []
-        found_starter = False
-        for _, row in pos_players.iterrows():
-            pid = int(row["player_id"])
-            if pid in assigned_starters:
-                continue  # already slotted as starter elsewhere
-
-            name = name_map.get(pid, f"ID {pid}")
-            starts = int(row["starts"])
-
-            # Starter: first player whose primary position is this one
-            if not found_starter and primary_pos.get(pid) == pos:
-                found_starter = True
-                assigned_starters.add(pid)
-                player_parts.append(
-                    f'<span style="color:var(--tdd-cream); font-weight:600; '
-                    f'font-size:0.88rem;">{name}</span>'
-                    f'<span class="tdd-context" style="margin-left:4px;">'
-                    f'({starts}g)</span>'
-                )
-            else:
-                player_parts.append(
-                    f'<span class="tdd-context">{name} ({starts}g)</span>'
-                )
-
-            if len(player_parts) >= 4:
-                break
-
-        if not player_parts:
-            st.markdown(
-                f'<div style="display:flex; align-items:center; gap:0.5rem; '
-                f'padding:0.4rem 0; border-bottom:1px solid var(--tdd-dark-border-faint);">'
-                f'<span style="color:var(--tdd-gold); font-weight:700; '
-                f'min-width:2.2rem; font-size:0.9rem;">{pos}</span>'
-                f'<span class="tdd-context">No data</span>'
-                f'</div>',
-                unsafe_allow_html=True,
+        if starter_row is not None:
+            name = starter_row["player_name"]
+            player_parts.append(
+                f'<span style="color:var(--tdd-cream); font-weight:600; '
+                f'font-size:0.88rem;">{name}</span>'
             )
-            continue
+        for brow in bench_at_pos[:3]:
+            player_parts.append(
+                f'<span class="tdd-context">{brow["player_name"]}</span>'
+            )
 
         st.markdown(
             f'<div style="display:flex; align-items:center; gap:0.5rem; '
