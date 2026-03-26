@@ -1266,6 +1266,34 @@ def page_player_profile() -> None:
     with hdr_right:
         st.markdown(header_html, unsafe_allow_html=True)
 
+    # --- Scouting grades for regular (non-two-way) players ---
+    if not is_two_way_player and not _rank_row.empty:
+        _rr_grades = _rank_row.iloc[0]
+        if player_type == "Pitcher":
+            _g_parts = []
+            for _lbl, _col in [("Stuff", "grade_stuff"), ("Command", "grade_command"), ("Durability", "grade_durability")]:
+                _v = _rr_grades.get(_col)
+                if pd.notna(_v):
+                    _g_parts.append(f"{_lbl}:{int(_v)}")
+            if _g_parts:
+                st.markdown(
+                    f'<div style="margin-top:-8px; margin-bottom:8px; font-size:0.85em;">'
+                    f'<span style="color:var(--tdd-slate);">{" ".join(_g_parts)}</span></div>',
+                    unsafe_allow_html=True,
+                )
+        else:
+            _g_parts = []
+            for _lbl, _col in [("Hit", "grade_hit"), ("Power", "grade_power"), ("Speed", "grade_speed"), ("Fielding", "grade_fielding"), ("Discipline", "grade_discipline")]:
+                _v = _rr_grades.get(_col)
+                if pd.notna(_v):
+                    _g_parts.append(f"{_lbl}:{int(_v)}")
+            if _g_parts:
+                st.markdown(
+                    f'<div style="margin-top:-8px; margin-bottom:8px; font-size:0.85em;">'
+                    f'<span style="color:var(--tdd-slate);">{" ".join(_g_parts)}</span></div>',
+                    unsafe_allow_html=True,
+                )
+
     # --- Two-Way Player: show both batting + pitching scouting grades ---
     if is_two_way_player and two_way_pitcher_row is not None:
         # Load rankings for scouting grades
@@ -1282,8 +1310,8 @@ def page_player_profile() -> None:
             tw_parts.append(
                 f'<span style="color:var(--tdd-gold); font-weight:700;">Batting: {h_dr_s}</span>'
                 f' <span style="color:var(--tdd-slate); font-size:0.85em;">'
-                f'H:{int(hr.get("grade_hit", 0))} P:{int(hr.get("grade_power", 0))} '
-                f'Sp:{int(hr.get("grade_speed", 0))} D:{int(hr.get("grade_discipline", 0))}</span>'
+                f'Hit:{int(hr.get("grade_hit", 0))} Power:{int(hr.get("grade_power", 0))} '
+                f'Speed:{int(hr.get("grade_speed", 0))} Discipline:{int(hr.get("grade_discipline", 0))}</span>'
             )
         if not p_row.empty:
             pr = p_row.iloc[0]
@@ -1292,8 +1320,8 @@ def page_player_profile() -> None:
             tw_parts.append(
                 f'<span style="color:var(--tdd-gold); font-weight:700;">Pitching: {p_dr_s}</span>'
                 f' <span style="color:var(--tdd-slate); font-size:0.85em;">'
-                f'St:{int(pr.get("grade_stuff", 0))} Cm:{int(pr.get("grade_command", 0))} '
-                f'Du:{int(pr.get("grade_durability", 0))}</span>'
+                f'Stuff:{int(pr.get("grade_stuff", 0))} Command:{int(pr.get("grade_command", 0))} '
+                f'Durability:{int(pr.get("grade_durability", 0))}</span>'
             )
         if tw_parts:
             tw_html = (
