@@ -13,6 +13,7 @@ from services.data_loader import (
 )
 from components.headshot import headshot_html
 from components.diamond_rating import diamond_rating_html
+from lib.diamond_rating import score_to_diamonds
 
 _POSITIONS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"]
 
@@ -29,9 +30,15 @@ def _load_hitter_pool() -> pd.DataFrame:
     if rankings.empty:
         return pd.DataFrame()
 
-    df = rankings[["batter_id", "batter_name", "position", "diamond_rating",
-                    "tdd_value_score", "grade_hit", "grade_power",
-                    "grade_speed", "grade_discipline"]].copy()
+    cols = ["batter_id", "batter_name", "position",
+            "tdd_value_score", "grade_hit", "grade_power",
+            "grade_speed", "grade_discipline"]
+    df = rankings[[c for c in cols if c in rankings.columns]].copy()
+    # Derive diamond_rating from tdd_value_score
+    if "tdd_value_score" in df.columns:
+        df["diamond_rating"] = df["tdd_value_score"].apply(score_to_diamonds)
+    else:
+        df["diamond_rating"] = 5.0
 
     # Merge team from roster (same source as team overview depth chart)
     if not roster.empty and "team_abbr" in roster.columns:

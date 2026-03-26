@@ -1,14 +1,18 @@
 """Diamond Rating — TDD's 0-10 diamond scale for player quality.
 
-The diamond rating is pre-computed in the rankings parquets via the 20-80
-scouting grade system (src/models/scouting_grades.py). The ``diamond_rating``
-column is the single source of truth. When not available, falls back to
-converting ``tdd_value_score`` (0-1) to the 0-10 scale.
+The display diamond rating is always derived from ``tdd_value_score`` (0-1)
+via ``score_to_diamonds()``.  This production-weighted composite is the
+single source of truth for all leaderboards, team pages, and game cards.
+
+A separate ``tools_rating`` column (0-10, league-relative) exists in the
+rankings parquets for scouting-only evaluation.  It is shown on the player
+profile page as "Tools Grade" and is NOT used for sorting or display
+diamond ratings elsewhere.
 
 Scale: 0-10 (continuous, 1 decimal)
-  8.0+ = Elite (all tools 60+ grade)
-  6.5+ = Above Average (plus tools)
-  5.0  = MLB Average (all 50-grade tools)
+  8.0+ = Elite
+  6.5+ = Above Average
+  5.0  = MLB Average
   3.5+ = Below Average
   <3.5 = Developing / Fringe
 """
