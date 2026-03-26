@@ -2866,7 +2866,13 @@ def page_schedule() -> None:
         unsafe_allow_html=True,
     )
 
-    today = date.today()
+    # Anchor "today" to the data date, not the system clock (server may be UTC)
+    meta = load_update_metadata()
+    data_date_str = meta.get("game_date", "")
+    if data_date_str:
+        today = date.fromisoformat(data_date_str)
+    else:
+        today = date.today()
 
     # Date range: 7 days back through 7 days forward
     dates = [today + timedelta(days=d) for d in range(-7, 8)]
@@ -2885,8 +2891,6 @@ def page_schedule() -> None:
     )
     selected_date = dates[date_labels.index(selected_label)]
     is_today = selected_date == today
-
-    meta = load_update_metadata()
 
     if is_today:
         # Today: use cached parquets (sims + lineups)
