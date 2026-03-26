@@ -178,7 +178,8 @@ def _render_team_profile_tab(
             if col in all_tp.columns:
                 ranked = all_tp[col].rank(ascending=False, method="min")
                 idx = all_tp.index[all_tp["abbreviation"] == selected_team]
-                _ranks[col] = int(ranked.loc[idx].iloc[0]) if len(idx) > 0 else 0
+                val = ranked.loc[idx].iloc[0] if len(idx) > 0 else 0
+                _ranks[col] = int(val) if pd.notna(val) else 0
 
         # Defense/depth ranks from team_rankings
         all_tr = load_team_rankings()
@@ -186,7 +187,8 @@ def _render_team_profile_tab(
             if col in all_tr.columns:
                 ranked = all_tr[col].rank(ascending=False, method="min")
                 idx = all_tr.index[all_tr["abbreviation"] == selected_team]
-                _ranks[col] = int(ranked.loc[idx].iloc[0]) if len(idx) > 0 else 0
+                val = ranked.loc[idx].iloc[0] if len(idx) > 0 else 0
+                _ranks[col] = int(val) if pd.notna(val) else 0
 
         # ── Top 10 players with league-wide positional rank ──────────
         st.markdown(

@@ -1,10 +1,12 @@
-"""Division Standings -- preseason projected standings by division."""
+"""Division Standings -- current + preseason projected standings by division."""
 from __future__ import annotations
+
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-from config import GOLD, SAGE, SLATE, DARK_BORDER
+from config import GOLD, SAGE, SLATE, DARK_BORDER, DASHBOARD_DIR
 from components.team_logo import team_logo_html
 from services.data_loader import load_team_rankings
 
@@ -25,6 +27,14 @@ _TIER_COLORS = {
     "Competitive": SLATE,
     "Rebuilding": "#7B8FA6",
 }
+
+_PRESEASON_SNAPSHOT = DASHBOARD_DIR / "snapshots" / "team_rankings_2026_preseason.parquet"
+
+
+def _load_preseason_rankings() -> pd.DataFrame:
+    if not _PRESEASON_SNAPSHOT.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(_PRESEASON_SNAPSHOT)
 
 
 def _division_card(teams: pd.DataFrame, short_name: str) -> str:
@@ -67,21 +77,8 @@ def _division_card(teams: pd.DataFrame, short_name: str) -> str:
     )
 
 
-def page_division_standings() -> None:
-    """Render the Division Standings page."""
-    st.markdown(
-        '<div class="section-header">Division Standings</div>'
-        '<div class="tdd-meta" style="margin-top:-0.5rem; margin-bottom:0.8rem;">'
-        'Preseason projected standings by division</div>',
-        unsafe_allow_html=True,
-    )
-
-    rankings = load_team_rankings()
-    if rankings.empty:
-        st.warning("No team rankings data found. Run precompute first.")
-        return
-
-    # AL divisions row
+def _render_divisions(rankings: pd.DataFrame) -> None:
+    """Render AL + NL division cards from a rankings dataframe."""
     al_divs = [d for d in _DIVISIONS if d[0].startswith("American")]
     nl_divs = [d for d in _DIVISIONS if d[0].startswith("National")]
 
@@ -112,3 +109,32 @@ def page_division_standings() -> None:
         ).reset_index(drop=True)
         with col:
             st.markdown(_division_card(div_teams, div_short), unsafe_allow_html=True)
+
+
+def page_division_standings() -> None:
+    """Render the Division Standings page."""
+    st.markdown(
+        '<div class="section-header">Division Standings</div>',
+        unsafe_allow_html=True,
+    )
+
+    tab_current, tab_preseason = st.tabs(["Current Projections", "Preseason Projections"])
+
+    with tab_current:
+        rankings = load_team_rankings()
+        if rankings.empty:
+            st.warning("No team rankings data found. Run precompute first.")
+        else:
+            _render_divisions(rankings)
+
+    with tab_preseason:
+        preseason = _load_preseason_rankings()
+        if preseason.empty:
+            st.warning("No preseason snapshot found.")
+        else:
+            st.markdown(
+                '<div class="tdd-meta" style="margin-bottom:0.8rem;">'
+                'Frozen preseason projections (March 26, 2026)</div>',
+                unsafe_allow_html=True,
+            )
+            _render_divisions(preseason)
