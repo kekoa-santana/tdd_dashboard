@@ -69,29 +69,23 @@ hr {
 }
 
 /* Minimal gold season selector — no border, centered gold text, just arrow */
-.st-key-gold_season_pick,
-.st-key-gold_deep_season {
-    display: flex;
-    justify-content: center;
-}
-.st-key-gold_season_pick .stSelectbox,
-.st-key-gold_deep_season .stSelectbox {
-    width: 100% !important;
+.st-key-profile_season_pick,
+.st-key-profile_deep_dive_season {
     display: flex !important;
     justify-content: center !important;
 }
-.st-key-gold_season_pick .stSelectbox > div,
-.st-key-gold_deep_season .stSelectbox > div {
+.st-key-profile_season_pick > div,
+.st-key-profile_deep_dive_season > div {
     width: auto !important;
     min-width: 0 !important;
 }
-.st-key-gold_season_pick .stSelectbox div[data-baseweb="select"],
-.st-key-gold_deep_season .stSelectbox div[data-baseweb="select"] {
+.st-key-profile_season_pick div[data-baseweb="select"],
+.st-key-profile_deep_dive_season div[data-baseweb="select"] {
     width: auto !important;
     display: inline-flex !important;
 }
-.st-key-gold_season_pick .stSelectbox div[data-baseweb="select"] > div,
-.st-key-gold_deep_season .stSelectbox div[data-baseweb="select"] > div {
+.st-key-profile_season_pick div[data-baseweb="select"] > div,
+.st-key-profile_deep_dive_season div[data-baseweb="select"] > div {
     border: none !important;
     background: transparent !important;
     padding: 0 4px !important;
@@ -101,15 +95,15 @@ hr {
     display: inline-flex !important;
     gap: 4px;
 }
-.st-key-gold_season_pick .stSelectbox div[data-baseweb="select"] > div > div,
-.st-key-gold_deep_season .stSelectbox div[data-baseweb="select"] > div > div {
+.st-key-profile_season_pick div[data-baseweb="select"] > div > div,
+.st-key-profile_deep_dive_season div[data-baseweb="select"] > div > div {
     color: var(--tdd-gold) !important;
     font-weight: 600 !important;
     font-size: 0.9rem !important;
     flex: 0 0 auto !important;
 }
-.st-key-gold_season_pick .stSelectbox svg,
-.st-key-gold_deep_season .stSelectbox svg {
+.st-key-profile_season_pick svg,
+.st-key-profile_deep_dive_season svg {
     fill: var(--tdd-gold) !important;
     color: var(--tdd-gold) !important;
 }
@@ -554,7 +548,106 @@ hr {
     max-width: 380px;
 }
 .lb-card-wide {
-    max-width: none;
+    max-width: 520px;
+}
+.lb-title-row {
+    padding: 0 0 0.4rem;
+    border-bottom: 1px solid var(--tdd-dark-border);
+    margin-bottom: 0.3rem;
+}
+.lb-title {
+    color: var(--tdd-gold);
+    font-size: 1.0rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+.lb-subtitle {
+    color: var(--tdd-slate);
+    font-size: 0.70rem;
+    font-weight: 400;
+    margin-left: 0.4rem;
+}
+.lb-row {
+    display: flex;
+    align-items: center;
+    padding: 0.28rem 0;
+    border-bottom: 1px solid var(--tdd-dark-border-faint);
+    gap: 0.3rem;
+}
+.lb-row:last-child { border-bottom: none; }
+.lb-rank {
+    color: var(--tdd-slate);
+    font-size: 0.82rem;
+    min-width: 1.6rem;
+    text-align: right;
+    margin-right: 0.2rem;
+}
+.lb-rank-top { color: var(--tdd-gold); font-weight: 700; }
+.lb-rank-good { color: var(--tdd-gold); font-weight: 700; }
+.lb-rank-bad { color: var(--tdd-slate); font-weight: 600; }
+.lb-headshot {
+    margin: 0 0.3rem;
+}
+.lb-name {
+    color: var(--tdd-cream);
+    font-size: 0.95rem;
+    font-weight: 600;
+    flex: 1;
+}
+.lb-name a { color: inherit; text-decoration: none; }
+.lb-name a:hover { color: var(--tdd-gold); text-decoration: underline; }
+.lb-team {
+    color: var(--tdd-slate);
+    font-size: 0.80rem;
+    margin-right: 0.5rem;
+}
+.lb-val {
+    color: var(--tdd-sage);
+    font-size: 1rem;
+    font-weight: 700;
+    min-width: 2.5rem;
+    text-align: right;
+}
+.lb-val-good { color: var(--tdd-gold); }
+.lb-val-bad { color: var(--tdd-slate); }
+.lb-range {
+    color: var(--tdd-slate);
+    font-size: 0.7rem;
+    min-width: 4.2rem;
+    text-align: right;
+    margin-left: 0.3rem;
+}
+.lb-watch-header {
+    color: var(--tdd-slate);
+    font-size: 0.78rem;
+    font-weight: 500;
+    margin: 0.6rem 0 0.3rem 0;
+    padding-top: 0.4rem;
+    border-top: 1px solid var(--tdd-dark-border);
+    font-style: italic;
+}
+.lb-watch-row {
+    display: flex;
+    align-items: center;
+    padding: 0.15rem 0;
+    gap: 0.3rem;
+}
+.lb-watch-name {
+    color: var(--tdd-slate);
+    font-size: 0.82rem;
+    flex: 1;
+}
+.lb-watch-val {
+    color: var(--tdd-slate);
+    font-size: 0.85rem;
+    font-weight: 600;
+    min-width: 2.5rem;
+    text-align: right;
+}
+.lb-watch-range {
+    color: var(--tdd-slate);
+    font-size: 0.7rem;
+    margin-left: 0.3rem;
 }
 
 /* Brand header */

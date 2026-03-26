@@ -420,13 +420,14 @@ def _render_ranking_card(
     if df.empty:
         return
 
-    # Sort by the requested score column (descending).
-    # For current_value mode this is tdd_value_score; for talent mode it is
-    # talent_upside_score.  Falls back to rank_col numeric sort.
-    if score_col in df.columns and df[score_col].notna().any():
-        work = df.sort_values(score_col, ascending=False)
-    elif rank_col in df.columns:
+    # Sort by the precomputed rank column (ascending = rank 1 first).
+    # rank_col includes positional adjustments that raw score sorting misses
+    # (SS/C boosted, DH/1B penalized).  Fall back to score sort if rank
+    # column is missing.
+    if rank_col in df.columns and df[rank_col].notna().any():
         work = df.sort_values(rank_col)
+    elif score_col in df.columns and df[score_col].notna().any():
+        work = df.sort_values(score_col, ascending=False)
     else:
         work = df.copy()
     has_detail = detail_stats is not None
@@ -619,16 +620,16 @@ def _render_batter_rankings(
         return
 
     # Resolve columns based on value mode
-    # "overall" (default) = scouting-informed comprehensive ranking (talent_upside_score)
-    # "projected" = forward-looking 2-3 year projection (current_value_score)
+    # "overall" (default) = production-dominant current value ranking
+    # "projected" = forward-looking 2-3 year dynasty outlook (talent_upside_score)
     is_projected = value_mode == "projected"
     if is_projected:
-        score_col = "current_value_score" if "current_value_score" in df.columns else "tdd_value_score"
-        rank_col = "overall_rank"
-        detail_stats = BATTER_TALENT_STATS
-    else:
         score_col = "talent_upside_score" if "talent_upside_score" in df.columns else "tdd_value_score"
         rank_col = "talent_rank" if "talent_rank" in df.columns else "overall_rank"
+        detail_stats = BATTER_TALENT_STATS
+    else:
+        score_col = "current_value_score" if "current_value_score" in df.columns else "tdd_value_score"
+        rank_col = "overall_rank"
         detail_stats = BATTER_DETAIL_STATS
 
     pos_rank_col = "pos_rank"
@@ -699,14 +700,16 @@ def _render_pitcher_rankings(
         return
 
     # Resolve columns based on value mode
+    # "overall" (default) = production-dominant current value ranking
+    # "projected" = forward-looking 2-3 year dynasty outlook (talent_upside_score)
     is_projected = value_mode == "projected"
     if is_projected:
-        score_col = "current_value_score" if "current_value_score" in df.columns else "tdd_value_score"
-        rank_col = "role_rank"
-        detail_stats = PITCHER_TALENT_STATS
-    else:
         score_col = "talent_upside_score" if "talent_upside_score" in df.columns else "tdd_value_score"
         rank_col = "talent_rank" if "talent_rank" in df.columns else "role_rank"
+        detail_stats = PITCHER_TALENT_STATS
+    else:
+        score_col = "current_value_score" if "current_value_score" in df.columns else "tdd_value_score"
+        rank_col = "role_rank"
         detail_stats = PITCHER_DETAIL_STATS
 
     # Fallback

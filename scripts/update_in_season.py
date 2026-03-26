@@ -542,6 +542,383 @@ def save_weekly_snapshot(game_date: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Batter game simulations
+# ---------------------------------------------------------------------------
+
+def run_batter_sims(game_date: str) -> None:
+    """Run batter-level game sims for today's lineups and save to parquet.
+
+    Requires todays_sims.parquet (pitcher context) and todays_lineups.parquet
+    to already exist from run_schedule_refresh().
+    """
+    import numpy as np
+    import pandas as pd
+    from lib.game_sim.batter_simulator import simulate_batter_game
+    from lib.matchup import score_matchup, score_matchup_bb, score_matchup_hr
+    from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
+
+    sims_path = DASHBOARD_DIR / "todays_sims.parquet"
+    lu_path = DASHBOARD_DIR / "todays_lineups.parquet"
+    if not sims_path.exists() or not lu_path.exists():
+        logger.warning("Missing sims or lineups parquet, cannot run batter sims")
+        return
+
+    pitcher_sims = pd.read_parquet(sims_path)
+    lineups = pd.read_parquet(lu_path)
+    if lineups.empty or pitcher_sims.empty:
+        logger.info("No lineups or pitcher sims available for batter sims")
+        return
+
+    # Load hitter posterior samples
+    h_k_path = DASHBOARD_DIR / "hitter_k_samples.npz"
+    h_bb_path = DASHBOARD_DIR / "hitter_bb_samples.npz"
+    h_hr_path = DASHBOARD_DIR / "hitter_hr_samples.npz"
+
+    h_k_samples: dict[str, np.ndarray] = {}
+    h_bb_samples: dict[str, np.ndarray] = {}
+    h_hr_samples: dict[str, np.ndarray] = {}
+
+    if h_k_path.exists():
+        _d = np.load(h_k_path)
+        h_k_samples = {k: _d[k] for k in _d.files}
+    if h_bb_path.exists():
+        _d = np.load(h_bb_path)
+        h_bb_samples = {k: _d[k] for k in _d.files}
+    if h_hr_path.exists():
+        _d = np.load(h_hr_path)
+        h_hr_samples = {k: _d[k] for k in _d.files}
+
+    if not h_k_samples:
+        logger.warning("No hitter K samples found, cannot run batter sims")
+        return
+
+    # Hitter projections for fallback rates
+    h_proj_path = DASHBOARD_DIR / "hitter_projections.parquet"
+    h_proj = pd.read_parquet(h_proj_path) if h_proj_path.exists() else pd.DataFrame()
+
+    # Arsenal/vuln for matchup lifts
+    arsenal_path = DASHBOARD_DIR / "pitcher_arsenal.parquet"
+    vuln_path = DASHBOARD_DIR / "hitter_vuln_career.parquet"
+    arsenal_df = pd.read_parquet(arsenal_path) if arsenal_path.exists() else pd.DataFrame()
+    vuln_df = pd.read_parquet(vuln_path) if vuln_path.exists() else pd.DataFrame()
+
+    baselines_pt = {
+        pt: {
+            "whiff_rate": vals.get("whiff_rate", 0.25),
+            "chase_rate": vals.get("chase_rate", 0.30),
+            "barrel_rate": vals.get("barrel_rate", 0.06),
+        }
+        for pt, vals in LEAGUE_AVG_BY_PITCH_TYPE.items()
+    }
+
+    # Bullpen rates
+    bp_path = DASHBOARD_DIR / "team_bullpen_rates.parquet"
+    bp_lookup: dict[str, dict] = {}
+    if bp_path.exists():
+        bp_df = pd.read_parquet(bp_path)
+        for _, r in bp_df.iterrows():
+            bp_lookup[r.get("team_abbr", "")] = {
+                "k_rate": float(r.get("bullpen_k_rate", 0.253)),
+                "bb_rate": float(r.get("bullpen_bb_rate", 0.084)),
+                "hr_rate": float(r.get("bullpen_hr_rate", 0.024)),
+            }
+
+    # Fallback sample generator
+    _rng = np.random.default_rng(77)
+
+    def _fallback(rate: float, n: int = 4000) -> np.ndarray:
+        r = np.clip(rate, 0.01, 0.99)
+        return _rng.beta(r * 200, (1 - r) * 200, size=n).astype(np.float32)
+
+    # Build pitcher context lookup from sims
+    pitcher_ctx: dict[int, dict] = {}
+    for _, ps in pitcher_sims.iterrows():
+        pid = int(ps["pitcher_id"])
+        pitcher_ctx[pid] = {
+            "k_rate": float(ps.get("projected_k_rate", 0.22)),
+            "bb_rate": float(ps["expected_bb"]) / max(float(ps["expected_bf"]), 1),
+            "hr_rate": float(ps["expected_hr"]) / max(float(ps["expected_bf"]), 1),
+            "bf_mu": float(ps.get("bf_mu", 24)),
+            "bf_sigma": float(ps.get("bf_sigma", 3)),
+            "team_abbr": ps.get("team_abbr", ""),
+            "opp_abbr": ps.get("opp_abbr", ""),
+            "game_pk": int(ps["game_pk"]),
+            "has_lineup": bool(ps.get("has_lineup", False)),
+        }
+
+    logger.info("Running batter sims for %d lineup batters...", len(lineups))
+    results = []
+    skipped = 0
+
+    for _, brow in lineups.iterrows():
+        bid = int(brow["batter_id"])
+        bid_str = str(bid)
+        gpk = int(brow["game_pk"])
+
+        if bid_str not in h_k_samples:
+            skipped += 1
+            continue
+
+        # Find the opposing pitcher for this batter
+        opp_pid = None
+        for pid, ctx in pitcher_ctx.items():
+            if ctx["game_pk"] == gpk and ctx["opp_abbr"] == brow.get("team_abbr", ""):
+                opp_pid = pid
+                break
+        if opp_pid is None:
+            skipped += 1
+            continue
+
+        pctx = pitcher_ctx[opp_pid]
+        bp_rates = bp_lookup.get(pctx["team_abbr"], {})
+
+        # Matchup lifts
+        k_lift = bb_lift = hr_lift = 0.0
+        if not arsenal_df.empty and not vuln_df.empty:
+            k_m = score_matchup(opp_pid, bid, arsenal_df, vuln_df, baselines_pt)
+            k_lift = k_m.get("matchup_k_logit_lift", 0.0)
+            k_lift = 0.0 if np.isnan(k_lift) else k_lift
+            bb_m = score_matchup_bb(opp_pid, bid, arsenal_df, vuln_df, baselines_pt)
+            bb_lift = bb_m.get("matchup_bb_logit_lift", 0.0)
+            bb_lift = 0.0 if np.isnan(bb_lift) else bb_lift
+            hr_m = score_matchup_hr(opp_pid, bid, arsenal_df, vuln_df, baselines_pt)
+            hr_lift = hr_m.get("matchup_hr_logit_lift", 0.0)
+            hr_lift = 0.0 if np.isnan(hr_lift) else hr_lift
+
+        # Hitter posterior samples
+        bk = h_k_samples[bid_str]
+        bbb = h_bb_samples.get(bid_str)
+        if bbb is None:
+            hp = h_proj[h_proj["batter_id"] == bid] if not h_proj.empty else pd.DataFrame()
+            rate = float(hp.iloc[0].get("projected_bb_rate", 0.08)) if not hp.empty else 0.08
+            bbb = _fallback(rate)
+        bhr = h_hr_samples.get(bid_str)
+        if bhr is None:
+            hp = h_proj[h_proj["batter_id"] == bid] if not h_proj.empty else pd.DataFrame()
+            rate = float(hp.iloc[0].get("projected_hr_per_pa", 0.03)) if not hp.empty else 0.03
+            bhr = _fallback(rate)
+
+        batting_order = int(brow.get("batting_order", 5))
+
+        sim_result = simulate_batter_game(
+            batter_k_rate_samples=bk,
+            batter_bb_rate_samples=bbb,
+            batter_hr_rate_samples=bhr,
+            batting_order=batting_order,
+            starter_k_rate=pctx["k_rate"],
+            starter_bb_rate=pctx["bb_rate"],
+            starter_hr_rate=pctx["hr_rate"],
+            starter_bf_mu=pctx["bf_mu"],
+            starter_bf_sigma=pctx["bf_sigma"],
+            matchup_k_lift=k_lift,
+            matchup_bb_lift=bb_lift,
+            matchup_hr_lift=hr_lift,
+            bullpen_k_rate=bp_rates.get("k_rate", 0.253),
+            bullpen_bb_rate=bp_rates.get("bb_rate", 0.084),
+            bullpen_hr_rate=bp_rates.get("hr_rate", 0.024),
+            n_sims=10_000,
+            random_seed=42 + gpk + bid,
+        )
+
+        summary = sim_result.summary()
+
+        # Prop lines
+        k_props = sim_result.over_probs("k", lines=[0.5, 1.5])
+        h_props = sim_result.over_probs("h", lines=[0.5, 1.5])
+        hr_props = sim_result.over_probs("hr", lines=[0.5])
+
+        prop_dict = {}
+        for _, kr in k_props.iterrows():
+            col = f"p_k_over_{kr['line']:.1f}".replace(".", "_")
+            prop_dict[col] = kr["p_over"]
+        for _, hr in h_props.iterrows():
+            col = f"p_h_over_{hr['line']:.1f}".replace(".", "_")
+            prop_dict[col] = hr["p_over"]
+        for _, hr in hr_props.iterrows():
+            col = f"p_hr_over_{hr['line']:.1f}".replace(".", "_")
+            prop_dict[col] = hr["p_over"]
+
+        results.append({
+            "game_pk": gpk,
+            "batter_id": bid,
+            "batter_name": brow.get("batter_name", ""),
+            "team_abbr": brow.get("team_abbr", ""),
+            "opp_abbr": pctx["opp_abbr"] if pctx["opp_abbr"] != brow.get("team_abbr") else pctx["team_abbr"],
+            "batting_order": batting_order,
+            "opp_starter_id": opp_pid,
+            "expected_k": summary["k"]["mean"],
+            "std_k": summary["k"]["std"],
+            "expected_bb": summary["bb"]["mean"],
+            "expected_h": summary["h"]["mean"],
+            "expected_hr": summary["hr"]["mean"],
+            "expected_tb": summary["tb"]["mean"],
+            "expected_pa": summary["pa"]["mean"],
+            "has_lineup": pctx["has_lineup"],
+            **prop_dict,
+        })
+
+    if results:
+        df = pd.DataFrame(results)
+        df.to_parquet(DASHBOARD_DIR / "todays_batter_sims.parquet", index=False)
+        logger.info("Saved batter sims: %d batters (%d skipped, no samples)",
+                     len(df), skipped)
+    else:
+        logger.warning("No batter sims produced (%d skipped)", skipped)
+
+
+# ---------------------------------------------------------------------------
+# Prediction archiving
+# ---------------------------------------------------------------------------
+
+def archive_yesterdays_predictions(game_date: str) -> None:
+    """Archive yesterday's predictions joined with actuals to cumulative logs.
+
+    Called at the start of main() before anything overwrites yesterday's files.
+    """
+    import pandas as pd
+    from datetime import timedelta
+
+    yesterday = (date.fromisoformat(game_date) - timedelta(days=1)).isoformat()
+
+    # Check if we have yesterday's predictions
+    sims_path = DASHBOARD_DIR / "todays_sims.parquet"
+    games_path = DASHBOARD_DIR / "todays_games.parquet"
+    batter_sims_path = DASHBOARD_DIR / "todays_batter_sims.parquet"
+
+    if not sims_path.exists() or not games_path.exists():
+        logger.info("No predictions to archive (files missing)")
+        return
+
+    # Verify the predictions are actually for yesterday
+    games = pd.read_parquet(games_path)
+    if games.empty:
+        logger.info("No games in todays_games.parquet, nothing to archive")
+        return
+
+    pred_date = str(games.iloc[0].get("game_date", ""))[:10]
+    if pred_date and pred_date != yesterday:
+        logger.info("Predictions are for %s, not yesterday (%s). Skipping archive.",
+                     pred_date, yesterday)
+        return
+
+    # Check for duplicate archiving
+    pitcher_log_path = DASHBOARD_DIR / "pitcher_sim_log.parquet"
+    if pitcher_log_path.exists():
+        existing = pd.read_parquet(pitcher_log_path)
+        if "prediction_date" in existing.columns:
+            if yesterday in existing["prediction_date"].astype(str).values:
+                logger.info("Already archived predictions for %s. Skipping.", yesterday)
+                return
+
+    # Query actuals from DB
+    try:
+        from lib.db import read_sql
+
+        pitcher_actuals = read_sql("""
+            SELECT player_id AS pitcher_id, game_pk,
+                   pit_k AS actual_k, pit_bb AS actual_bb,
+                   pit_h AS actual_h, pit_hr AS actual_hr,
+                   pit_bf AS actual_bf, pit_pitches AS actual_pitches,
+                   pit_ip AS actual_ip
+            FROM production.fact_player_game_mlb
+            WHERE player_role = 'pitcher'
+              AND game_date = :gd
+              AND season = :season
+        """, params={"gd": yesterday, "season": SEASON})
+
+        batter_actuals = read_sql("""
+            SELECT player_id AS batter_id, game_pk,
+                   bat_k AS actual_k, bat_bb AS actual_bb,
+                   bat_h AS actual_h, bat_hr AS actual_hr,
+                   bat_tb AS actual_tb, bat_pa AS actual_pa
+            FROM production.fact_player_game_mlb
+            WHERE player_role = 'batter'
+              AND game_date = :gd
+              AND season = :season
+        """, params={"gd": yesterday, "season": SEASON})
+
+    except Exception as e:
+        logger.warning("Could not query actuals from DB: %s. Skipping archive.", e)
+        return
+
+    if pitcher_actuals.empty:
+        logger.info("No pitcher actuals found for %s. Skipping archive.", yesterday)
+        return
+
+    # --- Archive pitcher predictions ---
+    pitcher_sims = pd.read_parquet(sims_path)
+    pitcher_sims["prediction_date"] = yesterday
+
+    pitcher_merged = pitcher_sims.merge(
+        pitcher_actuals, on=["game_pk", "pitcher_id"], how="inner",
+    )
+
+    if not pitcher_merged.empty:
+        # Select columns for the log
+        log_cols = [
+            "game_pk", "prediction_date", "pitcher_id", "pitcher_name",
+            "team_abbr", "opp_abbr",
+            "expected_k", "k_std", "expected_bb", "expected_h", "expected_hr",
+            "expected_bf", "expected_ip", "expected_pitches", "has_lineup",
+        ]
+        # Add prop columns if present
+        for c in pitcher_merged.columns:
+            if c.startswith("p_over_"):
+                log_cols.append(c)
+        # Add actuals
+        log_cols += ["actual_k", "actual_bb", "actual_h", "actual_hr",
+                     "actual_bf", "actual_ip", "actual_pitches"]
+
+        log_cols = [c for c in log_cols if c in pitcher_merged.columns]
+        new_rows = pitcher_merged[log_cols]
+
+        if pitcher_log_path.exists():
+            existing = pd.read_parquet(pitcher_log_path)
+            combined = pd.concat([existing, new_rows], ignore_index=True)
+        else:
+            combined = new_rows
+
+        combined.to_parquet(pitcher_log_path, index=False)
+        logger.info("Archived %d pitcher predictions for %s (total: %d)",
+                     len(new_rows), yesterday, len(combined))
+
+    # --- Archive batter predictions ---
+    if batter_sims_path.exists() and not batter_actuals.empty:
+        batter_sims = pd.read_parquet(batter_sims_path)
+        batter_sims["prediction_date"] = yesterday
+
+        batter_merged = batter_sims.merge(
+            batter_actuals, on=["game_pk", "batter_id"], how="inner",
+        )
+
+        if not batter_merged.empty:
+            log_cols = [
+                "game_pk", "prediction_date", "batter_id", "batter_name",
+                "team_abbr", "batting_order", "opp_starter_id",
+                "expected_k", "std_k", "expected_bb", "expected_h",
+                "expected_hr", "expected_tb", "expected_pa", "has_lineup",
+            ]
+            for c in batter_merged.columns:
+                if c.startswith("p_k_over_") or c.startswith("p_h_over_") or c.startswith("p_hr_over_"):
+                    log_cols.append(c)
+            log_cols += ["actual_k", "actual_bb", "actual_h", "actual_hr",
+                         "actual_tb", "actual_pa"]
+            log_cols = [c for c in log_cols if c in batter_merged.columns]
+            new_rows = batter_merged[log_cols]
+
+            batter_log_path = DASHBOARD_DIR / "batter_sim_log.parquet"
+            if batter_log_path.exists():
+                existing = pd.read_parquet(batter_log_path)
+                combined = pd.concat([existing, new_rows], ignore_index=True)
+            else:
+                combined = new_rows
+
+            combined.to_parquet(batter_log_path, index=False)
+            logger.info("Archived %d batter predictions for %s (total: %d)",
+                         len(new_rows), yesterday, len(combined))
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -568,6 +945,7 @@ def main() -> None:
     if args.schedule_only:
         logger.info("Mode: schedule-only (hourly refresh)")
         run_schedule_refresh(game_date)
+        run_batter_sims(game_date)
 
         # Update metadata timestamp
         meta_path = DASHBOARD_DIR / "update_metadata.json"
@@ -585,6 +963,10 @@ def main() -> None:
         logger.info("Done! (schedule-only)")
         return
 
+    # Step 0: Archive yesterday's predictions before anything overwrites them
+    logger.info("Step 0: Archiving yesterday's predictions...")
+    archive_yesterdays_predictions(game_date)
+
     # Step 1: Run projection engine (model work lives in player_profiles)
     if not args.skip_engine:
         success = run_projection_engine(game_date, skip_schedule=args.skip_schedule)
@@ -595,6 +977,10 @@ def main() -> None:
             )
     else:
         logger.info("Step 1: Skipped (--skip-engine)")
+
+    # Step 1b: Run batter sims (uses pitcher sims from Step 1)
+    logger.info("Step 1b: Running batter game sims...")
+    run_batter_sims(game_date)
 
     # Step 2: Export roster from DB to parquet
     logger.info("Step 2: Exporting roster...")

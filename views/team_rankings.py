@@ -237,6 +237,15 @@ def _render_power_rankings(
 
     df = df.sort_values("rank").reset_index(drop=True)
 
+    # Pre-load rankings + player-team mapping for expanded details
+    from services.data_loader import load_rankings, load_player_teams
+    try:
+        _hr_all = load_rankings("hitters")
+        _pr_all = load_rankings("pitchers")
+        _pt_loaded = load_player_teams()
+    except Exception:
+        _hr_all = _pr_all = _pt_loaded = None
+
     cards_html: list[str] = []
     for _, row in df.iterrows():
         rank = int(row.get("rank", 0))
@@ -297,40 +306,44 @@ def _render_power_rankings(
         )
 
         # ── expanded detail ──
-        # Radar chart data
-        radar_scores = {
-            "Offense": float(row.get("offense_score", 0) or 0),
-            "Pitching": float(row.get("pitching_score", 0) or 0),
-            "Fielding": float(row.get("defense_score", 0) or 0),
-            "Org": float(row.get("org_score", 0) or 0),
-            "Health": float(row.get("health_depth_score", 0) or 0),
-            "Schedule": float(row.get("schedule_score", 0) or 0),
-        }
-        radar_html = radar_chart_html(radar_scores, size=190)
+        # Composition bars with league rank (replaces radar chart)
+        _comp_dims = [
+            ("Offense", "offense_score"),
+            ("Rotation", "rotation_score"),
+            ("Bullpen", "bullpen_score"),
+            ("Fielding", "defense_score"),
+            ("Health/Depth", "health_depth_score"),
+        ]
 
-        # Scouting grade bars (replace ELO)
-        grade_parts: list[str] = []
-        if not prof_row.empty:
-            for label, col in [("Lineup", "lineup_diamond"),
-                                ("Rotation", "rotation_diamond"),
-                                ("Bullpen", "bullpen_diamond")]:
-                val = prof_row[col].iloc[0] if col in prof_row.columns else None
-                if val is not None and not np.isnan(val):
-                    grade_parts.append(_score_gauge(label, val / 10.0))
-        elo_html = "".join(grade_parts)
+        def _comp_bar(label: str, score: float, league_rank: int) -> str:
+            pct = max(0, min(100, score * 100))
+            color = GOLD if score >= 0.70 else SAGE if score >= 0.45 else EMBER if score < 0.30 else SLATE
+            rank_color = GOLD if league_rank <= 5 else SAGE if league_rank <= 15 else SLATE
+            return (
+                f'<div style="margin-bottom:8px;">'
+                f'<div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:2px;">'
+                f'<span style="color:var(--tdd-cream); font-size:0.8rem; font-weight:600;">'
+                f'{label} <span style="color:{rank_color}; font-size:0.72rem;">(#{league_rank})</span></span>'
+                f'<span style="color:{color}; font-weight:700; font-size:0.85rem;">{score:.2f}</span>'
+                f'</div>'
+                f'<div style="height:10px; background:var(--tdd-dark-card); border-radius:4px;">'
+                f'<div style="width:{pct:.1f}%; height:100%; background:{color}; border-radius:4px;"></div>'
+                f'</div></div>'
+            )
 
-        # Score gauges
-        gauges = ""
-        for label, col in [("Offense", "offense_score"), ("Pitching", "pitching_score"),
-                            ("Fielding", "defense_score"), ("Health/Depth", "health_depth_score")]:
-            val = row.get(col, None)
-            if val is not None and not np.isnan(val):
-                gauges += _score_gauge(label, val)
+        comp_html = ""
+        for label, col in _comp_dims:
+            val = float(row.get(col, 0) or 0)
+            # Compute league rank for this dimension
+            if col in df.columns:
+                lg_rank = int((df[col].rank(ascending=False, method="min")).loc[row.name])
+            else:
+                lg_rank = 0
+            comp_html += _comp_bar(label, val, lg_rank)
 
         # Style pills
         pills: list[str] = []
-        for col, label_prefix in [("offense_style", ""), ("pitching_style", ""),
-                                    ("age_trajectory", "")]:
+        for col in ["offense_style", "pitching_style", "age_trajectory"]:
             val = row.get(col, None)
             if val and isinstance(val, str) and val != "nan":
                 pill_color = GOLD if "Power" in val or "Strikeout" in val or "Ascending" in val else (
@@ -342,6 +355,63 @@ def _render_power_rankings(
             if pills else ""
         )
 
+        # Top contributing players (right side)
+        players_html = ""
+        try:
+            _pt_all = load_player_teams() if _pt_loaded is None else _pt_loaded
+            _team_pids = set(
+                _pt_all[_pt_all["team_abbr"] == abbr]["player_id"]
+            ) if not _pt_all.empty else set()
+
+            top_list: list[tuple[str, str, int, float]] = []  # name, pos, rank, score
+
+            if _hr_all is not None and not _hr_all.empty and _team_pids:
+                _h_pid = "batter_id" if "batter_id" in _hr_all.columns else "player_id"
+                _h_sc = next((c for c in ("current_value_score", "tdd_value_score") if c in _hr_all.columns), None)
+                if _h_sc:
+                    th = _hr_all[_hr_all[_h_pid].isin(_team_pids)]
+                    for _, pr in th.iterrows():
+                        top_list.append((
+                            pr["batter_name"], pr.get("position", ""),
+                            int(pr.get("pos_rank", 0)), float(pr[_h_sc]),
+                        ))
+
+            if _pr_all is not None and not _pr_all.empty and _team_pids:
+                _p_pid = "pitcher_id" if "pitcher_id" in _pr_all.columns else "player_id"
+                _p_sc = next((c for c in ("current_value_score", "tdd_value_score") if c in _pr_all.columns), None)
+                if _p_sc:
+                    tp_ = _pr_all[_pr_all[_p_pid].isin(_team_pids)]
+                    for _, pr in tp_.iterrows():
+                        top_list.append((
+                            pr["pitcher_name"], pr.get("role", "P"),
+                            int(pr.get("role_rank", 0)), float(pr[_p_sc]),
+                        ))
+
+            top_list.sort(key=lambda x: x[3], reverse=True)
+            for name, pos, lg_rank, sc in top_list[:8]:
+                rk_color = GOLD if lg_rank <= 5 else SAGE if lg_rank <= 15 else SLATE
+                players_html += (
+                    f'<div style="display:flex; align-items:center; gap:6px; '
+                    f'padding:3px 0; border-bottom:1px solid {DARK_BORDER};">'
+                    f'<span style="color:{rk_color}; font-weight:700; font-size:0.78rem; '
+                    f'min-width:2.2rem; text-align:right;">#{lg_rank}</span>'
+                    f'<span style="color:{SLATE}; font-size:0.72rem; min-width:1.8rem;">{pos}</span>'
+                    f'<span style="color:var(--tdd-cream); font-size:0.82rem; flex:1;">{name}</span>'
+                    f'<span style="color:var(--tdd-gold); font-weight:600; font-size:0.82rem;">'
+                    f'{sc * 10:.1f}</span>'
+                    f'</div>'
+                )
+        except Exception:
+            pass  # graceful degradation
+
+        if players_html:
+            players_html = (
+                f'<div style="margin-top:4px;">'
+                f'<div style="color:var(--tdd-slate); font-size:0.72rem; font-weight:600; '
+                f'margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;">Top Players</div>'
+                f'{players_html}</div>'
+            )
+
         # View link
         view_link = (
             f'<a class="tr-view-link" href="?page=team_overview&team={abbr}">'
@@ -350,9 +420,9 @@ def _render_power_rankings(
 
         detail = (
             f'<div class="tr-detail-grid">'
-            f'<div class="tr-detail-left">{radar_html}</div>'
+            f'<div class="tr-detail-left">{comp_html}{pills_html}</div>'
             f'<div class="tr-detail-right">'
-            f'{elo_html}{gauges}{pills_html}{view_link}'
+            f'{players_html}{view_link}'
             f'</div></div>'
         )
 

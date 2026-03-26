@@ -1,7 +1,6 @@
 """Model Performance page -- backtest results, game K model, projection movers, preseason comparison."""
 from __future__ import annotations
 
-import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
@@ -14,20 +13,27 @@ from config import (
 )
 from components.metric_cards import metric_card
 from components.backtest_charts import (
+    PLOTLY_CONFIG,
     create_accuracy_bars,
     create_coverage_chart,
     create_game_k_model_comparison,
     create_movers_chart,
     create_projection_timeline,
+    create_pred_vs_actual_scatter,
+    create_error_histogram,
+    create_rolling_mae_chart,
+    create_prop_calibration_chart,
 )
 from services.data_loader import (
     load_backtest,
     load_projections,
     load_weekly_snapshots,
+    load_pitcher_sim_log,
+    load_batter_sim_log,
 )
 from utils.formatters import fmt_stat, delta_html
 from utils.helpers import strip_accents
-from lib.theme import add_watermark
+
 from components.diamond_rating import diamond_rating_text_composite
 
 
@@ -69,6 +75,167 @@ def _load_preseason(player_type: str) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# In-Season Accuracy
+# ---------------------------------------------------------------------------
+
+_PITCHER_STAT_CONFIGS = {
+    "K": ("expected_k", "actual_k"),
+    "BB": ("expected_bb", "actual_bb"),
+    "H": ("expected_h", "actual_h"),
+    "HR": ("expected_hr", "actual_hr"),
+}
+
+_BATTER_STAT_CONFIGS = {
+    "K": ("expected_k", "actual_k"),
+    "H": ("expected_h", "actual_h"),
+    "HR": ("expected_hr", "actual_hr"),
+    "TB": ("expected_tb", "actual_tb"),
+}
+
+
+def _render_in_season_accuracy_tab() -> None:
+    """In-season game sim accuracy: pitcher and batter predictions vs actuals."""
+    import numpy as np
+
+    player_type = st.radio(
+        "Player type", ["Pitcher", "Hitter"],
+        horizontal=True, key="in_season_type",
+        label_visibility="collapsed",
+    )
+
+    if player_type == "Pitcher":
+        df = load_pitcher_sim_log()
+        stat_map = _PITCHER_STAT_CONFIGS
+        id_col, name_col = "pitcher_id", "pitcher_name"
+    else:
+        df = load_batter_sim_log()
+        stat_map = _BATTER_STAT_CONFIGS
+        id_col, name_col = "batter_id", "batter_name"
+
+    if df.empty:
+        st.info(
+            "No in-season prediction data yet. The accuracy log is populated "
+            "daily once the season starts and games have been played."
+        )
+        return
+
+    # Ensure numeric types
+    for _, (pred_col, act_col) in stat_map.items():
+        if pred_col in df.columns:
+            df[pred_col] = pd.to_numeric(df[pred_col], errors="coerce")
+        if act_col in df.columns:
+            df[act_col] = pd.to_numeric(df[act_col], errors="coerce")
+
+    # Summary metric cards
+    n_games = len(df)
+    pred_k, act_k = df.get("expected_k"), df.get("actual_k")
+    k_mae = float((pred_k - act_k).abs().mean()) if pred_k is not None and act_k is not None else 0
+    k_corr = float(pred_k.corr(act_k)) if pred_k is not None and act_k is not None else 0
+    k_bias = float((pred_k - act_k).mean()) if pred_k is not None and act_k is not None else 0
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        metric_card(f"{'Starts' if player_type == 'Pitcher' else 'Games'} Tracked",
+                    str(n_games), color=GOLD)
+    with c2:
+        metric_card("K MAE", f"{k_mae:.2f}")
+    with c3:
+        metric_card("K Correlation", f"{k_corr:.3f}")
+    with c4:
+        bias_color = SAGE if abs(k_bias) < 0.3 else EMBER
+        metric_card("K Bias", f"{k_bias:+.2f}")
+
+    # Stat selector
+    stat_label = st.radio(
+        "Stat", list(stat_map.keys()),
+        horizontal=True, key="in_season_stat",
+        label_visibility="collapsed",
+    )
+    pred_col, act_col = stat_map[stat_label]
+
+    if pred_col not in df.columns or act_col not in df.columns:
+        st.warning(f"No {stat_label} data available in the log.")
+        return
+
+    valid = df[[pred_col, act_col]].dropna()
+    if valid.empty:
+        st.warning(f"No valid {stat_label} predictions with actuals.")
+        return
+
+    predicted = valid[pred_col]
+    actual = valid[act_col]
+    has_lineup = df.loc[valid.index, "has_lineup"] if "has_lineup" in df.columns else None
+
+    # Scatter + Error histogram
+    col_l, col_r = st.columns(2)
+    with col_l:
+        fig = create_pred_vs_actual_scatter(predicted, actual, stat_label, has_lineup)
+        st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key="mp_L173")
+    with col_r:
+        errors = predicted - actual
+        fig = create_error_histogram(errors, stat_label)
+        st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key="mp_L177")
+
+    # K prop calibration (pitcher only)
+    if player_type == "Pitcher" and stat_label == "K":
+        prop_lines = [
+            ("p_over_4_5", 4.5), ("p_over_5_5", 5.5),
+            ("p_over_6_5", 6.5), ("p_over_7_5", 7.5),
+        ]
+        probs_list, overs_list, labels_list = [], [], []
+        for col, line_val in prop_lines:
+            if col in df.columns and "actual_k" in df.columns:
+                valid_prop = df[[col, "actual_k"]].dropna()
+                if len(valid_prop) >= 10:
+                    probs_list.append(valid_prop[col])
+                    overs_list.append((valid_prop["actual_k"] > line_val).astype(float))
+                    labels_list.append(f"{line_val}")
+        if probs_list:
+            st.markdown(f'<div style="color:{GOLD}; font-weight:600; margin-top:1rem;">'
+                        f'K Prop Calibration</div>', unsafe_allow_html=True)
+            fig = create_prop_calibration_chart(probs_list, overs_list, labels_list)
+            st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key="mp_L197")
+
+    # Rolling MAE trend
+    if "prediction_date" in df.columns:
+        st.markdown(f'<div style="color:{GOLD}; font-weight:600; margin-top:1rem;">'
+                    f'Accuracy Over Time</div>', unsafe_allow_html=True)
+        stat_configs = [(pred_col, act_col, stat_label)]
+        fig = create_rolling_mae_chart(df, "prediction_date", stat_configs, window=7)
+        st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key="mp_L205")
+
+    # Biggest hits and misses
+    df_scored = df[[name_col, "prediction_date", pred_col, act_col]].dropna().copy()
+    if not df_scored.empty:
+        df_scored["error"] = (df_scored[pred_col] - df_scored[act_col]).abs()
+        df_scored["signed_error"] = df_scored[pred_col] - df_scored[act_col]
+
+        st.markdown(f'<div style="color:{GOLD}; font-weight:600; margin-top:1rem;">'
+                    f'Biggest Hits and Misses</div>', unsafe_allow_html=True)
+
+        hit_col, miss_col = st.columns(2)
+        with hit_col:
+            st.markdown(f"**Closest Predictions** ({stat_label})")
+            hits = df_scored.nsmallest(10, "error")[
+                [name_col, "prediction_date", pred_col, act_col, "error"]
+            ].reset_index(drop=True)
+            hits.columns = ["Player", "Date", "Predicted", "Actual", "Error"]
+            st.dataframe(hits, use_container_width=True, hide_index=True)
+
+        with miss_col:
+            st.markdown(f"**Biggest Misses** ({stat_label})")
+            misses = df_scored.nlargest(10, "error")[
+                [name_col, "prediction_date", pred_col, act_col, "signed_error"]
+            ].reset_index(drop=True)
+            misses.columns = ["Player", "Date", "Predicted", "Actual", "Error"]
+            st.dataframe(misses, use_container_width=True, hide_index=True)
+
+    # Raw data expander
+    with st.expander("Full prediction log"):
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+# ---------------------------------------------------------------------------
 # Page
 # ---------------------------------------------------------------------------
 
@@ -82,39 +249,30 @@ def page_model_performance() -> None:
         unsafe_allow_html=True,
     )
 
-    (tab_backtest, tab_game_k, tab_hits_misses, tab_movers,
-     tab_preseason, tab_season_tracker) = st.tabs([
-        "Backtest Results", "Game K Model", "Biggest Hits & Misses",
-        "Projection Movers", "Preseason Comparison", "Season Tracker",
+    (tab_in_season, tab_backtest, tab_game_k, tab_hits_misses, tab_movers,
+     tab_preseason) = st.tabs([
+        "In-Season Accuracy", "Backtest Results", "Game Sim Backtests",
+        "Biggest Hits & Misses", "Projection Movers",
+        "Weekly Snapshots",
     ])
+
+    # ===================================================================
+    # Tab 0: In-Season Accuracy
+    # ===================================================================
+    with tab_in_season:
+        _render_in_season_accuracy_tab()
 
     # ===================================================================
     # Tab 1: Backtest Results
     # ===================================================================
     with tab_backtest:
-        player_type = st.radio(
-            "Player Type", ["Pitcher", "Hitter"],
-            horizontal=True, key="bt_player_type",
-        )
-        ptype = player_type.lower()
-
-        stat_category = st.radio(
-            "Stat Category", ["Rate Stats (K%, BB%)", "Counting Stats", "Game K Props"],
-            horizontal=True, key="bt_stat_cat",
-        )
-
-        if stat_category == "Rate Stats (K%, BB%)":
-            _render_rate_backtest(ptype)
-        elif stat_category == "Counting Stats":
-            _render_counting_backtest(ptype)
-        else:
-            _render_game_k_tab_inline()
+        _render_backtest_top10_tab()
 
     # ===================================================================
-    # Tab 2: Game K Model
+    # Tab 2: Game Sim Backtests
     # ===================================================================
     with tab_game_k:
-        _render_game_k_tab()
+        _render_game_sim_backtest_tab()
 
     # ===================================================================
     # Tab 3: Biggest Hits & Misses
@@ -129,21 +287,135 @@ def page_model_performance() -> None:
         _render_movers_tab()
 
     # ===================================================================
-    # Tab 5: Preseason Comparison
+    # Tab 5: Weekly Snapshots
     # ===================================================================
     with tab_preseason:
-        _render_preseason_comparison_tab()
-
-    # ===================================================================
-    # Tab 6: Season Tracker
-    # ===================================================================
-    with tab_season_tracker:
-        _render_season_tracker_tab()
+        _render_weekly_snapshots_tab()
 
 
 # ---------------------------------------------------------------------------
-# Tab 1 renderers
+# Tab 1: Backtest Top 10
 # ---------------------------------------------------------------------------
+
+def _render_backtest_top10_tab() -> None:
+    """Leaderboard-style backtest results: most/least of each stat + our prediction."""
+    from components.headshot import headshot_html
+
+    bip_df = load_backtest("bip_backtest_results")
+    if bip_df.empty:
+        st.info("No player-level backtest data available.")
+        return
+
+    # Deduplicate: keep one variant per player per season (K/BB/HR are identical across variants)
+    if "variant" in bip_df.columns:
+        bip_df = bip_df.drop_duplicates(subset=["batter_id", "test_season"], keep="first")
+
+    # Player type toggle
+    player_type = st.radio(
+        "Player type", ["Batter", "Pitcher"],
+        horizontal=True, key="bt_type",
+        label_visibility="collapsed",
+    )
+
+    if player_type == "Pitcher":
+        st.info("Pitcher-level backtest leaderboards coming soon. Use the Game Sim Backtests tab for pitcher accuracy.")
+        return
+
+    # Stat selector based on player type
+    # (label, pred_col, actual_col, higher_is_better_for_batter)
+    batter_stats = [
+        ("K", "total_k_mean", "k", False),
+        ("BB", "total_bb_mean", "bb", True),
+        ("HR", "total_hr_mean", "hr", True),
+        ("H", "total_h_mean", "hits", True),
+        ("SB", "total_sb_mean", "sb", True) if "total_sb_mean" in bip_df.columns and "sb" in bip_df.columns else None,
+    ]
+    batter_stats = [s for s in batter_stats if s is not None]
+
+    stat_choice = st.selectbox(
+        "Stat", [s[0] for s in batter_stats], key="bt_stat_choice",
+    )
+    cfg = next(s for s in batter_stats if s[0] == stat_choice)
+    stat_label, pred_col, act_col, higher_is_good = cfg
+
+    # Season filter
+    seasons = sorted(bip_df["test_season"].unique(), reverse=True)
+    season = st.selectbox("Season", seasons, key="bt_season")
+
+    df = bip_df[bip_df["test_season"] == season].copy()
+    if pred_col not in df.columns or act_col not in df.columns:
+        st.info(f"No data for {stat_label}.")
+        return
+
+    df = df[["batter_id", "batter_name", pred_col, act_col]].dropna().copy()
+    df["predicted"] = df[pred_col].round(1)
+    df["actual"] = df[act_col].astype(int)
+    df["error"] = df["predicted"] - df["actual"]
+
+    # Summary cards
+    mae = df["error"].abs().mean()
+    corr = df["predicted"].corr(df["actual"])
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown(metric_card("Players", f"{len(df):,}"), unsafe_allow_html=True)
+    with c2:
+        st.markdown(metric_card(f"{stat_label} MAE", f"{mae:.1f}"), unsafe_allow_html=True)
+    with c3:
+        st.markdown(metric_card("Correlation", f"{corr:.3f}"), unsafe_allow_html=True)
+
+    # Leaderboard builder using CSS classes from styles.css
+    def _build_lb(subset: pd.DataFrame, title: str, is_good: bool) -> str:
+        tier = "good" if is_good else "bad"
+        rows = []
+        for i, (_, row) in enumerate(subset.iterrows(), 1):
+            pid = int(row["batter_id"])
+            name = row["batter_name"]
+            actual = int(row["actual"])
+            pred = row["predicted"]
+            err = row["error"]
+            err_color = SAGE if abs(err) < mae else EMBER
+            rank_class = f"lb-rank-{tier} lb-rank"
+
+            hs = f'<span class="lb-headshot">{headshot_html(pid, size=50)}</span>'
+            rows.append(
+                f'<div class="lb-row">'
+                f'<span class="{rank_class}">{i}.</span>'
+                f'{hs}'
+                f'<span class="lb-name">{name}</span>'
+                f'<span class="lb-val lb-val-{tier}">{actual}</span>'
+                f'<span class="lb-range" style="color:{err_color};">'
+                f'pred: {pred:.0f} ({err:+.0f})</span>'
+                f'</div>'
+            )
+        title_class = "lb-val-good" if is_good else "lb-val-bad"
+        return (
+            f'<div class="lb-card lb-card-wide">'
+            f'<div class="lb-title-row">'
+            f'<span class="lb-title {title_class}">{title}</span>'
+            f'</div>'
+            + "".join(rows)
+            + '</div>'
+        )
+
+    # Most and Least: "good" = gold, "bad" = slate
+    most = df.nlargest(10, "actual")
+    least = df[df["actual"] > 0].nsmallest(10, "actual")
+
+    # For K: most is bad (slate), fewest is good (gold)
+    # For HR/H/BB/SB: most is good (gold), fewest is bad (slate)
+    col_l, col_r = st.columns(2)
+    with col_l:
+        html = _build_lb(most, f"Most {stat_label} ({season})", is_good=higher_is_good)
+        st.markdown(html, unsafe_allow_html=True)
+    with col_r:
+        html = _build_lb(least, f"Fewest {stat_label} ({season})", is_good=not higher_is_good)
+        st.markdown(html, unsafe_allow_html=True)
+
+    # Scatter
+    from components.backtest_charts import create_pred_vs_actual_scatter
+    fig = create_pred_vs_actual_scatter(df["predicted"], df["actual"], stat_label)
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=f"bt_scatter_{stat_label}_{season}")
+
 
 def _render_rate_backtest(ptype: str) -> None:
     """Rate stat backtest: K% and BB%."""
@@ -251,7 +523,7 @@ def _render_backtest_summary(
     col1, col2 = st.columns(2)
     with col1:
         fig = create_accuracy_bars(df, "bayes_mae", "marcel_mae", f"{label} MAE by Season")
-        st.pyplot(fig, width='stretch')
+        st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=f"mp_acc_{label}")
     with col2:
         cov_cols, cov_labels = [], []
         if "coverage_95" in df.columns:
@@ -262,70 +534,121 @@ def _render_backtest_summary(
             cov_labels.append("80% CI")
         if cov_cols:
             fig = create_coverage_chart(df, cov_cols, cov_labels)
-            st.pyplot(fig, width='stretch')
+            st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=f"mp_cov_{label}")
 
 
 # ---------------------------------------------------------------------------
 # Tab 2: Game K Model
 # ---------------------------------------------------------------------------
 
-def _render_game_k_tab_inline() -> None:
-    """Inline game K backtest for Tab 1 stat category selector."""
-    _render_game_k_tab()
+def _render_game_sim_backtest_tab() -> None:
+    """Game sim backtest results for all projected stats individually."""
+    summary = load_backtest("game_sim_backtest_summary")
+    game_k = load_backtest("game_k_backtest")
 
-
-def _render_game_k_tab() -> None:
-    """Dedicated Game K model performance section."""
-    df = load_backtest("game_k_backtest")
-    if df.empty:
-        st.info("No game K backtest data available.")
+    if summary.empty and game_k.empty:
+        st.info("No game simulation backtest data available.")
         return
 
-    # Summary cards
-    total_games = int(df["n_games"].sum())
-    best_brier = df["full_model_avg_brier"].min() if "full_model_avg_brier" in df.columns else df["avg_brier"].min()
-    avg_log = df["log_score"].mean() if "log_score" in df.columns else None
+    # Stat selector from summary columns
+    if not summary.empty:
+        stat_names = ["K", "BB", "H", "HR", "BF", "Pitches", "IP"]
+        stat_keys = ["k", "bb", "h", "hr", "bf", "pitches", "ip"]
+        available = [
+            (name, key) for name, key in zip(stat_names, stat_keys)
+            if f"{key}_mae" in summary.columns
+        ]
+    else:
+        available = [("K", "k")]
 
-    cols = st.columns(4 if avg_log is not None else 3)
-    with cols[0]:
-        st.markdown(metric_card("Games Tested", f"{total_games:,}"), unsafe_allow_html=True)
-    with cols[1]:
-        st.markdown(metric_card("Best Brier", f"{best_brier:.4f}"), unsafe_allow_html=True)
-    if avg_log is not None:
-        with cols[2]:
-            st.markdown(metric_card("Avg Log Score", f"{avg_log:.3f}"), unsafe_allow_html=True)
+    stat_choice = st.radio(
+        "Stat", [a[0] for a in available],
+        horizontal=True, key="gsim_stat",
+        label_visibility="collapsed",
+    )
+    stat_key = next(k for n, k in available if n == stat_choice)
 
-    # Coverage cards
-    cov_cols = ["coverage_50", "coverage_80", "coverage_90"]
-    cov_labels = ["50% CI", "80% CI", "90% CI"]
-    existing = [(c, l) for c, l in zip(cov_cols, cov_labels) if c in df.columns]
-    if existing:
-        cov_c = st.columns(len(existing) + 1)
-        for i, (col, lbl) in enumerate(existing):
-            with cov_c[i]:
-                avg = df[col].mean() * 100
-                st.markdown(metric_card(f"{lbl} Coverage", f"{avg:.1f}%"), unsafe_allow_html=True)
+    # Summary cards from the summary table
+    if not summary.empty:
+        mae_col = f"{stat_key}_mae"
+        rmse_col = f"{stat_key}_rmse"
+        bias_col = f"{stat_key}_bias"
+        corr_col = f"{stat_key}_corr"
 
-    # Model tier comparison chart
-    st.markdown('<div class="tdd-section-hdr">Model Tier Comparison</div>',
-                unsafe_allow_html=True)
-    fig = create_game_k_model_comparison(df)
-    st.pyplot(fig, width='stretch')
+        avg_mae = summary[mae_col].mean() if mae_col in summary.columns else None
+        avg_rmse = summary[rmse_col].mean() if rmse_col in summary.columns else None
+        avg_bias = summary[bias_col].mean() if bias_col in summary.columns else None
+        avg_corr = summary[corr_col].mean() if corr_col in summary.columns else None
+        total_games = int(summary["n_games"].sum())
 
-    # Coverage chart
-    if existing:
-        st.markdown('<div class="tdd-section-hdr">Interval Coverage</div>',
-                    unsafe_allow_html=True)
-        fig = create_coverage_chart(
-            df,
-            [c for c, _ in existing],
-            [l for _, l in existing],
+        card_cols = st.columns(5)
+        with card_cols[0]:
+            st.markdown(metric_card("Games Tested", f"{total_games:,}"), unsafe_allow_html=True)
+        if avg_mae is not None:
+            with card_cols[1]:
+                st.markdown(metric_card(f"{stat_choice} MAE", f"{avg_mae:.2f}"), unsafe_allow_html=True)
+        if avg_rmse is not None:
+            with card_cols[2]:
+                st.markdown(metric_card(f"{stat_choice} RMSE", f"{avg_rmse:.2f}"), unsafe_allow_html=True)
+        if avg_corr is not None:
+            with card_cols[3]:
+                st.markdown(metric_card("Correlation", f"{avg_corr:.3f}"), unsafe_allow_html=True)
+        if avg_bias is not None:
+            with card_cols[4]:
+                bias_color = SAGE if abs(avg_bias) < 0.3 else EMBER
+                st.markdown(metric_card("Bias", f"{avg_bias:+.2f}"), unsafe_allow_html=True)
+
+        # Per-season breakdown table
+        display_cols = ["test_season", "n_games"]
+        for prefix in [stat_key]:
+            for suffix in ["mae", "rmse", "bias", "corr"]:
+                c = f"{prefix}_{suffix}"
+                if c in summary.columns:
+                    display_cols.append(c)
+        # K-specific extras
+        if stat_key == "k":
+            for c in ["k_avg_brier", "k_coverage_50", "k_coverage_80", "k_coverage_90"]:
+                if c in summary.columns:
+                    display_cols.append(c)
+
+        st.dataframe(
+            summary[display_cols].style.format(
+                {c: "{:.3f}" for c in display_cols if c not in ["test_season", "n_games"]},
+                na_rep="",
+            ),
+            use_container_width=True, hide_index=True,
         )
-        st.pyplot(fig, width='stretch')
 
-    # Raw data
-    with st.expander("Raw Backtest Data"):
-        st.dataframe(df, width='stretch', hide_index=True)
+    # K-specific: model tier comparison and coverage from game_k_backtest
+    if stat_key == "k" and not game_k.empty:
+        if "full_model_avg_brier" in game_k.columns:
+            st.markdown('<div class="tdd-section-hdr">Model Tier Comparison (K Props)</div>',
+                        unsafe_allow_html=True)
+            fig = create_game_k_model_comparison(game_k)
+            st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key="gsim_tier")
+
+        cov_cols = ["coverage_50", "coverage_80", "coverage_90"]
+        cov_labels = ["50% CI", "80% CI", "90% CI"]
+        existing = [(c, l) for c, l in zip(cov_cols, cov_labels) if c in game_k.columns]
+        if existing:
+            st.markdown('<div class="tdd-section-hdr">K Interval Coverage</div>',
+                        unsafe_allow_html=True)
+            fig = create_coverage_chart(game_k, [c for c, _ in existing], [l for _, l in existing])
+            st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key="gsim_cov")
+
+    # Predicted vs actual scatter from game-level predictions
+    preds = load_backtest("game_sim_backtest_predictions")
+    if not preds.empty:
+        pred_col = f"expected_{stat_key}"
+        act_col = f"actual_{stat_key}"
+        if pred_col in preds.columns and act_col in preds.columns:
+            valid = preds[[pred_col, act_col]].dropna()
+            if not valid.empty:
+                from components.backtest_charts import create_pred_vs_actual_scatter
+                st.markdown(f'<div class="tdd-section-hdr">{stat_choice}: Predicted vs Actual (Game Level)</div>',
+                            unsafe_allow_html=True)
+                fig = create_pred_vs_actual_scatter(valid[pred_col], valid[act_col], stat_choice)
+                st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=f"gsim_scatter_{stat_key}")
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +657,14 @@ def _render_game_k_tab() -> None:
 
 def _render_hits_misses_tab() -> None:
     """Show players with largest prediction errors (positive and negative)."""
+    st.markdown(
+        f'<div style="color:{GOLD}; font-weight:600; font-size:0.85rem; '
+        f'margin-bottom:0.8rem;">'
+        f'2026 Season (Live) &mdash; updates every time a player plays a game'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
     player_type = st.radio(
         "Player Type", ["Pitcher", "Hitter"],
         horizontal=True, key="hm_player_type",
@@ -357,8 +688,8 @@ def _render_hits_misses_tab() -> None:
 
     if observed_col not in current.columns:
         st.info(
-            f"No observed data for {stat_col.replace('projected_', '')}. "
-            "Observed stats appear once the season starts."
+            f"No observed data for {stat_col.replace('projected_', '')} yet. "
+            "This tab populates as 2026 games are played and projections update."
         )
         return
 
@@ -383,8 +714,6 @@ def _render_hits_misses_tab() -> None:
     # Biggest Hits (smallest absolute error, with meaningful projection)
     biggest_hits = df.nsmallest(n_show, "abs_error")
 
-    import matplotlib.pyplot as plt
-
     chart_col1, chart_col2 = st.columns(2)
 
     with chart_col1:
@@ -399,8 +728,8 @@ def _render_hits_misses_tab() -> None:
                 f"Closest Projections ({stat_label})",
                 positive_color=SAGE, negative_color=SAGE,
             )
-            st.pyplot(fig, width='stretch')
-            plt.close(fig)
+            st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key="mp_L574")
+            pass
 
             display = biggest_hits[[name_col, stat_col, observed_col, "error"]].copy()
             for c in [stat_col, observed_col, "error"]:
@@ -425,8 +754,8 @@ def _render_hits_misses_tab() -> None:
                 f"Largest Errors ({stat_label})",
                 positive_color=EMBER, negative_color=EMBER,
             )
-            st.pyplot(fig, width='stretch')
-            plt.close(fig)
+            st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key="mp_L600")
+            pass
 
             display = biggest_misses[[name_col, stat_col, observed_col, "error"]].copy()
             for c in [stat_col, observed_col, "error"]:
@@ -531,8 +860,6 @@ def _render_movers_tab() -> None:
         up_df, down_df = decliners, improvers
 
     # Visual movers charts
-    import matplotlib.pyplot as plt
-
     chart_col1, chart_col2 = st.columns(2)
     with chart_col1:
         if not up_df.empty and name_col in up_df.columns and "delta" in up_df.columns:
@@ -542,8 +869,8 @@ def _render_movers_tab() -> None:
                 f"{up_label} ({stat_label})",
                 positive_color=SAGE, negative_color=SAGE,
             )
-            st.pyplot(fig, width='stretch')
-            plt.close(fig)
+            st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key="mp_L715")
+            pass
 
     with chart_col2:
         if not down_df.empty and name_col in down_df.columns and "delta" in down_df.columns:
@@ -553,8 +880,8 @@ def _render_movers_tab() -> None:
                 f"{down_label} ({stat_label})",
                 positive_color=EMBER, negative_color=EMBER,
             )
-            st.pyplot(fig, width='stretch')
-            plt.close(fig)
+            st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key="mp_L726")
+            pass
 
     # Data tables
     col1, col2 = st.columns(2)
@@ -633,7 +960,7 @@ def _render_movers_tab() -> None:
         [stat_col],
     )
     if fig is not None:
-        st.pyplot(fig, width='stretch')
+        st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key="mp_L806")
     else:
         st.caption("Player not found in snapshots.")
 
@@ -670,23 +997,11 @@ def _build_comparison_df(
     return merged
 
 
-def _render_preseason_comparison_tab() -> None:
-    """Compare preseason projections to current with comparison table, movers, and sparklines."""
-    snapshot_dir = DASHBOARD_DIR / "snapshots"
-    if not snapshot_dir.exists():
-        st.warning("No preseason snapshots found. Run precompute first.")
-        return
-
-    h_snaps = sorted(snapshot_dir.glob("hitter_projections_*_preseason.parquet"))
-    p_snaps = sorted(snapshot_dir.glob("pitcher_projections_*_preseason.parquet"))
-
-    if not h_snaps and not p_snaps:
-        st.warning("No preseason snapshots found. Run precompute first.")
-        return
-
+def _render_weekly_snapshots_tab() -> None:
+    """Weekly snapshot comparison with week-over-week dropdown."""
     player_type = st.radio(
         "Player type", ["Pitcher", "Hitter"],
-        horizontal=True, key="preseason_type",
+        horizontal=True, key="weekly_type",
     )
     ptype = player_type.lower()
 
@@ -701,12 +1016,41 @@ def _render_preseason_comparison_tab() -> None:
     current = load_projections(ptype)
     weekly = load_weekly_snapshots(ptype)
 
-    if preseason.empty:
-        st.info("No preseason snapshot available for this player type yet.")
+    # Build ordered snapshot list: Preseason, Week 1, Week 2, ...
+    all_snapshots: dict[str, pd.DataFrame] = {}
+    if not preseason.empty:
+        all_snapshots["Preseason"] = preseason
+    for i, (date_str, df) in enumerate(sorted(weekly.items()), start=1):
+        all_snapshots[f"Week {i} ({date_str})"] = df
+
+    if not all_snapshots:
+        st.info("No snapshots available yet. Preseason and weekly snapshots will appear here as the season progresses.")
         return
 
-    if current.empty:
-        _render_preseason_only_table(preseason, name_col, id_col, stat_configs)
+    # Snapshot selector
+    snap_labels = list(all_snapshots.keys())
+    default_idx = max(0, len(snap_labels) - 2) if len(snap_labels) >= 2 else 0
+
+    compare_col1, compare_col2 = st.columns(2)
+    with compare_col1:
+        from_snap = st.selectbox(
+            "From", snap_labels, index=default_idx, key="weekly_from",
+        )
+    with compare_col2:
+        to_options = snap_labels
+        to_default = len(snap_labels) - 1
+        to_snap = st.selectbox(
+            "To", to_options, index=to_default, key="weekly_to",
+        )
+
+    prev_df = all_snapshots[from_snap]
+    curr_df = all_snapshots[to_snap] if to_snap != "Current" else current
+    # If "Current" projections exist and aren't already a snapshot, add as option
+    if not current.empty and to_snap not in all_snapshots:
+        curr_df = current
+
+    if prev_df.empty or curr_df.empty:
+        st.warning("Selected snapshots are empty.")
         return
 
     # Sub-tabs: Comparison Table | Biggest Movers | Player Lookup
@@ -716,20 +1060,18 @@ def _render_preseason_comparison_tab() -> None:
 
     # --- Comparison Table ---
     with sub_overview:
-        merged = _build_comparison_df(preseason, current, id_col, name_col, stat_configs)
+        merged = _build_comparison_df(prev_df, curr_df, id_col, name_col, stat_configs)
 
         if merged.empty:
-            st.warning("No matching players between preseason and current projections.")
+            st.warning("No matching players between selected snapshots.")
             return
-
-        snap_date = preseason["snapshot_date"].iloc[0] if "snapshot_date" in preseason.columns else "Preseason"
 
         st.markdown(
             f'<div class="insight-card">'
             f'<span class="tdd-meta">Comparing </span>'
-            f'<span class="tdd-stat-value">preseason ({snap_date})</span>'
+            f'<span class="tdd-stat-value">{from_snap}</span>'
             f'<span class="tdd-meta"> to </span>'
-            f'<span class="tdd-stat-value">current projections</span>'
+            f'<span class="tdd-stat-value">{to_snap}</span>'
             f'<span class="tdd-meta"> | {len(merged)} {ptype}s matched</span>'
             f'</div>',
             unsafe_allow_html=True,
@@ -770,17 +1112,17 @@ def _render_preseason_comparison_tab() -> None:
         display_df = pd.DataFrame(display_rows)
         st.dataframe(display_df, width='stretch', hide_index=True, height=600)
 
-    # --- Biggest Movers vs Preseason ---
+    # --- Biggest Movers ---
     with sub_movers:
         stat_choice = st.radio(
             "Stat", [cfg[0] for cfg in stat_configs],
-            horizontal=True, key="preseason_movers_stat",
+            horizontal=True, key="weekly_movers_stat",
         )
         stat_cfg = next(cfg for cfg in stat_configs if cfg[0] == stat_choice)
         stat_key = stat_cfg[1]
         higher_better = stat_cfg[2]
 
-        merged_full = _build_comparison_df(preseason, current, id_col, name_col, stat_configs)
+        merged_full = _build_comparison_df(prev_df, curr_df, id_col, name_col, stat_configs)
         delta_col = f"delta_{stat_key}"
 
         if delta_col not in merged_full.columns or merged_full[delta_col].isna().all():
@@ -806,24 +1148,24 @@ def _render_preseason_comparison_tab() -> None:
                     fig = create_movers_chart(
                         improvers[name_col].tolist(),
                         improvers["delta_pp"].tolist(),
-                        f"Top {stat_choice} Improvers vs Preseason",
+                        f"Top {stat_choice} Improvers",
                         positive_color=SAGE,
                         negative_color=SAGE,
                     )
-                    st.pyplot(fig, width='stretch')
-                    plt.close(fig)
+                    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key="mp_L983")
+                    pass
 
             with col2:
                 if not decliners.empty:
                     fig = create_movers_chart(
                         decliners[name_col].tolist(),
                         decliners["delta_pp"].tolist(),
-                        f"Top {stat_choice} Decliners vs Preseason",
+                        f"Top {stat_choice} Decliners",
                         positive_color=EMBER,
                         negative_color=EMBER,
                     )
-                    st.pyplot(fig, width='stretch')
-                    plt.close(fig)
+                    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key="mp_L995")
+                    pass
 
     # --- Player Lookup with sparkline timeline ---
     with sub_lookup:
@@ -835,8 +1177,10 @@ def _render_preseason_comparison_tab() -> None:
             unsafe_allow_html=True,
         )
 
-        all_names = current[[id_col, name_col]].drop_duplicates()
-        search_lu = st.text_input("Search player", key="preseason_lu_search")
+        # Use the "to" snapshot for names since it's the most recent
+        _names_df = curr_df if not curr_df.empty else prev_df
+        all_names = _names_df[[id_col, name_col]].drop_duplicates()
+        search_lu = st.text_input("Search player", key="weekly_lu_search")
         if search_lu:
             _norm = strip_accents(search_lu)
             all_names = all_names[
@@ -848,21 +1192,16 @@ def _render_preseason_comparison_tab() -> None:
             return
 
         selected_name = st.selectbox(
-            "Player", all_names[name_col].tolist(), key="preseason_lu_player",
+            "Player", all_names[name_col].tolist(), key="weekly_lu_player",
         )
         selected_id = int(
             all_names[all_names[name_col] == selected_name][id_col].iloc[0]
         )
 
-        snapshots_ordered: dict[str, pd.DataFrame] = {}
-        if not preseason.empty:
-            snapshots_ordered["Preseason"] = preseason
-        for date_str in sorted(weekly.keys()):
-            snapshots_ordered[date_str] = weekly[date_str]
-        snapshots_ordered["Current"] = current
+        snapshots_ordered = dict(all_snapshots)  # reuse the ordered snapshot dict
 
         if len(snapshots_ordered) < 2:
-            st.caption("Need at least preseason + current to show a timeline.")
+            st.caption("Need at least 2 snapshots to show a timeline.")
             return
 
         for stat_label, stat_key, higher_better, _ in stat_configs:
@@ -902,14 +1241,20 @@ def _render_preseason_comparison_tab() -> None:
                 st.caption(f"Pre: {pre_val:.1f}% | Now: {cur_val:.1f}% | {delta_pp:+.1f}pp")
 
             with spark_col:
-                fig, ax = plt.subplots(figsize=(5.5, 2.5))
-                fig.patch.set_facecolor(DARK)
-                ax.set_facecolor(DARK)
+                import plotly.graph_objects as go
+                from components.backtest_charts import _hex_to_rgba
 
                 plot_vals = [v * 100 for v in values]
-                x = range(len(plot_vals))
-                ax.plot(x, plot_vals, color=color, linewidth=2, marker="o", markersize=5)
-                ax.fill_between(x, min(plot_vals) - 0.5, plot_vals, alpha=0.1, color=color)
+                fig = go.Figure()
+
+                fig.add_trace(go.Scatter(
+                    x=list(dates), y=plot_vals,
+                    mode="lines+markers",
+                    line=dict(color=color, width=2),
+                    marker=dict(size=6, color=color),
+                    hovertemplate="%{x}: %{y:.1f}%<extra></extra>",
+                    showlegend=False,
+                ))
 
                 # CI bands if available
                 lo_col = f"{proj_col}_2_5"
@@ -926,121 +1271,38 @@ def _render_preseason_comparison_tab() -> None:
                             lo_vals.append(float(lo_v) * 100)
                             hi_vals.append(float(hi_v) * 100)
                 if len(lo_vals) == len(values):
-                    ax.fill_between(x, lo_vals, hi_vals, alpha=0.15, color=color)
+                    fig.add_trace(go.Scatter(
+                        x=list(dates) + list(dates)[::-1],
+                        y=hi_vals + lo_vals[::-1],
+                        fill="toself",
+                        fillcolor=_hex_to_rgba(color, 0.12),
+                        line=dict(width=0),
+                        hoverinfo="skip", showlegend=False,
+                    ))
 
-                ax.set_xticks(list(x))
-                ax.set_xticklabels(dates, rotation=30, ha="right", fontsize=8)
-                ax.set_ylabel(f"{stat_label} (%)", color=SLATE, fontsize=9)
-                ax.set_title(
-                    f"{selected_name} | {stat_label} Evolution",
-                    color=CREAM, fontsize=11, fontweight="bold", pad=8,
+                fig.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    margin=dict(l=20, r=20, t=40, b=20),
+                    height=250,
+                    showlegend=False,
+                    dragmode=False,
+                    title=dict(
+                        text=f"{selected_name} | {stat_label} Evolution",
+                        font=dict(color=CREAM, size=12), x=0.5, xanchor="center",
+                    ),
+                    xaxis=dict(
+                        tickfont=dict(color=SLATE, size=8), tickangle=-30,
+                        showgrid=False, zeroline=False, showline=False,
+                    ),
+                    yaxis=dict(
+                        tickfont=dict(color=SLATE, size=8),
+                        showgrid=True, gridcolor="rgba(123,143,166,0.12)",
+                        zeroline=False, showline=False,
+                        title=dict(text=f"{stat_label} (%)", font=dict(color=SLATE, size=9)),
+                    ),
+                    font=dict(color=CREAM),
                 )
-                ax.tick_params(colors=SLATE, labelsize=8)
-                for spine in ax.spines.values():
-                    spine.set_visible(False)
-
-                add_watermark(fig)
-                fig.tight_layout()
-                st.pyplot(fig, width='stretch')
-                plt.close(fig)
+                st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=f"mp_spark_{stat_label}")
 
 
-def _render_preseason_only_table(
-    df: pd.DataFrame,
-    name_col: str,
-    id_col: str,
-    stat_configs: list,
-) -> None:
-    """Simple preseason projection table when no current data is available."""
-    snap_date = df["snapshot_date"].iloc[0] if "snapshot_date" in df.columns else "Unknown"
-    target_season = df["target_season"].iloc[0] if "target_season" in df.columns else "?"
-
-    st.markdown(f"""
-    <div class="insight-card">
-        <div class="insight-title">Projection Snapshot</div>
-        <div class="insight-bullet">
-            <span class="dot" style="background:{GOLD};"></span>
-            Target season: {target_season} | Snapshot date: {snap_date}
-        </div>
-        <div class="insight-bullet">
-            <span class="dot" style="background:{SLATE};"></span>
-            These projections are frozen from preseason. Current projections not yet available for comparison.
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    search = st.text_input("Search player", "", placeholder="Type a name...",
-                           key="preseason_search_fallback")
-    if search:
-        _search_norm = strip_accents(search)
-        df = df[df[name_col].apply(lambda x: _search_norm.lower() in strip_accents(str(x)).lower())]
-
-    display_rows = []
-    for _, row in df.iterrows():
-        r: dict[str, object] = {
-            "Rank": len(display_rows) + 1,
-            "Name": row[name_col],
-            "Age": int(row["age"]) if pd.notna(row.get("age")) else "",
-            "Rating": diamond_rating_text_composite(row["composite_score"]),
-        }
-        for label, key, higher_better, _ in stat_configs:
-            proj_col = f"projected_{key}"
-            obs_col = f"observed_{key}"
-            if proj_col in row.index and pd.notna(row.get(proj_col)):
-                r[f"Proj {label}"] = fmt_stat(row[proj_col], key)
-            else:
-                r[f"Proj {label}"] = ""
-            if obs_col in row.index and pd.notna(row.get(obs_col)):
-                r[f"{PRIOR_SEASON} {label}"] = fmt_stat(row[obs_col], key)
-            else:
-                r[f"{PRIOR_SEASON} {label}"] = ""
-        display_rows.append(r)
-
-    display_df = pd.DataFrame(display_rows)
-    st.dataframe(display_df, width='stretch', hide_index=True, height=600)
-
-    st.caption(
-        f"Showing {len(display_df)} players from preseason projection. "
-        "These are locked in and won't change | use for end-of-season accuracy review."
-    )
-
-
-# ---------------------------------------------------------------------------
-# Tab 6: Season Tracker
-# ---------------------------------------------------------------------------
-
-def _render_season_tracker_tab() -> None:
-    """In-season accuracy tracker | stub until games begin."""
-    st.markdown(
-        f'<div class="tdd-section-hdr">In-Season Accuracy Tracker</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.info(
-        "Tracking begins Opening Day. Once the season starts, this tab will "
-        "show how well the Bayesian projections track real performance as "
-        "observed data accumulates."
-    )
-
-    st.markdown(
-        f'<div class="tdd-stat-value" style="margin-top:16px; '
-        f'margin-bottom:8px;">What will be tracked:</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(f"""
-- **Running MAE** for K% and BB% projections | updated weekly as new data arrives
-- **Projected vs Actual scatter plots** | one point per player, diagonal = perfect accuracy
-- **Calibration curve** | predicted probability vs actual frequency across deciles
-- **Weekly accuracy snapshots** | trend line showing whether the model improves as the season progresses
-    """)
-
-    st.markdown(
-        f'<div style="margin-top:16px; padding:12px 16px; '
-        f'border-left:3px solid var(--tdd-gold); background:transparent;">'
-        f'<span class="tdd-meta">'
-        f'Data will auto-populate from weekly projection snapshots and '
-        f'the daily update pipeline. No manual setup required.</span>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
