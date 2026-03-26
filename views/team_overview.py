@@ -195,18 +195,18 @@ def _render_team_profile_tab(
             unsafe_allow_html=True,
         )
 
-        # Load rankings for this team
+        # Load rankings for this team — use roster as authoritative team source
+        from lib.diamond_rating import score_to_diamonds as _s2d
         _hr = load_rankings("hitters")
         _pr = load_rankings("pitchers")
-        _pt = pd.read_parquet(DASHBOARD_DIR / "player_teams.parquet") if (DASHBOARD_DIR / "player_teams.parquet").exists() else pd.DataFrame()
-
+        _roster = load_roster()
         _team_pids = set()
-        if not _pt.empty:
-            _pt_pid = "player_id" if "player_id" in _pt.columns else "batter_id"
-            _team_pids = set(_pt[_pt["team_abbr"] == selected_team][_pt_pid])
+        if not _roster.empty:
+            _team_pids = set(_roster[_roster["team_abbr"] == selected_team]["player_id"])
 
         def _player_rank_row(name: str, pos: str, league_rank: int, score: float) -> str:
             color = GOLD if league_rank <= 5 else SAGE if league_rank <= 15 else SLATE
+            diamonds = _s2d(score)
             return (
                 f'<div style="display:flex; align-items:center; gap:8px; '
                 f'padding:4px 12px; border-left:3px solid {color}; margin-bottom:2px;">'
@@ -214,7 +214,7 @@ def _render_team_profile_tab(
                 f'font-weight:700;">#{league_rank}</span>'
                 f'<span class="tdd-meta" style="min-width:2rem; color:{SLATE};">{pos}</span>'
                 f'<span style="color:var(--tdd-cream); flex:1;">{name}</span>'
-                f'<span class="tdd-stat-value" style="color:var(--tdd-gold);">{score * 10:.1f}</span>'
+                f'<span class="tdd-stat-value" style="color:var(--tdd-gold);">{diamonds:.1f}</span>'
                 f'</div>'
             )
 
@@ -1303,14 +1303,15 @@ def _build_pitcher_rows(
 ) -> list[dict]:
     """Build display rows for a set of pitchers."""
     rows: list[dict] = []
-    # Use diamond_rating from rankings as source of truth
-    _p_ranks = load_rankings("pitchers") if "diamond_rating" not in pitchers.columns else pd.DataFrame()
-    if not _p_ranks.empty and "diamond_rating" in _p_ranks.columns:
+    # Diamond rating — always derived from tdd_value_score
+    from lib.diamond_rating import score_to_diamonds
+    _p_ranks = load_rankings("pitchers") if "tdd_value_score" not in pitchers.columns else pd.DataFrame()
+    if not _p_ranks.empty and "tdd_value_score" in _p_ranks.columns:
         pitchers = pitchers.merge(
-            _p_ranks[["pitcher_id", "diamond_rating"]].drop_duplicates(),
+            _p_ranks[["pitcher_id", "tdd_value_score"]].drop_duplicates(),
             on="pitcher_id", how="left",
         )
-    sort_col = "diamond_rating" if "diamond_rating" in pitchers.columns else "composite_score"
+    sort_col = "tdd_value_score" if "tdd_value_score" in pitchers.columns else "composite_score"
     for _, row in pitchers.sort_values(sort_col, ascending=False).iterrows():
         pid = int(row["pitcher_id"])
         inj = injury_lookup.get(pid)
@@ -1319,8 +1320,8 @@ def _build_pitcher_rows(
             sev = inj["severity"]
             tag = "[IL-60]" if sev == "major" else "[IL]" if sev == "significant" else "[DTD]"
             name = f"{tag} {name}"
-        dr = row.get("diamond_rating")
-        rating_str = f"{dr:.1f}" if pd.notna(dr) else diamond_rating_text_composite(row.get("composite_score", 0))
+        tvs = row.get("tdd_value_score")
+        rating_str = f"{score_to_diamonds(tvs):.1f}" if pd.notna(tvs) else diamond_rating_text_composite(row.get("composite_score", 0))
         r: dict[str, object] = {
             "Name": name,
             "Age": int(row["age"]) if pd.notna(row.get("age")) else "",
@@ -1470,14 +1471,15 @@ def _render_roster_tab(
     else:
         h_rows = []
         if not team_hitters.empty:
-            # Use diamond_rating from rankings as source of truth
-            _h_ranks = load_rankings("hitters") if "diamond_rating" not in team_hitters.columns else pd.DataFrame()
-            if not _h_ranks.empty and "diamond_rating" in _h_ranks.columns:
+            # Diamond rating — always derived from tdd_value_score
+            from lib.diamond_rating import score_to_diamonds
+            _h_ranks = load_rankings("hitters") if "tdd_value_score" not in team_hitters.columns else pd.DataFrame()
+            if not _h_ranks.empty and "tdd_value_score" in _h_ranks.columns:
                 team_hitters = team_hitters.merge(
-                    _h_ranks[["batter_id", "diamond_rating"]].drop_duplicates(),
+                    _h_ranks[["batter_id", "tdd_value_score"]].drop_duplicates(),
                     on="batter_id", how="left",
                 )
-            sort_col = "diamond_rating" if "diamond_rating" in team_hitters.columns else "composite_score"
+            sort_col = "tdd_value_score" if "tdd_value_score" in team_hitters.columns else "composite_score"
             for _, row in team_hitters.sort_values(sort_col, ascending=False).iterrows():
                 pid = int(row["batter_id"])
                 inj = injury_lookup.get(pid)
@@ -1486,8 +1488,8 @@ def _render_roster_tab(
                     sev = inj["severity"]
                     tag = "[IL-60]" if sev == "major" else "[IL]" if sev == "significant" else "[DTD]"
                     name = f"{tag} {name}"
-                dr = row.get("diamond_rating")
-                rating_str = f"{dr:.1f}" if pd.notna(dr) else diamond_rating_text_composite(row.get("composite_score", 0))
+                tvs = row.get("tdd_value_score")
+                rating_str = f"{score_to_diamonds(tvs):.1f}" if pd.notna(tvs) else diamond_rating_text_composite(row.get("composite_score", 0))
                 r: dict[str, object] = {
                     "Name": name,
                     "Age": int(row["age"]) if pd.notna(row.get("age")) else "",

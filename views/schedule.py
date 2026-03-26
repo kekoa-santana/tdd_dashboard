@@ -15,7 +15,7 @@ from config import (
     SCHEDULE_REFRESH_MINUTES, GAME_WINDOW_START_HOUR, GAME_WINDOW_END_HOUR,
 )
 from services.data_loader import (
-    load_todays_games, load_todays_sims, load_todays_lineups,
+    load_todays_games, load_todays_lineups,
     load_update_metadata, load_pitcher_arsenal, load_hitter_vulnerability,
     load_hitter_strength,
     load_projections, load_counting, load_game_info, load_player_teams,
@@ -28,7 +28,7 @@ from services.data_loader import (
     load_batter_pitch_count_features, load_tto_profiles,
     load_pitcher_exit_tendencies,
     load_pitcher_location_grid, load_hitter_zone_grid,
-    load_roster,
+    load_roster, load_game_props,
     fetch_live_schedule, fetch_live_lineups,
 )
 from utils.helpers import get_team_lookup
@@ -81,7 +81,7 @@ def _render_todays_games() -> None:
     fresh lineups/pitchers from the MLB API on demand.
     """
     meta = load_update_metadata()
-    sims = load_todays_sims()
+    sims = load_game_props()
 
     proj_ts = meta.get("last_updated")
 
@@ -153,26 +153,19 @@ def _render_schedule_cards(
         for _, _r in _p_arch.iterrows():
             _p_arch_lookup[int(_r["pitcher_id"])] = _r["archetype_name"]
 
-    # Diamond rating lookup from rankings | use pre-computed diamond_rating (0-10)
-    # when available, fall back to tdd_value_score (0-1) converted via score_to_diamonds
+    # Diamond rating lookup — always derived from tdd_value_score via score_to_diamonds
     from services.data_loader import load_rankings
     from lib.diamond_rating import score_to_diamonds
     _h_rankings = load_rankings("hitters")
     _p_rankings = load_rankings("pitchers")
     _diamond_lookup: dict[int, float] = {}
-    if not _h_rankings.empty:
-        use_precomputed = "diamond_rating" in _h_rankings.columns
+    if not _h_rankings.empty and "tdd_value_score" in _h_rankings.columns:
         for _, _r in _h_rankings.iterrows():
-            if use_precomputed and pd.notna(_r.get("diamond_rating")):
-                _diamond_lookup[int(_r["batter_id"])] = _r["diamond_rating"]
-            elif "tdd_value_score" in _r.index:
+            if pd.notna(_r.get("tdd_value_score")):
                 _diamond_lookup[int(_r["batter_id"])] = score_to_diamonds(_r["tdd_value_score"])
-    if not _p_rankings.empty:
-        use_precomputed = "diamond_rating" in _p_rankings.columns
+    if not _p_rankings.empty and "tdd_value_score" in _p_rankings.columns:
         for _, _r in _p_rankings.iterrows():
-            if use_precomputed and pd.notna(_r.get("diamond_rating")):
-                _diamond_lookup[int(_r["pitcher_id"])] = _r["diamond_rating"]
-            elif "tdd_value_score" in _r.index:
+            if pd.notna(_r.get("tdd_value_score")):
                 _diamond_lookup[int(_r["pitcher_id"])] = score_to_diamonds(_r["tdd_value_score"])
 
     # Hitter projection lookup: batter_id → {k_rate, bb_rate, hr, ...}
@@ -268,6 +261,29 @@ def _render_schedule_cards(
     _tto_profiles = load_tto_profiles()
     _exit_tendencies = load_pitcher_exit_tendencies()
 
+    # Game props (player projection edges)
+    _game_props = load_game_props()
+    # Resolve numeric player_name values using projection data
+    if not _game_props.empty:
+        _name_lookup: dict[int, str] = {}
+        _hp = load_projections("hitter")
+        if not _hp.empty and "batter_name" in _hp.columns:
+            for _, _r in _hp.iterrows():
+                _name_lookup[int(_r["batter_id"])] = _r["batter_name"]
+        _pp = load_projections("pitcher")
+        if not _pp.empty and "pitcher_name" in _pp.columns:
+            for _, _r in _pp.iterrows():
+                _name_lookup[int(_r["pitcher_id"])] = _r["pitcher_name"]
+        # Also pull names from lineups (covers anyone missing from projections)
+        if not lineups.empty and "batter_name" in lineups.columns:
+            for _, _r in lineups.iterrows():
+                pid = int(_r.get("batter_id", 0))
+                if pid and pid not in _name_lookup:
+                    _name_lookup[pid] = _r["batter_name"]
+        _game_props["player_name"] = _game_props["player_id"].map(
+            lambda pid: _name_lookup.get(int(pid), str(pid))
+        )
+
     # Always build projection lookup (used by cards + drilldown)
     proj_lookup = _build_projection_lookup()
     # Inject accurate tdd_value_score + scouting grades into pitcher proj lookup
@@ -313,9 +329,30 @@ def _render_schedule_cards(
         game_dt = game.get("game_date", "")
         status = game.get("status", "")
 
-        game_sims = sims[sims["game_pk"] == gpk] if not sims.empty else pd.DataFrame()
-        away_sim = game_sims[game_sims["side"] == "away"].iloc[0] if not game_sims.empty and (game_sims["side"] == "away").any() else None
-        home_sim = game_sims[game_sims["side"] == "home"].iloc[0] if not game_sims.empty and (game_sims["side"] == "home").any() else None
+        # game_props has per-stat rows; pivot to get expected_k / expected_ip per side
+        game_sims = sims[(sims["game_pk"] == gpk) & (sims["player_type"] == "pitcher")] if not sims.empty else pd.DataFrame()
+
+        def _extract_pitcher_sim(side_label: str) -> dict | None:
+            side_rows = game_sims[game_sims["side"] == side_label] if not game_sims.empty else pd.DataFrame()
+            if side_rows.empty:
+                return None
+            k_row = side_rows[side_rows["stat"] == "K"]
+            outs_row = side_rows[side_rows["stat"] == "Outs"]
+            result = {}
+            if not k_row.empty:
+                result["expected_k"] = float(k_row.iloc[0]["expected"])
+            if not outs_row.empty:
+                result["expected_ip"] = round(float(outs_row.iloc[0]["expected"]) / 3, 1)
+            # Pass through metadata from any row
+            first = side_rows.iloc[0]
+            for col in ("dk_mean", "espn_mean", "umpire_k_lift", "weather_k_lift",
+                         "expected_ip", "expected_pitches", "expected_bf"):
+                if col in first.index and pd.notna(first.get(col)):
+                    result.setdefault(col, first[col])
+            return result if result else None
+
+        away_sim = _extract_pitcher_sim("away")
+        home_sim = _extract_pitcher_sim("home")
 
         # Status badge
         status_badge = ""
@@ -351,11 +388,11 @@ def _render_schedule_cards(
             arch_tag = f'<span class="tdd-stat-label"> · {_pp_arch}</span>' if _pp_arch else ""
 
             if sim is not None:
-                exp_k = sim["expected_k"]
+                exp_k = sim.get("expected_k")
                 exp_ip = sim.get("expected_ip")
-                stats = f'E[K] {exp_k:.1f}'
-                if pd.notna(exp_ip):
-                    stats += f' · IP {exp_ip:.1f}'
+                stats = f'E[K] {exp_k:.1f}' if exp_k is not None else ""
+                if exp_ip is not None:
+                    stats += f' · IP {exp_ip:.1f}' if stats else f'IP {exp_ip:.1f}'
                 return (
                     f'<span class="tdd-player-name">{pp_name}</span>'
                     f'{arch_tag}'
@@ -440,17 +477,173 @@ def _render_schedule_cards(
                 str_df=_str_df,
                 ploc_df=_ploc_df,
                 hzone_df=_hzone_df,
+                game_props=_game_props,
             )
 
     if not sims.empty and not sims_stale:
+        pitcher_sims = sims[(sims["player_type"] == "pitcher") & (sims["stat"] == "K")]
+        n_pitchers = len(pitcher_sims)
         st.markdown("---")
         st.markdown(
             f'<div style="color:var(--tdd-slate); font-size:0.8rem;">'
-            f'{len(sims)} pitchers simulated | '
-            f'{sims["has_lineup"].sum()} with lineup data | '
+            f'{n_pitchers} pitchers simulated | '
             f'10,000 Monte Carlo draws per pitcher</div>',
             unsafe_allow_html=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# Projected Performers
+# ---------------------------------------------------------------------------
+
+_STAT_LABELS = {"TB": "Total Bases", "K": "Strikeouts", "H": "Hits", "Outs": "Outs Recorded"}
+_LINE_LABELS = {"low": "Low", "mid": "Mid", "high": "High"}
+
+
+def _edge_color(p_over: float) -> str:
+    """Return CSS color based on how far P(over) is from 0.5."""
+    if p_over >= 0.60:
+        return "var(--tdd-sage)"
+    if p_over <= 0.40:
+        return "var(--tdd-ember)"
+    return "var(--tdd-slate)"
+
+
+def _edge_label(p_over: float) -> str:
+    """Human-readable edge label."""
+    if p_over >= 0.60:
+        return "Projected to Pop"
+    if p_over <= 0.40:
+        return "Projected Quiet"
+    return "Neutral"
+
+
+def _render_props_section(gpk: int, props_df: pd.DataFrame) -> None:
+    """Render projected performer edges for a single game."""
+    if props_df.empty:
+        st.markdown(
+            '<div class="tdd-meta">No projection data available for this game.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    game_df = props_df[props_df["game_pk"] == gpk].copy()
+    if game_df.empty:
+        st.markdown(
+            '<div class="tdd-meta">No projection data available for this game.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # Edge strength = distance of p_over_mid from 0.50
+    game_df["edge"] = (game_df["p_over_mid"] - 0.50).abs()
+
+    # Split into over/under
+    pop_df = game_df[game_df["p_over_mid"] >= 0.58].sort_values("p_over_mid", ascending=False)
+    quiet_df = game_df[game_df["p_over_mid"] <= 0.42].sort_values("p_over_mid")
+
+    st.markdown(EXPANDABLE_CARD_CSS, unsafe_allow_html=True)
+
+    # --- Projected to Pop ---
+    st.markdown(
+        '<div style="font-size:0.85rem; font-weight:600; color:var(--tdd-sage); '
+        'margin:0.6rem 0 0.3rem; letter-spacing:0.3px;">Projected to Pop</div>',
+        unsafe_allow_html=True,
+    )
+    if pop_df.empty:
+        st.markdown(
+            '<div class="tdd-meta" style="margin-bottom:0.5rem;">No strong over-expected projections for this game.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        cards_html = ""
+        for _, row in pop_df.head(5).iterrows():
+            cards_html += _prop_card_html(row)
+        st.markdown(cards_html, unsafe_allow_html=True)
+
+    # --- Projected Quiet ---
+    st.markdown(
+        '<div style="font-size:0.85rem; font-weight:600; color:var(--tdd-ember); '
+        'margin:0.8rem 0 0.3rem; letter-spacing:0.3px;">Projected Quiet</div>',
+        unsafe_allow_html=True,
+    )
+    if quiet_df.empty:
+        st.markdown(
+            '<div class="tdd-meta" style="margin-bottom:0.5rem;">No strong under-expected projections for this game.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        cards_html = ""
+        for _, row in quiet_df.head(5).iterrows():
+            cards_html += _prop_card_html(row)
+        st.markdown(cards_html, unsafe_allow_html=True)
+
+
+def _prop_card_html(row: pd.Series) -> str:
+    """Build an expandable card for a single prop edge."""
+    name = row["player_name"]
+    stat = row["stat"]
+    stat_label = _STAT_LABELS.get(stat, stat)
+    team = row["team"]
+    opp = row["opponent"]
+    expected = row["expected"]
+    p_mid = row["p_over_mid"]
+    line_mid = row["line_mid"]
+    ptype = row["player_type"]
+    type_badge = "P" if ptype == "pitcher" else "H"
+
+    color = _edge_color(p_mid)
+    direction = "Over" if p_mid >= 0.50 else "Under"
+    pct = p_mid * 100
+
+    # Summary row: name | stat | expected vs line | P(over) badge
+    summary = (
+        f'<span style="display:flex; align-items:center; gap:0.5rem; width:100%;">'
+        # Type badge
+        f'<span style="font-size:0.65rem; color:var(--tdd-slate); '
+        f'border:1px solid var(--tdd-dark-border); border-radius:3px; '
+        f'padding:0 0.25rem; flex-shrink:0;">{type_badge}</span>'
+        # Name + team
+        f'<span class="tdd-player-name" style="min-width:0; flex:1;">{name}'
+        f'<span class="tdd-stat-label" style="margin-left:0.3rem;">{team} vs {opp}</span></span>'
+        # Stat + expected
+        f'<span style="color:var(--tdd-cream); font-size:0.8rem; flex-shrink:0;">'
+        f'{stat_label} {expected:.2f}</span>'
+        # Edge badge
+        f'<span style="color:{color}; font-size:0.75rem; font-weight:600; '
+        f'flex-shrink:0; min-width:3.5rem; text-align:right;">'
+        f'{direction} {pct:.0f}%</span>'
+        f'</span>'
+    )
+
+    # Detail: table with low/mid/high lines
+    detail = (
+        '<table style="width:100%; font-size:0.78rem; border-collapse:collapse; margin-top:0.2rem;">'
+        '<tr style="color:var(--tdd-slate); border-bottom:1px solid var(--tdd-dark-border);">'
+        '<th style="text-align:left; padding:0.25rem 0.5rem;">Line</th>'
+        '<th style="text-align:center; padding:0.25rem 0.5rem;">Threshold</th>'
+        '<th style="text-align:center; padding:0.25rem 0.5rem;">P(Over)</th>'
+        '</tr>'
+    )
+    for level, label in [("low", "Low"), ("mid", "Mid"), ("high", "High")]:
+        line_val = row[f"line_{level}"]
+        p_val = row[f"p_over_{level}"]
+        p_color = _edge_color(p_val)
+        highlight = ' font-weight:600;' if level == "mid" else ''
+        detail += (
+            f'<tr>'
+            f'<td style="padding:0.25rem 0.5rem; color:var(--tdd-cream);{highlight}">{label}</td>'
+            f'<td style="text-align:center; padding:0.25rem 0.5rem; color:var(--tdd-cream);{highlight}">{line_val:.1f}</td>'
+            f'<td style="text-align:center; padding:0.25rem 0.5rem; color:{p_color};{highlight}">{p_val*100:.0f}%</td>'
+            f'</tr>'
+        )
+    detail += '</table>'
+    detail += (
+        f'<div class="tdd-meta" style="margin-top:0.3rem;">'
+        f'Expected: {expected:.2f} | Std Dev: {row["std"]:.2f}</div>'
+    )
+
+    return expandable_card_html(summary, detail)
 
 
 # ---------------------------------------------------------------------------
@@ -486,6 +679,7 @@ def _render_game_drilldown(
     str_df: pd.DataFrame | None = None,
     ploc_df: pd.DataFrame | None = None,
     hzone_df: pd.DataFrame | None = None,
+    game_props: pd.DataFrame | None = None,
 ) -> None:
     """Rich game drill-down: lineup matchups, matchup analysis, and game simulator."""
     away_abbr = game.get("away_abbr", "?")
@@ -528,8 +722,8 @@ def _render_game_drilldown(
 
     # --- Inline toolbar: Section | Team | (Matchup picker) ---
     _SECTIONS = [
-        "Lineups", "Game Simulator",
-        "Matchup Analysis",
+        "Lineups", "Projected Performers",
+        "Game Simulator", "Matchup Analysis",
     ]
     team_options = [away_abbr, home_abbr]
 
@@ -545,7 +739,7 @@ def _render_game_drilldown(
             "Team", team_options,
             key=f"dd_team_{gpk}",
             label_visibility="collapsed",
-            disabled=section == "Lineups",
+            disabled=section in ("Lineups", "Projected Performers"),
         )
     side_idx = 0 if selected_team == away_abbr else 1
     active_side = sides[side_idx]
@@ -576,6 +770,11 @@ def _render_game_drilldown(
             sides, h_arch_lookup, h_stat_lookup,
             arsenal_df, vuln_df, gpk,
             pos_lookup=pos_lookup or {},
+        )
+
+    elif section == "Projected Performers":
+        _render_props_section(
+            gpk, game_props if game_props is not None else pd.DataFrame(),
         )
 
     elif section == "Matchup Analysis":
@@ -2077,10 +2276,11 @@ def _render_sim_tab(
 
     # Stat display config
     _STAT_META = {
-        "k":  {"label": "K",  "word": "strikeouts", "lines": (3.5, 10.5), "hi": 6, "vhi": 8},
-        "bb": {"label": "BB", "word": "walks",      "lines": (1.5, 5.5),  "hi": 3, "vhi": 4},
-        "h":  {"label": "H",  "word": "hits",       "lines": (3.5, 9.5),  "hi": 6, "vhi": 8},
-        "hr": {"label": "HR", "word": "home runs",  "lines": (0.5, 2.5),  "hi": 1, "vhi": 2},
+        "k":    {"label": "K",    "word": "strikeouts", "lines": (3.5, 10.5), "hi": 6, "vhi": 8},
+        "bb":   {"label": "BB",   "word": "walks",      "lines": (1.5, 5.5),  "hi": 3, "vhi": 4},
+        "h":    {"label": "H",    "word": "hits",       "lines": (3.5, 9.5),  "hi": 6, "vhi": 8},
+        "hr":   {"label": "HR",   "word": "home runs",  "lines": (0.5, 2.5),  "hi": 1, "vhi": 2},
+        "outs": {"label": "Outs", "word": "outs",       "lines": (11.5, 21.5), "hi": 17, "vhi": 20},
     }
 
     # Helper: fallback rate samples
@@ -2237,7 +2437,7 @@ def _render_sim_tab(
         tb_stat, tb_line, _ = st.columns([1, 2, 3])
         with tb_stat:
             selected_stat_label = st.selectbox(
-                "Stat", ["K", "BB", "H", "HR"],
+                "Stat", ["K", "BB", "H", "HR", "Outs"],
                 key=f"sim_stat_{_side_key}", label_visibility="collapsed",
             )
         stat_key = selected_stat_label.lower()
@@ -2894,7 +3094,7 @@ def page_schedule() -> None:
 
     if is_today:
         # Today: use cached parquets (sims + lineups)
-        sims = load_todays_sims()
+        sims = load_game_props()
         schedule = load_todays_games()
         lineups = load_todays_lineups()
     else:

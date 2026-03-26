@@ -238,14 +238,14 @@ def _render_power_rankings(
 
     df = df.sort_values("rank").reset_index(drop=True)
 
-    # Pre-load rankings + player-team mapping for expanded details
-    from services.data_loader import load_rankings, load_player_teams
+    # Pre-load rankings + roster for expanded details
+    from services.data_loader import load_rankings, load_roster
     try:
         _hr_all = load_rankings("hitters")
         _pr_all = load_rankings("pitchers")
-        _pt_loaded = load_player_teams()
+        _roster_loaded = load_roster()
     except Exception:
-        _hr_all = _pr_all = _pt_loaded = None
+        _hr_all = _pr_all = _roster_loaded = None
 
     cards_html: list[str] = []
     for _, row in df.iterrows():
@@ -362,10 +362,10 @@ def _render_power_rankings(
         # Top contributing players (right side)
         players_html = ""
         try:
-            _pt_all = load_player_teams() if _pt_loaded is None else _pt_loaded
+            _roster = _roster_loaded if _roster_loaded is not None else load_roster()
             _team_pids = set(
-                _pt_all[_pt_all["team_abbr"] == abbr]["player_id"]
-            ) if not _pt_all.empty else set()
+                _roster[_roster["team_abbr"] == abbr]["player_id"]
+            ) if not _roster.empty else set()
 
             top_list: list[tuple[str, str, int, float]] = []  # name, pos, rank, score
 
@@ -394,6 +394,7 @@ def _render_power_rankings(
             top_list.sort(key=lambda x: x[3], reverse=True)
             for name, pos, lg_rank, sc in top_list[:8]:
                 rk_color = GOLD if lg_rank <= 5 else SAGE if lg_rank <= 15 else SLATE
+                diamonds = score_to_diamonds(sc)
                 players_html += (
                     f'<div style="display:flex; align-items:center; gap:6px; '
                     f'padding:3px 0; border-bottom:1px solid {DARK_BORDER};">'
@@ -402,7 +403,7 @@ def _render_power_rankings(
                     f'<span style="color:{SLATE}; font-size:0.72rem; min-width:1.8rem;">{pos}</span>'
                     f'<span style="color:var(--tdd-cream); font-size:0.82rem; flex:1;">{name}</span>'
                     f'<span style="color:var(--tdd-gold); font-weight:600; font-size:0.82rem;">'
-                    f'{sc * 10:.1f}</span>'
+                    f'{diamonds:.1f}</span>'
                     f'</div>'
                 )
         except Exception:

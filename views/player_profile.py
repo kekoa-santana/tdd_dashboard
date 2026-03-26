@@ -1191,35 +1191,29 @@ def page_player_profile() -> None:
                     pf_label = f"HR Park: {pf:.3f}"
                     header_parts.append(pf_label)
 
-    # Use pre-computed diamond_rating from rankings as single source of truth.
-    # Shows both Overall Rating (gold) and Projected Value (sage) side by side.
+    # Diamond rating — always derived from tdd_value_score via score_to_diamonds
+    from lib.diamond_rating import score_to_diamonds
     _ranks = load_rankings("hitters") if player_type != "Pitcher" else load_rankings("pitchers")
     _id_col = "batter_id" if player_type != "Pitcher" else "pitcher_id"
     _rank_row = _ranks[_ranks[_id_col] == player_id] if not _ranks.empty else pd.DataFrame()
-    if not _rank_row.empty and "diamond_rating" in _rank_row.columns and pd.notna(_rank_row["diamond_rating"].iloc[0]):
-        _precomputed_dr = float(_rank_row["diamond_rating"].iloc[0])
-        diamond_html = diamond_rating_html(0, size="lg", precomputed=_precomputed_dr)
+    if not _rank_row.empty and "tdd_value_score" in _rank_row.columns and pd.notna(_rank_row["tdd_value_score"].iloc[0]):
+        _tvs = float(_rank_row["tdd_value_score"].iloc[0])
+        _dr = score_to_diamonds(_tvs)
+        diamond_html = diamond_rating_html(0, size="lg", precomputed=_dr)
     else:
         composite = player_row["composite_score"]
         diamond_html = diamond_rating_html_composite(composite, size="lg")
 
-    # Projected Value rating (SAGE colored, side by side with overall)
-    _proj_html = ""
-    if not _rank_row.empty and "current_value_score" in _rank_row.columns:
-        from lib.diamond_rating import score_to_diamonds
-        _proj_score = float(_rank_row["current_value_score"].iloc[0])
-        _proj_rating = score_to_diamonds(_proj_score)
-        _proj_diamonds = ""
-        for _di in range(10):
-            if _di < int(_proj_rating) or (_di == int(_proj_rating) and _proj_rating - int(_proj_rating) >= 0.5):
-                _proj_diamonds += f'<span style="color:{SAGE}">&#9670;</span>'
-            else:
-                _proj_diamonds += f'<span style="color:{SLATE}; opacity:0.35">&#9671;</span>'
-        _proj_html = (
-            f'<div style="margin-top:4px; font-size:0.85rem;">'
-            f'<span style="color:{SLATE}; font-size:0.7rem;">PROJECTED </span>'
-            f'<span style="letter-spacing:2px;">{_proj_diamonds}</span>'
-            f' <span style="color:{SAGE}; font-size:0.8rem;">{_proj_rating:.1f}</span>'
+    # Tools Grade — scouting-based rating (shown below diamond rating with tooltip)
+    _tools_html = ""
+    if not _rank_row.empty and "tools_rating" in _rank_row.columns and pd.notna(_rank_row["tools_rating"].iloc[0]):
+        _tools_val = float(_rank_row["tools_rating"].iloc[0])
+        _role_label = "pitchers" if player_type == "Pitcher" else "hitters"
+        _tools_html = (
+            f'<div style="margin-top:4px; font-size:0.8rem; cursor:help;" '
+            f'title="Tools Grade: scaled 1-10 against all {_role_label} in the system based on scouting grades (20-80 scale)">'
+            f'<span style="color:{SLATE}; font-size:0.7rem;">TOOLS </span>'
+            f'<span style="color:{GOLD}; font-weight:600;">{_tools_val:.1f}</span>'
             f'</div>'
         )
 
@@ -1262,7 +1256,7 @@ def page_player_profile() -> None:
         f'</div>'
         f'<div style="text-align:right;">'
         f'{diamond_html}'
-        f'{_proj_html}'
+        f'{_tools_html}'
         f'</div>'
         f'</div>'
     )
@@ -1283,8 +1277,8 @@ def page_player_profile() -> None:
         tw_parts = []
         if not h_row.empty:
             hr = h_row.iloc[0]
-            h_dr = hr.get("diamond_rating", "")
-            h_dr_s = f"{h_dr:.1f}" if pd.notna(h_dr) else ""
+            h_tvs = hr.get("tdd_value_score")
+            h_dr_s = f"{score_to_diamonds(h_tvs):.1f}" if pd.notna(h_tvs) else ""
             tw_parts.append(
                 f'<span style="color:var(--tdd-gold); font-weight:700;">Batting: {h_dr_s}</span>'
                 f' <span style="color:var(--tdd-slate); font-size:0.85em;">'
@@ -1293,8 +1287,8 @@ def page_player_profile() -> None:
             )
         if not p_row.empty:
             pr = p_row.iloc[0]
-            p_dr = pr.get("diamond_rating", "")
-            p_dr_s = f"{p_dr:.1f}" if pd.notna(p_dr) else ""
+            p_tvs = pr.get("tdd_value_score")
+            p_dr_s = f"{score_to_diamonds(p_tvs):.1f}" if pd.notna(p_tvs) else ""
             tw_parts.append(
                 f'<span style="color:var(--tdd-gold); font-weight:700;">Pitching: {p_dr_s}</span>'
                 f' <span style="color:var(--tdd-slate); font-size:0.85em;">'

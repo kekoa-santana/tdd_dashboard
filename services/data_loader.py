@@ -277,6 +277,14 @@ def load_todays_batter_sims() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_DATA_TTL)
+def load_game_props() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "game_props.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
 def load_pitcher_sim_log() -> pd.DataFrame:
     path = DASHBOARD_DIR / "pitcher_sim_log.parquet"
     if not path.exists():

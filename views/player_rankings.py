@@ -448,14 +448,8 @@ def _render_ranking_card(
         if info_col and info_col in row.index and pd.notna(row[info_col]):
             info_html = f'<span class="lb-info">{row[info_col]}</span>'
 
-        # Diamond display uses the selected score column's value, converted
-        # to 0-10 scale.  Only uses precomputed diamond_rating for overall mode.
-        # Projected mode forces re-conversion and renders in SAGE color.
-        if not projected and score_col not in ("current_value_score",):
-            precomputed = row.get("diamond_rating") if "diamond_rating" in row.index else None
-        else:
-            precomputed = None
-        val_html = _rating_val_html(row[score_col], precomputed_rating=precomputed, projected=projected)
+        # Diamond display — always convert score via score_to_diamonds
+        val_html = _rating_val_html(row[score_col], precomputed_rating=None, projected=projected)
 
         # Inline stats (if detail_stats provided)
         stat_inline = ""
