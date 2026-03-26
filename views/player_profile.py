@@ -1503,14 +1503,13 @@ def page_player_profile() -> None:
 
     if _player_seasons:
         _season_opts = [f"{s} Season" for s in _player_seasons]
-        with st.container(key="gold_season_pick"):
-            _season_pick = st.selectbox(
-                "Season",
-                _season_opts,
-                index=0,
-                key="profile_season_pick",
-                label_visibility="collapsed",
-            )
+        _season_pick = st.selectbox(
+            "Season",
+            _season_opts,
+            index=0,
+            key="profile_season_pick",
+            label_visibility="collapsed",
+        )
         _pick_season = int(_season_pick.split()[0])
     else:
         _pick_season = _recent_season
@@ -1738,13 +1737,12 @@ def page_player_profile() -> None:
         f'<div class="tdd-section-hdr" style="margin-top:1.5rem;">Deep Dive</div>',
         unsafe_allow_html=True,
     )
-    with st.container(key="gold_deep_season"):
-        deep_season = st.selectbox(
-            "Season", [str(s) for s in AVAILABLE_SEASONS] + ["Career"],
-            index=len(AVAILABLE_SEASONS) - 1,  # default to most recent
-            key="profile_deep_dive_season",
-            label_visibility="collapsed",
-        )
+    deep_season = st.selectbox(
+        "Season", [str(s) for s in AVAILABLE_SEASONS] + ["Career"],
+        index=len(AVAILABLE_SEASONS) - 1,  # default to most recent
+        key="profile_deep_dive_season",
+        label_visibility="collapsed",
+    )
     _deep_is_career = deep_season == "Career"
     _deep_season = None if _deep_is_career else int(deep_season)
 

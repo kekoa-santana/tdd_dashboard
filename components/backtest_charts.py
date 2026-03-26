@@ -1,12 +1,53 @@
-"""Backtest visualization charts for the Model Performance page."""
+"""Backtest and in-season accuracy charts for the Model Performance page.
+
+All charts use plotly with transparent backgrounds to match the dashboard theme.
+"""
 from __future__ import annotations
 
-from matplotlib.figure import Figure
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 
 from config import GOLD, EMBER, SAGE, SLATE, CREAM, DARK
-from components.charts import add_watermark
+
+# Shared plotly config passed to st.plotly_chart()
+PLOTLY_CONFIG = {"displayModeBar": False, "scrollZoom": False}
+
+# Common layout defaults
+_BASE_LAYOUT = dict(
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    margin=dict(l=20, r=20, t=40, b=20),
+    font=dict(color=CREAM),
+    dragmode=False,
+)
+
+_AXIS_STYLE = dict(
+    tickfont=dict(color=SLATE, size=9),
+    showgrid=False,
+    zeroline=False,
+    showline=False,
+)
+
+_GRID_AXIS = dict(
+    tickfont=dict(color=SLATE, size=9),
+    showgrid=True,
+    gridcolor="rgba(123,143,166,0.12)",
+    gridwidth=0.5,
+    zeroline=False,
+    showline=False,
+)
+
+
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+# ---------------------------------------------------------------------------
+# Backtest charts
+# ---------------------------------------------------------------------------
 
 
 def create_accuracy_bars(
@@ -14,47 +55,36 @@ def create_accuracy_bars(
     bayes_col: str,
     marcel_col: str,
     title: str,
-) -> Figure:
-    """Grouped bars: Bayes vs Marcel by test_season.
-
-    Parameters
-    ----------
-    df : DataFrame with ``test_season``, *bayes_col*, and *marcel_col* columns.
-    bayes_col / marcel_col : column names for the two systems.
-    title : chart title string.
-    """
+) -> go.Figure:
+    """Grouped bars: Bayes vs Marcel by test_season."""
     seasons = df["test_season"].astype(str).tolist()
     bayes_vals = df[bayes_col].tolist()
     marcel_vals = df[marcel_col].tolist()
 
-    x = np.arange(len(seasons))
-    width = 0.35
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        name="Bayes", x=seasons, y=bayes_vals,
+        marker_color=SAGE, opacity=0.85,
+        text=[f"{v:.3f}" for v in bayes_vals],
+        textposition="outside", textfont=dict(color=SAGE, size=10),
+    ))
+    fig.add_trace(go.Bar(
+        name="Marcel", x=seasons, y=marcel_vals,
+        marker_color=SLATE, opacity=0.85,
+        text=[f"{v:.3f}" for v in marcel_vals],
+        textposition="outside", textfont=dict(color=SLATE, size=10),
+    ))
 
-    fig = Figure(figsize=(5.5, 3.5))
-    ax = fig.subplots()
-    fig.patch.set_facecolor(DARK)
-    ax.set_facecolor(DARK)
-
-    ax.bar(x - width / 2, bayes_vals, width, label="Bayes", color=SAGE, alpha=0.85)
-    ax.bar(x + width / 2, marcel_vals, width, label="Marcel", color=SLATE, alpha=0.85)
-
-    # Value labels
-    for i, (bv, mv) in enumerate(zip(bayes_vals, marcel_vals)):
-        ax.text(i - width / 2, bv, f"{bv:.3f}", ha="center", va="bottom",
-                color=SAGE, fontsize=8, fontweight="bold")
-        ax.text(i + width / 2, mv, f"{mv:.3f}", ha="center", va="bottom",
-                color=SLATE, fontsize=8, fontweight="bold")
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(seasons)
-    ax.set_title(title, color=CREAM, fontsize=12, fontweight="bold", pad=10)
-    ax.legend(loc="upper right", fontsize=9, framealpha=0.3)
-    ax.tick_params(colors=SLATE, labelsize=9)
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-
-    add_watermark(fig)
-    fig.tight_layout()
+    fig.update_layout(
+        **_BASE_LAYOUT,
+        barmode="group",
+        height=300,
+        showlegend=True,
+        legend=dict(font=dict(color=CREAM, size=10), bgcolor="rgba(0,0,0,0)"),
+        title=dict(text=title, font=dict(color=CREAM, size=13), x=0.5, xanchor="center"),
+        xaxis=_AXIS_STYLE,
+        yaxis=_GRID_AXIS,
+    )
     return fig
 
 
@@ -62,16 +92,8 @@ def create_coverage_chart(
     df: pd.DataFrame,
     coverage_cols: list[str],
     labels: list[str],
-) -> Figure:
-    """Horizontal bars showing CI coverage vs expected targets.
-
-    Parameters
-    ----------
-    df : DataFrame (one row per test_season).
-    coverage_cols : list of column names holding coverage fractions.
-    labels : display labels for each coverage level (e.g. ["95% CI"]).
-    """
-    # Average across seasons for a single summary bar per level
+) -> go.Figure:
+    """Horizontal bars showing CI coverage vs expected targets."""
     avgs = [df[col].mean() for col in coverage_cols]
     targets = []
     for lbl in labels:
@@ -86,85 +108,73 @@ def create_coverage_chart(
         else:
             targets.append(0.95)
 
-    y = np.arange(len(labels))
-    fig = Figure(figsize=(5.5, max(2, len(labels) * 0.8)))
-    ax = fig.subplots()
-    fig.patch.set_facecolor(DARK)
-    ax.set_facecolor(DARK)
-
     colors = [SAGE if avg >= tgt * 0.95 else EMBER for avg, tgt in zip(avgs, targets)]
-    ax.barh(y, [a * 100 for a in avgs], height=0.5, color=colors, alpha=0.85)
 
-    for i, (avg, tgt) in enumerate(zip(avgs, targets)):
-        ax.plot([tgt * 100, tgt * 100], [i - 0.35, i + 0.35],
-                color=GOLD, linewidth=2, linestyle="--")
-        ax.text(avg * 100 + 1, i, f"{avg*100:.1f}%", va="center",
-                color=CREAM, fontsize=9, fontweight="bold")
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=labels, x=[a * 100 for a in avgs],
+        orientation="h",
+        marker_color=colors, opacity=0.85,
+        text=[f"{a*100:.1f}%" for a in avgs],
+        textposition="outside", textfont=dict(color=CREAM, size=10),
+    ))
 
-    ax.set_yticks(y)
-    ax.set_yticklabels(labels)
-    ax.set_xlim(0, 105)
-    ax.set_xlabel("Coverage %", color=SLATE, fontsize=10)
-    ax.set_title("Interval Coverage (dashed = target)", color=CREAM,
-                 fontsize=12, fontweight="bold", pad=10)
-    ax.tick_params(colors=CREAM, labelsize=9)
-    for spine in ax.spines.values():
-        spine.set_visible(False)
+    # Target lines
+    for i, tgt in enumerate(targets):
+        fig.add_shape(
+            type="line",
+            x0=tgt * 100, x1=tgt * 100,
+            y0=i - 0.4, y1=i + 0.4,
+            line=dict(color=GOLD, width=2, dash="dash"),
+        )
 
-    add_watermark(fig)
-    fig.tight_layout()
+    fig.update_layout(
+        **_BASE_LAYOUT,
+        height=max(180, len(labels) * 55),
+        title=dict(text="Interval Coverage (dashed = target)",
+                   font=dict(color=CREAM, size=13), x=0.5, xanchor="center"),
+        xaxis=dict(**_AXIS_STYLE, range=[0, 108],
+                   title=dict(text="Coverage %", font=dict(color=SLATE, size=10))),
+        yaxis=dict(**_AXIS_STYLE, autorange="reversed"),
+    )
     return fig
 
 
-def create_game_k_model_comparison(df: pd.DataFrame) -> Figure:
-    """Grouped bars comparing 4 model tiers by Brier score.
-
-    Expects columns: naive_avg_brier, poisson_avg_brier,
-    model_no_matchup_avg_brier, full_model_avg_brier.
-    """
+def create_game_k_model_comparison(df: pd.DataFrame) -> go.Figure:
+    """Grouped bars comparing 4 model tiers by Brier score."""
     tier_cols = [
         ("naive_avg_brier", "Naive"),
         ("poisson_avg_brier", "Poisson"),
         ("model_no_matchup_avg_brier", "No Matchup"),
         ("full_model_avg_brier", "Full Model"),
     ]
-
-    seasons = df["test_season"].astype(str).tolist()
-    n_seasons = len(seasons)
-    n_tiers = len(tier_cols)
-    width = 0.18
-    x = np.arange(n_seasons)
-
     tier_colors = [SLATE, EMBER, GOLD, SAGE]
+    seasons = df["test_season"].astype(str).tolist()
 
-    fig = Figure(figsize=(5.5, 3.5))
-    ax = fig.subplots()
-    fig.patch.set_facecolor(DARK)
-    ax.set_facecolor(DARK)
-
-    for j, ((col, label), color) in enumerate(zip(tier_cols, tier_colors)):
+    fig = go.Figure()
+    for (col, label), color in zip(tier_cols, tier_colors):
         if col not in df.columns:
             continue
-        offset = (j - n_tiers / 2 + 0.5) * width
         vals = df[col].tolist()
-        bars = ax.bar(x + offset, vals, width, label=label, color=color, alpha=0.85)
-        for bar, v in zip(bars, vals):
-            ax.text(bar.get_x() + bar.get_width() / 2, v,
-                    f"{v:.3f}", ha="center", va="bottom",
-                    color=color, fontsize=7, fontweight="bold")
+        fig.add_trace(go.Bar(
+            name=label, x=seasons, y=vals,
+            marker_color=color, opacity=0.85,
+            text=[f"{v:.3f}" for v in vals],
+            textposition="outside", textfont=dict(color=color, size=9),
+        ))
 
-    ax.set_xticks(x)
-    ax.set_xticklabels(seasons)
-    ax.set_ylabel("Avg Brier Score", color=SLATE, fontsize=10)
-    ax.set_title("Game K Model Comparison by Brier Score", color=CREAM,
-                 fontsize=12, fontweight="bold", pad=10)
-    ax.legend(loc="upper right", fontsize=8, framealpha=0.3)
-    ax.tick_params(colors=SLATE, labelsize=9)
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-
-    add_watermark(fig)
-    fig.tight_layout()
+    fig.update_layout(
+        **_BASE_LAYOUT,
+        barmode="group",
+        height=300,
+        showlegend=True,
+        legend=dict(font=dict(color=CREAM, size=9), bgcolor="rgba(0,0,0,0)"),
+        title=dict(text="Game K Model Comparison by Brier Score",
+                   font=dict(color=CREAM, size=13), x=0.5, xanchor="center"),
+        xaxis=_AXIS_STYLE,
+        yaxis=dict(**_GRID_AXIS,
+                   title=dict(text="Avg Brier Score", font=dict(color=SLATE, size=10))),
+    )
     return fig
 
 
@@ -174,45 +184,29 @@ def create_movers_chart(
     title: str,
     positive_color: str = SAGE,
     negative_color: str = EMBER,
-) -> Figure:
-    """Horizontal lollipop chart showing biggest projection movers.
-
-    Parameters
-    ----------
-    names : player names (top to bottom).
-    deltas : change values in percentage points.
-    title : chart title.
-    positive_color / negative_color : bar colors.
-    """
-    n = len(names)
-    fig = Figure(figsize=(5.5, max(2.5, n * 0.35)))
-    ax = fig.subplots()
-    fig.patch.set_facecolor(DARK)
-    ax.set_facecolor(DARK)
-
-    y = np.arange(n)
+) -> go.Figure:
+    """Horizontal bar chart showing biggest projection movers."""
     colors = [positive_color if d >= 0 else negative_color for d in deltas]
 
-    ax.barh(y, deltas, height=0.5, color=colors, alpha=0.85)
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=names, x=deltas,
+        orientation="h",
+        marker_color=colors, opacity=0.85,
+        text=[f"{d:+.1f}pp" for d in deltas],
+        textposition="outside", textfont=dict(color=CREAM, size=10),
+    ))
 
-    for i, (d, name) in enumerate(zip(deltas, names)):
-        align = "left" if d >= 0 else "right"
-        offset = 0.1 if d >= 0 else -0.1
-        ax.text(d + offset, i, f"{d:+.1f}pp", ha=align, va="center",
-                color=CREAM, fontsize=8, fontweight="bold")
+    fig.add_vline(x=0, line_color=SLATE, line_width=0.5, opacity=0.5)
 
-    ax.set_yticks(y)
-    ax.set_yticklabels(names, fontsize=9)
-    ax.axvline(0, color=SLATE, linewidth=0.5, alpha=0.5)
-    ax.set_title(title, color=CREAM, fontsize=12, fontweight="bold", pad=10)
-    ax.set_xlabel("Change (pp)", color=SLATE, fontsize=9)
-    ax.tick_params(colors=SLATE, labelsize=9)
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-
-    ax.invert_yaxis()
-    add_watermark(fig)
-    fig.tight_layout()
+    fig.update_layout(
+        **_BASE_LAYOUT,
+        height=max(200, len(names) * 32),
+        title=dict(text=title, font=dict(color=CREAM, size=13), x=0.5, xanchor="center"),
+        xaxis=dict(**_AXIS_STYLE,
+                   title=dict(text="Change (pp)", font=dict(color=SLATE, size=10))),
+        yaxis=dict(**_AXIS_STYLE, autorange="reversed"),
+    )
     return fig
 
 
@@ -222,16 +216,8 @@ def create_projection_timeline(
     id_col: str,
     name_col: str,
     stat_cols: list[str],
-) -> Figure | None:
-    """Line chart of projected rate over time with CI band.
-
-    Parameters
-    ----------
-    snapshots : {date_str: df} dict from weekly snapshot loader.
-    player_id : player to plot.
-    id_col / name_col : column names for player ID and display name.
-    stat_cols : list of stat column names to plot (e.g. ["projected_k_rate"]).
-    """
+) -> go.Figure | None:
+    """Line chart of projected rate over time with CI band."""
     dates = sorted(snapshots.keys())
     if not dates:
         return None
@@ -255,18 +241,23 @@ def create_projection_timeline(
         return None
 
     colors = [SAGE, GOLD, EMBER, SLATE]
-    fig = Figure(figsize=(5.5, 3.5))
-    ax = fig.subplots()
-    fig.patch.set_facecolor(DARK)
-    ax.set_facecolor(DARK)
+    fig = go.Figure()
 
     for i, s in enumerate(stat_cols):
         color = colors[i % len(colors)]
         vals = [v * 100 for v in stat_data[s]]
-        ax.plot(range(len(valid_dates)), vals, color=color,
-                linewidth=2, marker="o", markersize=5, label=s.replace("projected_", ""))
+        label = s.replace("projected_", "")
 
-        # CI band if available
+        fig.add_trace(go.Scatter(
+            x=valid_dates, y=vals,
+            mode="lines+markers",
+            line=dict(color=color, width=2),
+            marker=dict(size=6, color=color),
+            name=label,
+            hovertemplate="%{x}: %{y:.1f}%<extra></extra>",
+        ))
+
+        # CI band
         lo_col = s + "_2_5"
         hi_col = s + "_97_5"
         lo_vals, hi_vals = [], []
@@ -275,21 +266,244 @@ def create_projection_timeline(
             if not row.empty and lo_col in row.columns and hi_col in row.columns:
                 lo_vals.append(float(row.iloc[0][lo_col]) * 100)
                 hi_vals.append(float(row.iloc[0][hi_col]) * 100)
+
         if len(lo_vals) == len(valid_dates):
-            ax.fill_between(range(len(valid_dates)), lo_vals, hi_vals,
-                            alpha=0.15, color=color)
+            fig.add_trace(go.Scatter(
+                x=valid_dates + valid_dates[::-1],
+                y=hi_vals + lo_vals[::-1],
+                fill="toself",
+                fillcolor=_hex_to_rgba(color, 0.12),
+                line=dict(width=0),
+                hoverinfo="skip", showlegend=False,
+            ))
 
-    ax.set_xticks(range(len(valid_dates)))
-    ax.set_xticklabels(valid_dates, rotation=45, ha="right", fontsize=8)
-    ax.set_ylabel("Rate (%)", color=SLATE, fontsize=10)
     title = f"{player_name} | Projection Timeline" if player_name else "Projection Timeline"
-    ax.set_title(title, color=CREAM, fontsize=12, fontweight="bold", pad=10)
-    if len(stat_cols) > 1:
-        ax.legend(fontsize=8, framealpha=0.3)
-    ax.tick_params(colors=SLATE, labelsize=9)
-    for spine in ax.spines.values():
-        spine.set_visible(False)
+    fig.update_layout(
+        **_BASE_LAYOUT,
+        height=280,
+        showlegend=len(stat_cols) > 1,
+        legend=dict(font=dict(color=CREAM, size=9), bgcolor="rgba(0,0,0,0)"),
+        title=dict(text=title, font=dict(color=CREAM, size=13), x=0.5, xanchor="center"),
+        xaxis=dict(**_AXIS_STYLE, tickangle=-45),
+        yaxis=dict(**_GRID_AXIS,
+                   title=dict(text="Rate (%)", font=dict(color=SLATE, size=10))),
+    )
+    return fig
 
-    add_watermark(fig)
-    fig.tight_layout()
+
+# ---------------------------------------------------------------------------
+# In-season accuracy charts
+# ---------------------------------------------------------------------------
+
+
+def create_pred_vs_actual_scatter(
+    predicted: pd.Series,
+    actual: pd.Series,
+    stat_label: str,
+    has_lineup: pd.Series | None = None,
+) -> go.Figure:
+    """Scatter of predicted vs actual game-level stats with diagonal."""
+    fig = go.Figure()
+
+    if has_lineup is not None:
+        mask_lu = has_lineup.astype(bool)
+        if mask_lu.any():
+            fig.add_trace(go.Scatter(
+                x=predicted[mask_lu], y=actual[mask_lu],
+                mode="markers",
+                marker=dict(size=6, color=SAGE, opacity=0.5),
+                name="With lineup",
+                hovertemplate="Pred: %{x:.1f}, Actual: %{y:.0f}<extra></extra>",
+            ))
+        if (~mask_lu).any():
+            fig.add_trace(go.Scatter(
+                x=predicted[~mask_lu], y=actual[~mask_lu],
+                mode="markers",
+                marker=dict(size=6, color=SLATE, opacity=0.4),
+                name="No lineup",
+                hovertemplate="Pred: %{x:.1f}, Actual: %{y:.0f}<extra></extra>",
+            ))
+    else:
+        fig.add_trace(go.Scatter(
+            x=predicted, y=actual,
+            mode="markers",
+            marker=dict(size=6, color=SAGE, opacity=0.5),
+            hovertemplate="Pred: %{x:.1f}, Actual: %{y:.0f}<extra></extra>",
+            showlegend=False,
+        ))
+
+    lo = min(predicted.min(), actual.min(), 0)
+    hi = max(predicted.max(), actual.max()) + 1
+    fig.add_trace(go.Scatter(
+        x=[lo, hi], y=[lo, hi],
+        mode="lines",
+        line=dict(color=GOLD, width=1.5, dash="dash"),
+        hoverinfo="skip", showlegend=False,
+    ))
+
+    fig.update_layout(
+        **_BASE_LAYOUT,
+        height=300,
+        showlegend=has_lineup is not None,
+        legend=dict(font=dict(color=CREAM, size=9), bgcolor="rgba(0,0,0,0)"),
+        title=dict(text=f"Predicted vs Actual {stat_label}",
+                   font=dict(color=CREAM, size=13), x=0.5, xanchor="center"),
+        xaxis=dict(**_GRID_AXIS, range=[lo - 0.3, hi],
+                   title=dict(text=f"Predicted {stat_label}", font=dict(color=SLATE, size=10))),
+        yaxis=dict(**_GRID_AXIS, range=[lo - 0.3, hi],
+                   title=dict(text=f"Actual {stat_label}", font=dict(color=SLATE, size=10)),
+                   scaleanchor="x"),
+    )
+    return fig
+
+
+def create_error_histogram(
+    errors: pd.Series,
+    stat_label: str,
+) -> go.Figure:
+    """Histogram of prediction errors (predicted - actual)."""
+    fig = go.Figure()
+
+    # Split into positive (over-predict) and negative (under-predict)
+    pos = errors[errors >= 0]
+    neg = errors[errors < 0]
+
+    bin_size = max(0.5, (errors.max() - errors.min()) / 25)
+
+    if not neg.empty:
+        fig.add_trace(go.Histogram(
+            x=neg, marker_color=EMBER, opacity=0.8,
+            xbins=dict(size=bin_size),
+            hovertemplate="Error: %{x:.1f}, Count: %{y}<extra></extra>",
+            showlegend=False,
+        ))
+    if not pos.empty:
+        fig.add_trace(go.Histogram(
+            x=pos, marker_color=SAGE, opacity=0.8,
+            xbins=dict(size=bin_size),
+            hovertemplate="Error: %{x:.1f}, Count: %{y}<extra></extra>",
+            showlegend=False,
+        ))
+
+    fig.add_vline(x=0, line_color=GOLD, line_width=1.5, line_dash="dash", opacity=0.8)
+
+    mean_err = errors.mean()
+    fig.add_vline(x=mean_err, line_color=CREAM, line_width=1, line_dash="dot", opacity=0.6)
+    fig.add_annotation(
+        x=mean_err, y=1.0, yref="paper",
+        text=f"bias: {mean_err:+.2f}",
+        showarrow=False, font=dict(color=CREAM, size=10),
+        xanchor="left", xshift=6, yanchor="top",
+    )
+
+    fig.update_layout(
+        **_BASE_LAYOUT,
+        barmode="stack",
+        height=300,
+        title=dict(text=f"{stat_label} Error Distribution",
+                   font=dict(color=CREAM, size=13), x=0.5, xanchor="center"),
+        xaxis=dict(**_AXIS_STYLE,
+                   title=dict(text=f"{stat_label} Error (predicted - actual)",
+                              font=dict(color=SLATE, size=10))),
+        yaxis=dict(**_GRID_AXIS,
+                   title=dict(text="Count", font=dict(color=SLATE, size=10))),
+    )
+    return fig
+
+
+def create_rolling_mae_chart(
+    df: pd.DataFrame,
+    date_col: str,
+    stat_configs: list[tuple[str, str, str]],
+    window: int = 7,
+) -> go.Figure:
+    """Rolling MAE line chart over time.
+
+    stat_configs: list of (predicted_col, actual_col, label) tuples.
+    """
+    colors = [SAGE, GOLD, EMBER, SLATE]
+    df = df.sort_values(date_col).copy()
+
+    fig = go.Figure()
+    for i, (pred_col, act_col, label) in enumerate(stat_configs):
+        df[f"_ae_{label}"] = (df[pred_col] - df[act_col]).abs()
+        rolling = df.groupby(date_col)[f"_ae_{label}"].mean().rolling(
+            window, min_periods=1,
+        ).mean()
+        color = colors[i % len(colors)]
+        fig.add_trace(go.Scatter(
+            x=rolling.index.astype(str), y=rolling.values,
+            mode="lines",
+            line=dict(color=color, width=2),
+            name=f"{label} ({window}d)",
+            hovertemplate="%{x}: MAE %{y:.2f}<extra></extra>",
+        ))
+
+    fig.update_layout(
+        **_BASE_LAYOUT,
+        height=280,
+        showlegend=True,
+        legend=dict(font=dict(color=CREAM, size=9), bgcolor="rgba(0,0,0,0)"),
+        title=dict(text=f"Prediction Accuracy Over Time ({window}-day rolling)",
+                   font=dict(color=CREAM, size=13), x=0.5, xanchor="center"),
+        xaxis=dict(**_AXIS_STYLE, tickangle=-45),
+        yaxis=dict(**_GRID_AXIS,
+                   title=dict(text="Rolling MAE", font=dict(color=SLATE, size=10))),
+    )
+    return fig
+
+
+def create_prop_calibration_chart(
+    predicted_probs: list[pd.Series],
+    actual_overs: list[pd.Series],
+    line_labels: list[str],
+) -> go.Figure:
+    """Calibration dots: predicted probability vs actual hit rate per prop line."""
+    fig = go.Figure()
+
+    # Perfect calibration diagonal
+    fig.add_trace(go.Scatter(
+        x=[0, 1], y=[0, 1],
+        mode="lines",
+        line=dict(color=SLATE, width=1, dash="dash"),
+        opacity=0.5, hoverinfo="skip", showlegend=False,
+    ))
+
+    colors = [SAGE, GOLD, EMBER, SLATE]
+    for i, (probs, overs, label) in enumerate(
+        zip(predicted_probs, actual_overs, line_labels)
+    ):
+        if len(probs) < 10:
+            continue
+        n_bins = min(10, max(3, len(probs) // 20))
+        bins = np.linspace(0, 1, n_bins + 1)
+        bin_centers, bin_actuals = [], []
+        for lo, hi in zip(bins[:-1], bins[1:]):
+            mask = (probs >= lo) & (probs < hi)
+            if mask.sum() >= 3:
+                bin_centers.append((lo + hi) / 2)
+                bin_actuals.append(overs[mask].mean())
+
+        color = colors[i % len(colors)]
+        fig.add_trace(go.Scatter(
+            x=bin_centers, y=bin_actuals,
+            mode="lines+markers",
+            line=dict(color=color, width=1.5),
+            marker=dict(size=8, color=color),
+            name=f"Over {label} (n={len(probs)})",
+            hovertemplate="Predicted: %{x:.0%}, Actual: %{y:.0%}<extra></extra>",
+        ))
+
+    fig.update_layout(
+        **_BASE_LAYOUT,
+        height=300,
+        showlegend=True,
+        legend=dict(font=dict(color=CREAM, size=9), bgcolor="rgba(0,0,0,0)"),
+        title=dict(text="Prop Line Calibration",
+                   font=dict(color=CREAM, size=13), x=0.5, xanchor="center"),
+        xaxis=dict(**_GRID_AXIS, range=[-0.02, 1.02],
+                   title=dict(text="Predicted Probability", font=dict(color=SLATE, size=10))),
+        yaxis=dict(**_GRID_AXIS, range=[-0.02, 1.02],
+                   title=dict(text="Actual Frequency", font=dict(color=SLATE, size=10))),
+    )
     return fig

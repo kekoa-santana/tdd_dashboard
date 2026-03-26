@@ -11,6 +11,7 @@ import streamlit as st
 from config import (
     GOLD, EMBER, SAGE, SLATE, CREAM, DARK, DARK_CARD, DARK_BORDER,
     POSITIVE, NEGATIVE, DASHBOARD_DIR, PRIOR_SEASON, TRAINING_RANGE,
+    PITCH_DISPLAY,
     SCHEDULE_REFRESH_MINUTES, GAME_WINDOW_START_HOUR, GAME_WINDOW_END_HOUR,
 )
 from services.data_loader import (
@@ -33,6 +34,7 @@ from services.data_loader import (
 from utils.helpers import get_team_lookup
 from components.charts import _STAT_CHART_CONFIG
 from components.diamond_rating import diamond_rating_html
+from components.expandable_card import EXPANDABLE_CARD_CSS, expandable_card_html
 from components.team_logo import team_logo_html
 from components.headshot import headshot_html
 
@@ -201,6 +203,30 @@ def _render_schedule_cards(
                     **counting,
                 }
 
+    # Inject scouting grades from rankings into stat lookups
+    _h_grade_cols = ["grade_hit", "grade_power", "grade_speed", "grade_discipline", "grade_fielding"]
+    if not _h_rankings.empty:
+        for _, _r in _h_rankings.iterrows():
+            bid = int(_r["batter_id"])
+            grades = {c: int(_r[c]) for c in _h_grade_cols if c in _r.index and pd.notna(_r.get(c))}
+            if bid in _h_stat_lookup:
+                _h_stat_lookup[bid].update(grades)
+            else:
+                _h_stat_lookup[bid] = {
+                    "k_rate": None, "bb_rate": None,
+                    "tdd_value_score": _diamond_lookup.get(bid),
+                    **grades,
+                }
+
+    _p_grade_lookup: dict[int, dict] = {}
+    _p_grade_cols = ["grade_stuff", "grade_command", "grade_durability"]
+    if not _p_rankings.empty:
+        for _, _r in _p_rankings.iterrows():
+            pid = int(_r["pitcher_id"])
+            grades = {c: int(_r[c]) for c in _p_grade_cols if c in _r.index and pd.notna(_r.get(c))}
+            grades["tdd_value_score"] = _diamond_lookup.get(pid)
+            _p_grade_lookup[pid] = grades
+
     # Position lookup from roster + prospect rankings
     _roster = load_roster()
     _pos_lookup: dict[int, str] = {}
@@ -244,9 +270,11 @@ def _render_schedule_cards(
 
     # Always build projection lookup (used by cards + drilldown)
     proj_lookup = _build_projection_lookup()
-    # Inject accurate tdd_value_score from rankings into pitcher proj lookup
+    # Inject accurate tdd_value_score + scouting grades into pitcher proj lookup
     for pid, pinfo in proj_lookup.items():
         pinfo["tdd_value_score"] = _diamond_lookup.get(pid)
+        if pid in _p_grade_lookup:
+            pinfo.update(_p_grade_lookup[pid])
 
     if schedule.empty:
         st.info("No games scheduled for this date.")
@@ -824,7 +852,7 @@ def _render_hitter_projections_tab(
         # Pitcher at bottom (MLB style)
         if pid:
             p_composite = p_proj.get("tdd_value_score")
-            p_diamond = diamond_rating_html(p_composite, size="sm") if pd.notna(p_composite) else ""
+            p_diamond = diamond_rating_html(0, size="sm", precomputed=p_composite) if pd.notna(p_composite) else ""
             p_arch_html = (
                 f'<span class="tdd-badge">{p_arch}</span>'
             ) if p_arch else ""
@@ -870,6 +898,179 @@ def _render_matchup_tab_sidebyside(
                 arsenal_df, vuln_df, gpk,
                 pos_lookup=pos_lookup or {},
             )
+
+
+def _grade_color(grade: int) -> str:
+    """Return color for a 20-80 scouting grade."""
+    if grade >= 70:
+        return "var(--tdd-gold)"
+    if grade >= 55:
+        return "var(--tdd-sage)"
+    if grade >= 45:
+        return "var(--tdd-cream)"
+    return "var(--tdd-slate)"
+
+
+def _hitter_grades_html(stats: dict) -> str:
+    """Compact grade chips for a hitter: Hit/Pow/Spd/Disc/Fld."""
+    labels = [
+        ("Hit", "grade_hit"), ("Pow", "grade_power"), ("Spd", "grade_speed"),
+        ("Disc", "grade_discipline"), ("Fld", "grade_fielding"),
+    ]
+    parts = []
+    for abbr, key in labels:
+        v = stats.get(key)
+        if v is not None:
+            c = _grade_color(v)
+            parts.append(f'<span style="color:{c};">{abbr} {v}</span>')
+    if not parts:
+        return ""
+    return (
+        f'<span style="font-size:0.65rem; letter-spacing:0.3px; '
+        f'display:inline-flex; gap:0.4rem;">'
+        + "".join(parts) + '</span>'
+    )
+
+
+def _pitcher_grades_html(proj: dict) -> str:
+    """Compact grade chips for a pitcher: Stuff/Cmd/Dur."""
+    labels = [
+        ("Stuff", "grade_stuff"), ("Cmd", "grade_command"), ("Dur", "grade_durability"),
+    ]
+    parts = []
+    for abbr, key in labels:
+        v = proj.get(key)
+        if v is not None:
+            c = _grade_color(v)
+            parts.append(f'<span style="color:{c};">{abbr} {v}</span>')
+    if not parts:
+        return ""
+    return (
+        f'<span style="font-size:0.65rem; letter-spacing:0.3px; '
+        f'display:inline-flex; gap:0.4rem;">'
+        + "".join(parts) + '</span>'
+    )
+
+
+def _build_scouting_bullets(
+    pitcher_id: int,
+    pitcher_name: str,
+    opp_lu: pd.DataFrame,
+    arsenal_df: pd.DataFrame,
+    vuln_df: pd.DataFrame,
+) -> list[str]:
+    """Generate natural-language scouting bullets for a pitcher vs lineup.
+
+    Returns a list of 2-4 plain-English insights like:
+    "Webb's #1 pitch is a cutter, but Judge crushes it at .470 xwOBA"
+    """
+    if arsenal_df.empty or vuln_df.empty or opp_lu.empty:
+        return []
+
+    p_ars = arsenal_df[arsenal_df["pitcher_id"] == pitcher_id].copy()
+    if p_ars.empty:
+        return []
+    p_ars = p_ars.sort_values("usage_pct", ascending=False)
+
+    id_col = "batter_id" if "batter_id" in opp_lu.columns else "player_id"
+    name_col = "batter_name" if "batter_name" in opp_lu.columns else "player_name"
+    batter_ids = [int(b) for b in opp_lu.head(9)[id_col].dropna()]
+    batter_names = dict(zip(
+        opp_lu.head(9)[id_col].dropna().astype(int),
+        opp_lu.head(9)[name_col],
+    ))
+
+    # Last name only for brevity
+    def _last(name: str) -> str:
+        parts = name.strip().split()
+        return parts[-1] if parts else name
+
+    p_last = _last(pitcher_name)
+
+    # Primary pitch info
+    top_pitch = p_ars.iloc[0]
+    top_pt = top_pitch["pitch_type"]
+    top_pt_name = PITCH_DISPLAY.get(top_pt, top_pt).lower()
+    top_usage = top_pitch["usage_pct"]
+
+    bullets: list[str] = []
+
+    # 1. Best hitter matchup vs pitcher's primary pitch (highest xwOBA)
+    best_xwoba, best_batter = 0.0, ""
+    for bid in batter_ids:
+        bv = vuln_df[(vuln_df["batter_id"] == bid) & (vuln_df["pitch_type"] == top_pt)]
+        if not bv.empty:
+            xw = bv.iloc[0].get("xwoba_contact")
+            if pd.notna(xw) and xw > best_xwoba:
+                best_xwoba = xw
+                best_batter = _last(batter_names.get(bid, ""))
+
+    if best_batter and best_xwoba > 0.370:
+        bullets.append(
+            f"{p_last}'s #1 pitch is the {top_pt_name} ({top_usage:.0%} usage), "
+            f"but {best_batter} crushes it at .{int(best_xwoba * 1000):03d} xwOBA"
+        )
+    elif best_batter:
+        bullets.append(
+            f"{p_last} leans on the {top_pt_name} ({top_usage:.0%} usage); "
+            f"{best_batter} has the best contact at .{int(best_xwoba * 1000):03d} xwOBA"
+        )
+
+    # 2. Pitcher's best whiff pitch vs lineup weakness
+    whiff_pitches = p_ars[p_ars["whiff_rate"] > 0.28].head(2)
+    for _, wp in whiff_pitches.iterrows():
+        pt = wp["pitch_type"]
+        pt_name = PITCH_DISPLAY.get(pt, pt).lower()
+        wr = wp["whiff_rate"]
+        # Count batters vulnerable (high whiff) to this pitch
+        vulnerable = 0
+        for bid in batter_ids:
+            bv = vuln_df[(vuln_df["batter_id"] == bid) & (vuln_df["pitch_type"] == pt)]
+            if not bv.empty and bv.iloc[0].get("whiff_rate", 0) > 0.30:
+                vulnerable += 1
+        if vulnerable >= 3:
+            bullets.append(
+                f"{p_last}'s {pt_name} generates a {wr:.0%} whiff rate; "
+                f"{vulnerable} of 9 batters whiff over 30% against that pitch"
+            )
+            break  # one whiff bullet is enough
+
+    # 3. Hitter with biggest xwOBA edge across all pitch types
+    best_edge_batter, best_edge_pt, best_edge_val = "", "", 0.0
+    for bid in batter_ids:
+        for _, pa in p_ars.iterrows():
+            pt = pa["pitch_type"]
+            p_xwoba = pa.get("xwoba_against", 0.320)
+            bv = vuln_df[(vuln_df["batter_id"] == bid) & (vuln_df["pitch_type"] == pt)]
+            if not bv.empty:
+                h_xwoba = bv.iloc[0].get("xwoba_contact")
+                if pd.notna(h_xwoba) and pd.notna(p_xwoba) and h_xwoba > 0.400:
+                    edge = h_xwoba - p_xwoba
+                    if edge > best_edge_val:
+                        best_edge_val = edge
+                        best_edge_batter = _last(batter_names.get(bid, ""))
+                        best_edge_pt = PITCH_DISPLAY.get(pt, pt).lower()
+
+    if best_edge_batter and best_edge_val > 0.050:
+        bullets.append(
+            f"{best_edge_batter} has a big edge on {p_last}'s {best_edge_pt}; "
+            f"look for the pitcher to avoid that zone"
+        )
+
+    # 4. Pitcher dominance angle: elite whiff rate on primary pitch
+    if top_pitch.get("whiff_rate", 0) > 0.32:
+        weak_batters = []
+        for bid in batter_ids:
+            bv = vuln_df[(vuln_df["batter_id"] == bid) & (vuln_df["pitch_type"] == top_pt)]
+            if not bv.empty and bv.iloc[0].get("whiff_rate", 0) > 0.35:
+                weak_batters.append(_last(batter_names.get(bid, "")))
+        if weak_batters:
+            names = ", ".join(weak_batters[:3])
+            bullets.append(
+                f"Pitcher advantage: {names} all struggle against the {top_pt_name}"
+            )
+
+    return bullets[:4]  # cap at 4
 
 
 def _render_matchup_tab(
@@ -1002,8 +1203,8 @@ def _render_matchup_tab(
             if bid:
                 hs = f'<span style="margin:0 0.3rem;">{headshot_html(bid, size=32)}</span>'
 
-            rows_html.append(
-                f'<div class="tdd-lineup-row">'
+            # Summary row (always visible)
+            summary = (
                 f'<span style="color:{"var(--tdd-gold)" if order <= 3 else "var(--tdd-slate)"}; '
                 f'font-size:var(--tdd-fs-meta); min-width:1.2rem; text-align:right; font-weight:700;">{order}</span>'
                 f'{hs}'
@@ -1012,20 +1213,26 @@ def _render_matchup_tab(
                 f'{arch_html}'
                 f'<span style="margin:0 0.3rem;">{diamond_html}</span>'
                 f'{advantage_html}'
-                f'</div>'
             )
 
-        # Pitcher at bottom (MLB style)
+            # Detail section (grades)
+            grades_html = _hitter_grades_html(stats)
+            detail = grades_html if grades_html else (
+                '<span style="color:var(--tdd-slate); font-size:0.7rem;">No grade data</span>'
+            )
+
+            rows_html.append(expandable_card_html(summary, detail))
+
+        # Pitcher at bottom (expandable)
         if pid:
             p_composite = p_proj.get("tdd_value_score")
-            p_diamond = diamond_rating_html(p_composite, size="sm") if pd.notna(p_composite) else ""
+            p_diamond = diamond_rating_html(0, size="sm", precomputed=p_composite) if pd.notna(p_composite) else ""
             p_arch_html = (
                 f'<span class="tdd-badge">{p_arch}</span>'
             ) if p_arch else ""
             p_hs = f'<span style="margin:0 0.3rem;">{headshot_html(pid, size=32)}</span>'
 
-            rows_html.append(
-                f'<div class="tdd-lineup-row" style="background:rgba(200,169,110,0.06);">'
+            p_summary = (
                 f'<span style="color:var(--tdd-gold); font-size:var(--tdd-fs-meta); '
                 f'min-width:1.2rem; text-align:right; font-weight:700;">P</span>'
                 f'{p_hs}'
@@ -1033,13 +1240,18 @@ def _render_matchup_tab(
                 f'<span class="tdd-player-name" style="flex:1; min-width:5rem;">{pitcher_name}</span>'
                 f'{p_arch_html}'
                 f'<span style="margin:0 0.3rem;">{p_diamond}</span>'
-                f'</div>'
             )
+            p_grades_html = _pitcher_grades_html(p_proj)
+            p_detail = p_grades_html if p_grades_html else (
+                '<span style="color:var(--tdd-slate); font-size:0.7rem;">No grade data</span>'
+            )
+
+            rows_html.append(expandable_card_html(p_summary, p_detail))
 
         if rows_html:
             st.markdown(
-                f'<div style="background:transparent; border:none; '
-                f'border-bottom:1px solid var(--tdd-dark-border); margin-bottom:1rem; overflow:hidden;">'
+                EXPANDABLE_CARD_CSS
+                + f'<div style="margin-bottom:1rem;">'
                 + "".join(rows_html)
                 + '</div>',
                 unsafe_allow_html=True,
@@ -1062,6 +1274,27 @@ def _render_matchup_tab(
                 f' · <span style="color:var(--tdd-slate);">BB: {avg_bb:+.3f}</span></div>',
                 unsafe_allow_html=True,
             )
+
+        # Scouting report
+        if pid and not opp_lu.empty:
+            bullets = _build_scouting_bullets(
+                pid, pitcher_name, opp_lu, arsenal_df, vuln_df,
+            )
+            if bullets:
+                bullet_html = "".join(
+                    f'<li style="margin-bottom:0.3rem;">{b}</li>' for b in bullets
+                )
+                st.markdown(
+                    f'<div style="margin:0.5rem 0 1rem; padding:0.6rem 0.8rem; '
+                    f'border-left:2px solid var(--tdd-gold); font-size:0.82rem; '
+                    f'color:var(--tdd-cream);">'
+                    f'<div style="color:var(--tdd-gold); font-weight:600; '
+                    f'font-size:0.75rem; letter-spacing:0.5px; margin-bottom:0.3rem;">'
+                    f'SCOUTING REPORT</div>'
+                    f'<ul style="margin:0; padding-left:1.2rem; '
+                    f'color:var(--tdd-cream);">{bullet_html}</ul></div>',
+                    unsafe_allow_html=True,
+                )
 
 
 def _render_archetype_tab(

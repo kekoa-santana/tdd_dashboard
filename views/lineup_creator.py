@@ -10,7 +10,6 @@ from services.data_loader import (
     load_probable_starters,
     load_rankings,
     load_roster,
-    load_player_teams,
 )
 from components.headshot import headshot_html
 from components.diamond_rating import diamond_rating_html
@@ -26,7 +25,6 @@ def _load_hitter_pool() -> pd.DataFrame:
     """All ranked hitters with position eligibility."""
     rankings = load_rankings("hitters")
     roster = load_roster()
-    teams = load_player_teams()
 
     if rankings.empty:
         return pd.DataFrame()
@@ -35,12 +33,12 @@ def _load_hitter_pool() -> pd.DataFrame:
                     "tdd_value_score", "grade_hit", "grade_power",
                     "grade_speed", "grade_discipline"]].copy()
 
-    # Merge team
-    if not teams.empty:
+    # Merge team from roster (same source as team overview depth chart)
+    if not roster.empty and "team_abbr" in roster.columns:
         df = df.merge(
-            teams[["player_id", "team_abbr"]].rename(
+            roster[["player_id", "team_abbr"]].rename(
                 columns={"player_id": "batter_id"}
-            ),
+            ).drop_duplicates(subset="batter_id"),
             on="batter_id", how="left",
         )
     else:

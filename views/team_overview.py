@@ -10,6 +10,7 @@ from config import (
     POSITIVE, NEGATIVE,
     PITCHER_STATS, HITTER_STATS,
     CURRENT_SEASON, PRIOR_SEASON,
+    DASHBOARD_DIR,
 )
 from services.data_loader import (
     load_projections, load_counting, load_player_teams, load_roster,
@@ -187,68 +188,94 @@ def _render_team_profile_tab(
                 idx = all_tr.index[all_tr["abbreviation"] == selected_team]
                 _ranks[col] = int(ranked.loc[idx].iloc[0]) if len(idx) > 0 else 0
 
+        # ── Top 10 players with league-wide positional rank ──────────
         st.markdown(
             '<div class="tdd-section-hdr" style="margin-top:16px; margin-bottom:8px;">'
-            'Profile Scores</div>',
+            'Top Players</div>',
             unsafe_allow_html=True,
         )
 
-        def _diamond_gauge(label: str, val: float, rank: int = 0) -> str:
-            pct = max(0, min(100, val / 10 * 100))
-            color = GOLD if val >= 6.5 else SAGE if val >= 5.0 else EMBER if val < 3.5 else SLATE
-            rank_html = (
-                f' <span class="tdd-context" style="margin-left:4px;">#{rank}</span>'
-                if rank else ""
-            )
+        # Load rankings for this team
+        _hr = load_rankings("hitters")
+        _pr = load_rankings("pitchers")
+        _pt = pd.read_parquet(DASHBOARD_DIR / "player_teams.parquet") if (DASHBOARD_DIR / "player_teams.parquet").exists() else pd.DataFrame()
+
+        _team_pids = set()
+        if not _pt.empty:
+            _pt_pid = "player_id" if "player_id" in _pt.columns else "batter_id"
+            _team_pids = set(_pt[_pt["team_abbr"] == selected_team][_pt_pid])
+
+        def _player_rank_row(name: str, pos: str, league_rank: int, score: float) -> str:
+            color = GOLD if league_rank <= 5 else SAGE if league_rank <= 15 else SLATE
             return (
-                f'<div style="margin-bottom:8px;">'
-                f'<div style="display:flex; justify-content:space-between; margin-bottom:2px;">'
-                f'<span class="tdd-meta" style="color:var(--tdd-cream);">{label}</span>'
-                f'<span class="tdd-stat-value" style="color:{color};">'
-                f'{val:.1f}{rank_html}</span>'
+                f'<div style="display:flex; align-items:center; gap:8px; '
+                f'padding:4px 12px; border-left:3px solid {color}; margin-bottom:2px;">'
+                f'<span class="tdd-stat-value" style="color:{color}; min-width:2.5rem; '
+                f'font-weight:700;">#{league_rank}</span>'
+                f'<span class="tdd-meta" style="min-width:2rem; color:{SLATE};">{pos}</span>'
+                f'<span style="color:var(--tdd-cream); flex:1;">{name}</span>'
+                f'<span class="tdd-stat-value" style="color:var(--tdd-gold);">{score * 10:.1f}</span>'
                 f'</div>'
-                f'<div style="height:8px; background:var(--tdd-dark-card); border-radius:4px;">'
-                f'<div style="width:{pct:.1f}%; height:100%; background:{color}; '
-                f'border-radius:4px;"></div></div></div>'
             )
 
-        col1, col2 = st.columns(2)
-        with col1:
-            gauges_l = ""
-            lu_d = float(tp.get("lineup_diamond", 5.0) or 5.0)
-            gauges_l += _diamond_gauge("Offense", lu_d, _ranks.get("lineup_diamond", 0))
-            rot_d = float(tp.get("rotation_diamond", 5.0) or 5.0)
-            gauges_l += _diamond_gauge("Rotation", rot_d, _ranks.get("rotation_diamond", 0))
-            bp_d = float(tp.get("bullpen_diamond", 5.0) or 5.0)
-            gauges_l += _diamond_gauge("Bullpen", bp_d, _ranks.get("bullpen_diamond", 0))
-            st.markdown(f'<div class="insight-card">{gauges_l}</div>', unsafe_allow_html=True)
+        top_rows = ""
+        top_players = []
 
-        with col2:
-            gauges_r = ""
-            def_s = float(tr.get("defense_score", 0.5) or 0.5) * 10
-            gauges_r += _diamond_gauge("Fielding", def_s, _ranks.get("defense_score", 0))
-            hd_s = float(tr.get("health_depth_score", 0.5) or 0.5) * 10
-            gauges_r += _diamond_gauge("Depth", hd_s, _ranks.get("health_depth_score", 0))
+        if not _hr.empty and _team_pids:
+            _h_pid = "batter_id" if "batter_id" in _hr.columns else "player_id"
+            _h_score = next((c for c in ("current_value_score", "tdd_value_score") if c in _hr.columns), None)
+            if _h_score:
+                team_hitters = _hr[_hr[_h_pid].isin(_team_pids)].copy()
+                for _, row in team_hitters.iterrows():
+                    top_players.append({
+                        "name": row["batter_name"],
+                        "pos": row.get("position", ""),
+                        "rank": int(row.get("pos_rank", 0)),
+                        "score": float(row[_h_score]),
+                    })
 
-            # Style pills
-            styles = []
-            off_style = tr.get("offense_style")
-            if pd.notna(off_style):
-                s_color = GOLD if off_style == "Power" else SAGE if off_style == "Contact" else "#3498DB" if off_style == "Smallball" else SLATE
-                styles.append(_pill(f"\u26be {off_style}", s_color))
-            pit_style = tr.get("pitching_style")
-            if pd.notna(pit_style):
-                p_color = GOLD if pit_style == "Strikeout" else SAGE if pit_style == "Contact-mgmt" else SLATE
-                styles.append(_pill(f"\u26be {pit_style}", p_color))
-            age_traj = tr.get("age_trajectory")
-            if pd.notna(age_traj):
-                a_color = SAGE if age_traj == "Ascending" else EMBER if age_traj == "Declining" else SLATE
-                styles.append(_pill(age_traj, a_color))
+        if not _pr.empty and _team_pids:
+            _p_pid = "pitcher_id" if "pitcher_id" in _pr.columns else "player_id"
+            _p_score = next((c for c in ("current_value_score", "tdd_value_score") if c in _pr.columns), None)
+            if _p_score:
+                team_pitchers = _pr[_pr[_p_pid].isin(_team_pids)].copy()
+                for _, row in team_pitchers.iterrows():
+                    top_players.append({
+                        "name": row["pitcher_name"],
+                        "pos": row.get("role", "P"),
+                        "rank": int(row.get("role_rank", 0)),
+                        "score": float(row[_p_score]),
+                    })
 
-            if styles:
-                gauges_r += f'<div style="margin-top:8px;">{"".join(styles)}</div>'
+        top_players.sort(key=lambda x: x["score"], reverse=True)
+        for p in top_players[:10]:
+            top_rows += _player_rank_row(p["name"], p["pos"], p["rank"], p["score"])
 
-            st.markdown(f'<div class="insight-card">{gauges_r}</div>', unsafe_allow_html=True)
+        if top_rows:
+            st.markdown(
+                f'<div class="insight-card">{top_rows}</div>',
+                unsafe_allow_html=True,
+            )
+
+        # Style pills
+        styles = []
+        off_style = tr.get("offense_style")
+        if pd.notna(off_style):
+            s_color = GOLD if off_style == "Power" else SAGE if off_style == "Contact" else "#3498DB" if off_style == "Smallball" else SLATE
+            styles.append(_pill(f"\u26be {off_style}", s_color))
+        pit_style = tr.get("pitching_style")
+        if pd.notna(pit_style):
+            p_color = GOLD if pit_style == "Strikeout" else SAGE if pit_style == "Contact-mgmt" else SLATE
+            styles.append(_pill(f"\u26be {pit_style}", p_color))
+        age_traj = tr.get("age_trajectory")
+        if pd.notna(age_traj):
+            a_color = SAGE if age_traj == "Ascending" else EMBER if age_traj == "Declining" else SLATE
+            styles.append(_pill(age_traj, a_color))
+        if styles:
+            st.markdown(
+                f'<div style="margin-top:8px;">{"".join(styles)}</div>',
+                unsafe_allow_html=True,
+            )
 
     # ── Offense snapshot ─────────────────────────────────────────────
     st.markdown(
@@ -641,6 +668,16 @@ def _render_depth_chart_tab(
     # --- Position Depth Chart ---
     st.markdown("### Position Players")
 
+    # Determine each player's primary position (where they have the most starts).
+    # A player is only eligible to be the starter at their primary position.
+    primary_pos: dict[int, str] = {}  # player_id -> position with most starts
+    if not team_priors.empty:
+        for pid, grp in team_priors.groupby("player_id"):
+            best = grp.sort_values("starts", ascending=False).iloc[0]
+            primary_pos[int(pid)] = best["position"]
+
+    assigned_starters: set[int] = set()
+
     for pos in _HITTER_POSITIONS:
         pos_players = team_priors[team_priors["position"] == pos].sort_values(
             "starts", ascending=False,
@@ -659,13 +696,19 @@ def _render_depth_chart_tab(
             continue
 
         player_parts: list[str] = []
-        for i, (_, row) in enumerate(pos_players.head(4).iterrows()):
+        found_starter = False
+        for _, row in pos_players.iterrows():
             pid = int(row["player_id"])
+            if pid in assigned_starters:
+                continue  # already slotted as starter elsewhere
+
             name = name_map.get(pid, f"ID {pid}")
             starts = int(row["starts"])
-            is_starter = i == 0
 
-            if is_starter:
+            # Starter: first player whose primary position is this one
+            if not found_starter and primary_pos.get(pid) == pos:
+                found_starter = True
+                assigned_starters.add(pid)
                 player_parts.append(
                     f'<span style="color:var(--tdd-cream); font-weight:600; '
                     f'font-size:0.88rem;">{name}</span>'
@@ -676,6 +719,21 @@ def _render_depth_chart_tab(
                 player_parts.append(
                     f'<span class="tdd-context">{name} ({starts}g)</span>'
                 )
+
+            if len(player_parts) >= 4:
+                break
+
+        if not player_parts:
+            st.markdown(
+                f'<div style="display:flex; align-items:center; gap:0.5rem; '
+                f'padding:0.4rem 0; border-bottom:1px solid var(--tdd-dark-border-faint);">'
+                f'<span style="color:var(--tdd-gold); font-weight:700; '
+                f'min-width:2.2rem; font-size:0.9rem;">{pos}</span>'
+                f'<span class="tdd-context">No data</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            continue
 
         st.markdown(
             f'<div style="display:flex; align-items:center; gap:0.5rem; '
