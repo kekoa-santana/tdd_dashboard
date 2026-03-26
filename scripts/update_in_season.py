@@ -219,6 +219,18 @@ def run_schedule_refresh(game_date: str) -> None:
     tend_path = DASHBOARD_DIR / "pitcher_exit_tendencies.parquet"
     exit_tendencies = pd.read_parquet(tend_path) if tend_path.exists() else pd.DataFrame()
 
+    # --- Load depth chart fallback for pre-lineup sims ---
+    dc_path = DASHBOARD_DIR / "probable_starters_by_hand.parquet"
+    depth_chart = pd.read_parquet(dc_path) if dc_path.exists() else pd.DataFrame()
+    if not depth_chart.empty:
+        logger.info("Loaded depth charts: %d entries", len(depth_chart))
+
+    # Build pitch_hand lookup from pitcher projections
+    pitch_hand_lookup: dict[int, str] = {}
+    if not pitcher_proj.empty and "pitch_hand" in pitcher_proj.columns:
+        for _, pr in pitcher_proj[["pitcher_id", "pitch_hand"]].drop_duplicates().iterrows():
+            pitch_hand_lookup[int(pr["pitcher_id"])] = pr["pitch_hand"]
+
     # --- Load umpire tendencies and weather effects ---
     ump_path = DASHBOARD_DIR / "umpire_tendencies.parquet"
     wx_path = DASHBOARD_DIR / "weather_effects.parquet"
@@ -314,40 +326,62 @@ def run_schedule_refresh(game_date: str) -> None:
             # Lineup matchup lifts
             opp_side = "home" if side == "away" else "away"
             opp_team_id = game.get(f"{opp_side}_team_id")
+            opp_abbr = game.get(f"{opp_side}_abbr", "")
             lineup_matchup_lifts: dict[str, np.ndarray] = {}
-            has_lineup = False
+            lineup_source = "none"  # "api", "depth_chart", or "none"
             lineup_batter_ids: list[int] = []
 
-            if not lineups.empty and not arsenal_df.empty and not vuln_df.empty:
+            # --- Try real lineup from API first ---
+            game_lu = pd.DataFrame()
+            if not lineups.empty:
                 game_lu = lineups[
                     (lineups["game_pk"] == gpk) &
                     (lineups["team_id"] == opp_team_id)
                 ].sort_values("batting_order")
-
                 if len(game_lu) >= 9:
-                    has_lineup = True
-                    k_lifts, bb_lifts, hr_lifts = [], [], []
-                    for _, brow in game_lu.head(9).iterrows():
-                        bid = int(brow["batter_id"])
-                        lineup_batter_ids.append(bid)
+                    lineup_source = "api"
 
-                        k_m = score_matchup(pid, bid, arsenal_df, vuln_df, baselines_pt)
-                        kl = k_m.get("matchup_k_logit_lift", 0.0)
-                        k_lifts.append(0.0 if np.isnan(kl) else kl)
+            # --- Fall back to depth chart by pitcher hand ---
+            if lineup_source == "none" and not depth_chart.empty and opp_abbr:
+                p_hand = pitch_hand_lookup.get(pid, "R")
+                dc_lu = depth_chart[
+                    (depth_chart["team_abbr"] == opp_abbr) &
+                    (depth_chart["vs_hand"] == p_hand)
+                ].sort_values("batting_order")
+                if len(dc_lu) >= 9:
+                    # Reshape to match API lineup columns
+                    game_lu = dc_lu.head(9).rename(columns={
+                        "player_id": "batter_id",
+                        "player_name": "batter_name",
+                    })[["batter_id", "batter_name", "batting_order"]]
+                    lineup_source = "depth_chart"
+                    logger.debug("Using depth chart for %s vs %s (%sHP)",
+                                 opp_abbr, pname, p_hand)
 
-                        bb_m = score_matchup_bb(pid, bid, arsenal_df, vuln_df, baselines_pt)
-                        bl = bb_m.get("matchup_bb_logit_lift", 0.0)
-                        bb_lifts.append(0.0 if np.isnan(bl) else bl)
+            # --- Score matchup lifts if we have any lineup ---
+            if lineup_source != "none" and not arsenal_df.empty and not vuln_df.empty:
+                k_lifts, bb_lifts, hr_lifts = [], [], []
+                for _, brow in game_lu.head(9).iterrows():
+                    bid = int(brow["batter_id"])
+                    lineup_batter_ids.append(bid)
 
-                        hr_m = score_matchup_hr(pid, bid, arsenal_df, vuln_df, baselines_pt)
-                        hl = hr_m.get("matchup_hr_logit_lift", 0.0)
-                        hr_lifts.append(0.0 if np.isnan(hl) else hl)
+                    k_m = score_matchup(pid, bid, arsenal_df, vuln_df, baselines_pt)
+                    kl = k_m.get("matchup_k_logit_lift", 0.0)
+                    k_lifts.append(0.0 if np.isnan(kl) else kl)
 
-                    lineup_matchup_lifts = {
-                        "k": np.array(k_lifts),
-                        "bb": np.array(bb_lifts),
-                        "hr": np.array(hr_lifts),
-                    }
+                    bb_m = score_matchup_bb(pid, bid, arsenal_df, vuln_df, baselines_pt)
+                    bl = bb_m.get("matchup_bb_logit_lift", 0.0)
+                    bb_lifts.append(0.0 if np.isnan(bl) else bl)
+
+                    hr_m = score_matchup_hr(pid, bid, arsenal_df, vuln_df, baselines_pt)
+                    hl = hr_m.get("matchup_hr_logit_lift", 0.0)
+                    hr_lifts.append(0.0 if np.isnan(hl) else hl)
+
+                lineup_matchup_lifts = {
+                    "k": np.array(k_lifts),
+                    "bb": np.array(bb_lifts),
+                    "hr": np.array(hr_lifts),
+                }
 
             # TTO lifts
             tto_lifts = build_all_tto_lifts(
@@ -411,6 +445,7 @@ def run_schedule_refresh(game_date: str) -> None:
                 col = f"p_over_h_{hr_row['line']:.1f}".replace(".", "_")
                 p_over_dict[col] = hr_row["p_over"]
 
+            has_lineup = lineup_source != "none"
             avg_matchup = float(np.mean(lineup_matchup_lifts["k"])) if has_lineup else 0.0
 
             results.append({
@@ -448,6 +483,7 @@ def run_schedule_refresh(game_date: str) -> None:
                 "espn_median": espn["median"],
                 # Context
                 "has_lineup": has_lineup,
+                "lineup_source": lineup_source,
                 "avg_matchup_lift": avg_matchup,
                 "umpire_k_logit_lift": ump_k_lift,
                 "weather_k_logit_lift": wx_k_lift,
@@ -461,9 +497,11 @@ def run_schedule_refresh(game_date: str) -> None:
         sim_df.to_parquet(DASHBOARD_DIR / "todays_sims.parquet", index=False)
         logger.info("Saved game simulations for %d pitcher appearances", len(sim_df))
 
-        n_with_lineup = sim_df["has_lineup"].sum()
-        logger.info("  %d with lineup data, %d without",
-                     n_with_lineup, len(sim_df) - n_with_lineup)
+        n_api = (sim_df["lineup_source"] == "api").sum()
+        n_dc = (sim_df["lineup_source"] == "depth_chart").sum()
+        n_none = (sim_df["lineup_source"] == "none").sum()
+        logger.info("  Lineup sources: %d API, %d depth chart, %d none",
+                     n_api, n_dc, n_none)
     else:
         logger.warning("No pitchers could be simulated (missing K samples?)")
 
@@ -521,21 +559,34 @@ def _is_snapshot_day(game_date: str) -> bool:
 
 
 def save_weekly_snapshot(game_date: str) -> None:
-    """Copy current projections to a dated weekly snapshot.
+    """Copy current projections and rankings to a dated weekly snapshot.
 
     Idempotent: skips if a snapshot already exists for this date.
     """
     weekly_dir = DASHBOARD_DIR / "snapshots" / "weekly"
     weekly_dir.mkdir(parents=True, exist_ok=True)
 
+    # Projections
     for ptype in ("hitter", "pitcher"):
         src = DASHBOARD_DIR / f"{ptype}_projections.parquet"
         dst = weekly_dir / f"{ptype}_projections_{game_date}.parquet"
         if dst.exists():
-            logger.info("Weekly snapshot already exists: %s — skipping", dst.name)
+            logger.info("Weekly snapshot already exists: %s, skipping", dst.name)
             continue
         if not src.exists():
             logger.warning("No %s projections to snapshot", ptype)
+            continue
+        shutil.copy2(src, dst)
+        logger.info("Saved weekly snapshot: %s", dst.name)
+
+    # Rankings
+    for rtype in ("hitters", "pitchers"):
+        src = DASHBOARD_DIR / f"{rtype}_rankings.parquet"
+        dst = weekly_dir / f"{rtype}_rankings_{game_date}.parquet"
+        if dst.exists():
+            continue
+        if not src.exists():
+            logger.warning("No %s rankings to snapshot", rtype)
             continue
         shutil.copy2(src, dst)
         logger.info("Saved weekly snapshot: %s", dst.name)
