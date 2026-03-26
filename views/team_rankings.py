@@ -214,7 +214,6 @@ def _render_power_rankings(
     df: pd.DataFrame,
     profiles: pd.DataFrame,
     elo_df: pd.DataFrame,
-    ceiling: bool = False,
 ) -> None:
     """Section 1: expandable power rankings 1-30."""
     # Merge profile scores not in rankings (org_score, schedule_score)
@@ -301,21 +300,13 @@ def _render_power_rankings(
 
         # ── expanded detail ──
         # Composition bars with league rank (replaces radar chart)
-        if ceiling:
-            _comp_dims = [
-                ("Offense", "offense_ceiling", "offense_score"),
-                ("Pitching", "pitching_ceiling", "pitching_score"),
-                ("Fielding", "defense_score", "defense_score"),
-                ("Health/Depth", "health_depth_score", "health_depth_score"),
-            ]
-        else:
-            _comp_dims = [
-                ("Offense", "offense_score", "offense_ceiling"),
-                ("Rotation", "rotation_score", "rotation_score"),
-                ("Bullpen", "bullpen_score", "bullpen_score"),
-                ("Fielding", "defense_score", "defense_score"),
-                ("Health/Depth", "health_depth_score", "health_depth_score"),
-            ]
+        _comp_dims = [
+            ("Offense", "offense_score", "offense_score"),
+            ("Rotation", "rotation_score", "rotation_score"),
+            ("Bullpen", "bullpen_score", "bullpen_score"),
+            ("Fielding", "defense_score", "defense_score"),
+            ("Health/Depth", "health_depth_score", "health_depth_score"),
+        ]
 
         def _comp_bar(label: str, score: float, league_rank: int) -> str:
             pct = max(0, min(100, score * 100))
@@ -597,15 +588,7 @@ def page_team_rankings() -> None:
     # ── Section 1: Power Rankings ──
     st.markdown('<div class="tr-section">Power Rankings</div>', unsafe_allow_html=True)
 
-    view_mode = st.radio(
-        "View",
-        ["Current Roster", "Talent Ceiling"],
-        horizontal=True,
-        key="tr_view_mode",
-        label_visibility="collapsed",
-    )
-
-    _render_power_rankings(filtered, profiles, elo_df, ceiling=(view_mode == "Talent Ceiling"))
+    _render_power_rankings(filtered, profiles, elo_df)
 
     # ── Section 2: Top Lineups / Rotations / Bullpens (composition scores) ──
     # Use the same scores that drive the power ranking composition bars (×10)
