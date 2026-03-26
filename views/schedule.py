@@ -29,7 +29,7 @@ from services.data_loader import (
     load_pitcher_exit_tendencies,
     load_pitcher_location_grid, load_hitter_zone_grid,
     load_roster, load_game_props,
-    fetch_live_schedule, fetch_live_lineups,
+    fetch_live_schedule, fetch_live_lineups, fetch_live_boxscores,
 )
 from utils.helpers import format_ip, get_team_lookup
 from components.charts import _STAT_CHART_CONFIG
@@ -108,7 +108,10 @@ def _render_todays_games() -> None:
             st.cache_data.clear()
             st.rerun()
 
-    _render_schedule_cards(schedule, sims, lineups, meta)
+    # Fetch live boxscores for in-progress / final games
+    live_stats = fetch_live_boxscores(schedule) if not schedule.empty else pd.DataFrame()
+
+    _render_schedule_cards(schedule, sims, lineups, meta, live_stats=live_stats)
 
 
 def _build_projection_lookup() -> dict:
@@ -133,6 +136,8 @@ def _render_schedule_cards(
     sims: pd.DataFrame,
     lineups: pd.DataFrame,
     meta: dict,
+    *,
+    live_stats: pd.DataFrame | None = None,
 ) -> None:
     """Render game cards from schedule + sim + lineup data."""
     # Pre-build archetype + projection lookups for enrichment
@@ -479,6 +484,7 @@ def _render_schedule_cards(
                 ploc_df=_ploc_df,
                 hzone_df=_hzone_df,
                 game_props=_game_props,
+                live_stats=live_stats,
             )
 
     if not sims.empty and not sims_stale:
@@ -513,14 +519,25 @@ def _edge_color(p_over: float) -> str:
 def _edge_label(p_over: float) -> str:
     """Human-readable edge label."""
     if p_over >= 0.60:
-        return "Projected to Pop"
+        return "Over"
     if p_over <= 0.40:
-        return "Projected Quiet"
+        return "Under"
     return "Neutral"
 
 
-def _render_props_section(gpk: int, props_df: pd.DataFrame) -> None:
-    """Render projected performer edges for a single game."""
+def _render_props_section(
+    gpk: int,
+    props_df: pd.DataFrame,
+    lineups_df: pd.DataFrame | None = None,
+    live_stats_df: pd.DataFrame | None = None,
+) -> None:
+    """Render projected performer edges for a single game.
+
+    When confirmed lineups are available, only shows players who are in
+    the starting lineup (pitchers always included).  When lineups have
+    not been released yet, shows all projected players with a warning
+    banner.
+    """
     if props_df.empty:
         st.markdown(
             '<div class="tdd-meta">No projection data available for this game.</div>',
@@ -536,46 +553,90 @@ def _render_props_section(gpk: int, props_df: pd.DataFrame) -> None:
         )
         return
 
+    # Check if confirmed lineups exist for this game
+    game_lu = (
+        lineups_df[lineups_df["game_pk"] == gpk]
+        if lineups_df is not None and not lineups_df.empty
+        else pd.DataFrame()
+    )
+    lineup_confirmed = not game_lu.empty
+
+    if lineup_confirmed:
+        # Filter batters to only confirmed starters; keep all pitchers
+        confirmed_pids = set(game_lu["batter_id"].astype(int))
+        is_pitcher = game_df["player_type"] == "pitcher"
+        is_in_lineup = game_df["player_id"].astype(int).isin(confirmed_pids)
+        game_df = game_df[is_pitcher | is_in_lineup].copy()
+    else:
+        st.markdown(
+            '<div style="background:var(--tdd-dark-border); border-left:3px solid '
+            'var(--tdd-gold); padding:0.4rem 0.75rem; margin-bottom:0.5rem; '
+            'font-size:0.8rem; color:var(--tdd-gold);">'
+            'Estimated lineup — probable lineup not yet released'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+    if game_df.empty:
+        st.markdown(
+            '<div class="tdd-meta">No projection data for confirmed starters.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # Merge live actuals if available
+    game_live = (
+        live_stats_df[live_stats_df["game_pk"] == gpk]
+        if live_stats_df is not None and not live_stats_df.empty
+        else pd.DataFrame()
+    )
+    # Map prop stat names to live boxscore column names
+    _STAT_TO_ACTUAL = {
+        "K": "actual_K", "H": "actual_H", "HR": "actual_HR",
+        "BB": "actual_BB", "TB": "actual_TB", "Outs": "actual_Outs",
+    }
+    game_df["actual"] = None
+    game_df["game_status"] = ""
+    if not game_live.empty:
+        live_lookup: dict[tuple[int, str], dict] = {}
+        for _, lr in game_live.iterrows():
+            live_lookup[int(lr["player_id"])] = lr
+        for idx, row in game_df.iterrows():
+            pid = int(row["player_id"])
+            if pid in live_lookup:
+                lr = live_lookup[pid]
+                actual_col = _STAT_TO_ACTUAL.get(row["stat"])
+                if actual_col and actual_col in lr.index and pd.notna(lr[actual_col]):
+                    game_df.at[idx, "actual"] = float(lr[actual_col])
+                game_df.at[idx, "game_status"] = lr.get("game_status", "")
+
     # Edge strength = distance of p_over_mid from 0.50
     game_df["edge"] = (game_df["p_over_mid"] - 0.50).abs()
 
-    # Split into over/under
+    # Over projections only — model is most reliable near the mean
     pop_df = game_df[game_df["p_over_mid"] >= 0.58].sort_values("p_over_mid", ascending=False)
-    quiet_df = game_df[game_df["p_over_mid"] <= 0.42].sort_values("p_over_mid")
 
     st.markdown(EXPANDABLE_CARD_CSS, unsafe_allow_html=True)
 
-    # --- Projected to Pop ---
     st.markdown(
         '<div style="font-size:0.85rem; font-weight:600; color:var(--tdd-sage); '
-        'margin:0.6rem 0 0.3rem; letter-spacing:0.3px;">Projected to Pop</div>',
+        'margin:0.6rem 0 0.3rem; letter-spacing:0.3px;">Over Projections</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="tdd-meta" style="margin-bottom:0.4rem;">'
+        'Projections are most accurate near the expected value. '
+        'Showing players with strong over signals only.</div>',
         unsafe_allow_html=True,
     )
     if pop_df.empty:
         st.markdown(
-            '<div class="tdd-meta" style="margin-bottom:0.5rem;">No strong over-expected projections for this game.</div>',
+            '<div class="tdd-meta" style="margin-bottom:0.5rem;">No strong over projections for this game.</div>',
             unsafe_allow_html=True,
         )
     else:
         cards_html = ""
         for _, row in pop_df.head(5).iterrows():
-            cards_html += _prop_card_html(row)
-        st.markdown(cards_html, unsafe_allow_html=True)
-
-    # --- Projected Quiet ---
-    st.markdown(
-        '<div style="font-size:0.85rem; font-weight:600; color:var(--tdd-ember); '
-        'margin:0.8rem 0 0.3rem; letter-spacing:0.3px;">Projected Quiet</div>',
-        unsafe_allow_html=True,
-    )
-    if quiet_df.empty:
-        st.markdown(
-            '<div class="tdd-meta" style="margin-bottom:0.5rem;">No strong under-expected projections for this game.</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        cards_html = ""
-        for _, row in quiet_df.head(5).iterrows():
             cards_html += _prop_card_html(row)
         st.markdown(cards_html, unsafe_allow_html=True)
 
@@ -594,10 +655,42 @@ def _prop_card_html(row: pd.Series) -> str:
     type_badge = "P" if ptype == "pitcher" else "H"
 
     color = _edge_color(p_mid)
-    direction = "Over" if p_mid >= 0.50 else "Under"
-    pct = p_mid * 100
+    if p_mid >= 0.50:
+        direction = "Over"
+        pct = p_mid * 100
+    else:
+        direction = "Under"
+        pct = (1.0 - p_mid) * 100
 
-    # Summary row: name | stat | expected vs line | P(over) badge
+    # Live result badge — checkmark if the over has already hit
+    actual = row.get("actual")
+    game_status = str(row.get("game_status", ""))
+    is_final = "final" in game_status.lower() or "game over" in game_status.lower()
+    result_html = ""
+    if pd.notna(actual) and actual is not None:
+        actual_val = float(actual)
+        over_hit = actual_val > line_mid
+        if over_hit:
+            result_html = (
+                f'<span style="color:var(--tdd-sage); font-size:0.8rem; '
+                f'font-weight:700; flex-shrink:0;" title="Over hit: {actual_val:.0f}">'
+                f'\u2705 {actual_val:.0f}</span>'
+            )
+        elif is_final:
+            result_html = (
+                f'<span style="color:var(--tdd-ember); font-size:0.8rem; '
+                f'flex-shrink:0; opacity:0.7;" title="Final: {actual_val:.0f}">'
+                f'\u274c {actual_val:.0f}</span>'
+            )
+        else:
+            # In progress, not yet over
+            result_html = (
+                f'<span style="color:var(--tdd-slate); font-size:0.75rem; '
+                f'flex-shrink:0;" title="In progress">'
+                f'{actual_val:.0f}</span>'
+            )
+
+    # Summary row: name | stat | expected vs line | P(over) badge | result
     summary = (
         f'<span style="display:flex; align-items:center; gap:0.5rem; width:100%;">'
         # Type badge
@@ -614,6 +707,8 @@ def _prop_card_html(row: pd.Series) -> str:
         f'<span style="color:{color}; font-size:0.75rem; font-weight:600; '
         f'flex-shrink:0; min-width:3.5rem; text-align:right;">'
         f'{direction} {pct:.0f}%</span>'
+        # Live result
+        f'{result_html}'
         f'</span>'
     )
 
@@ -681,6 +776,7 @@ def _render_game_drilldown(
     ploc_df: pd.DataFrame | None = None,
     hzone_df: pd.DataFrame | None = None,
     game_props: pd.DataFrame | None = None,
+    live_stats: pd.DataFrame | None = None,
 ) -> None:
     """Rich game drill-down: lineup matchups, matchup analysis, and game simulator."""
     away_abbr = game.get("away_abbr", "?")
@@ -775,7 +871,10 @@ def _render_game_drilldown(
 
     elif section == "Projected Performers":
         _render_props_section(
-            gpk, game_props if game_props is not None else pd.DataFrame(),
+            gpk,
+            game_props if game_props is not None else pd.DataFrame(),
+            lineups_df=game_lu,
+            live_stats_df=live_stats,
         )
 
     elif section == "Matchup Analysis":
@@ -1114,9 +1213,9 @@ def _grade_color(grade: int) -> str:
 
 
 def _hitter_grades_html(stats: dict) -> str:
-    """Compact grade chips for a hitter: Hit/Pow/Spd/Disc/Fld."""
+    """Compact grade chips for a hitter: Con/Pow/Spd/Disc/Fld."""
     labels = [
-        ("Hit", "grade_hit"), ("Pow", "grade_power"), ("Spd", "grade_speed"),
+        ("Con", "grade_hit"), ("Pow", "grade_power"), ("Spd", "grade_speed"),
         ("Disc", "grade_discipline"), ("Fld", "grade_fielding"),
     ]
     parts = []

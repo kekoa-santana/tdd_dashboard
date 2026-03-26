@@ -1283,7 +1283,7 @@ def page_player_profile() -> None:
                 )
         else:
             _g_parts = []
-            for _lbl, _col in [("Hit", "grade_hit"), ("Power", "grade_power"), ("Speed", "grade_speed"), ("Fielding", "grade_fielding"), ("Discipline", "grade_discipline")]:
+            for _lbl, _col in [("Contact", "grade_hit"), ("Power", "grade_power"), ("Speed", "grade_speed"), ("Fielding", "grade_fielding"), ("Discipline", "grade_discipline")]:
                 _v = _rr_grades.get(_col)
                 if pd.notna(_v):
                     _g_parts.append(f"{_lbl}:{int(_v)}")
@@ -1310,7 +1310,7 @@ def page_player_profile() -> None:
             tw_parts.append(
                 f'<span style="color:var(--tdd-gold); font-weight:700;">Batting: {h_dr_s}</span>'
                 f' <span style="color:var(--tdd-slate); font-size:0.85em;">'
-                f'Hit:{int(hr.get("grade_hit", 0))} Power:{int(hr.get("grade_power", 0))} '
+                f'Contact:{int(hr.get("grade_hit", 0))} Power:{int(hr.get("grade_power", 0))} '
                 f'Speed:{int(hr.get("grade_speed", 0))} Discipline:{int(hr.get("grade_discipline", 0))}</span>'
             )
         if not p_row.empty:
