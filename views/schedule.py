@@ -31,7 +31,7 @@ from services.data_loader import (
     load_roster, load_game_props,
     fetch_live_schedule, fetch_live_lineups,
 )
-from utils.helpers import get_team_lookup
+from utils.helpers import format_ip, get_team_lookup
 from components.charts import _STAT_CHART_CONFIG
 from components.diamond_rating import diamond_rating_html
 from components.expandable_card import EXPANDABLE_CARD_CSS, expandable_card_html
@@ -342,7 +342,7 @@ def _render_schedule_cards(
             if not k_row.empty:
                 result["expected_k"] = float(k_row.iloc[0]["expected"])
             if not outs_row.empty:
-                result["expected_ip"] = round(float(outs_row.iloc[0]["expected"]) / 3, 1)
+                result["expected_ip"] = float(outs_row.iloc[0]["expected"]) / 3.0
             # Pass through metadata from any row
             first = side_rows.iloc[0]
             for col in ("dk_mean", "espn_mean", "umpire_k_lift", "weather_k_lift",
@@ -392,7 +392,8 @@ def _render_schedule_cards(
                 exp_ip = sim.get("expected_ip")
                 stats = f'E[K] {exp_k:.1f}' if exp_k is not None else ""
                 if exp_ip is not None:
-                    stats += f' · IP {exp_ip:.1f}' if stats else f'IP {exp_ip:.1f}'
+                    ip_str = format_ip(exp_ip)
+                    stats += f' · IP {ip_str}' if stats else f'IP {ip_str}'
                 return (
                     f'<span class="tdd-player-name">{pp_name}</span>'
                     f'{arch_tag}'
@@ -1090,12 +1091,14 @@ def _render_matchup_tab_sidebyside(
 ) -> None:
     """Lineup matchups for both sides rendered in side-by-side columns."""
     col_away, col_home = st.columns(2)
-    for side_info, col in zip(sides, [col_away, col_home]):
+    for i, (side_info, col) in enumerate(zip(sides, [col_away, col_home])):
+        opp_side = sides[1 - i]
         with col:
             _render_matchup_tab(
                 [side_info], h_arch_lookup, h_stat_lookup,
                 arsenal_df, vuln_df, gpk,
                 pos_lookup=pos_lookup or {},
+                opp_side=opp_side,
             )
 
 
@@ -1280,8 +1283,16 @@ def _render_matchup_tab(
     vuln_df: pd.DataFrame,
     gpk: int,
     pos_lookup: dict[int, str] | None = None,
+    opp_side: dict | None = None,
 ) -> None:
-    """Pitcher vs opposing lineup | MLB-style card layout with matchup advantage."""
+    """Team roster with matchup advantage badges.
+
+    When *opp_side* is provided (side-by-side view), each column shows:
+      - Team header
+      - Own SP at top
+      - Own lineup with batter matchup badges vs opposing SP
+      - Avg K matchup summary for own SP vs opposing lineup
+    """
     from scipy.special import expit, logit as sp_logit
     from lib.matchup import score_matchup, score_matchup_bb, score_matchup_hr
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
@@ -1316,17 +1327,23 @@ def _render_matchup_tab(
         p_bb = _safe_rate(p_proj.get("projected_bb_rate"), 0.08)
         p_hr = _safe_rate(p_proj.get("projected_hr_per_bf"), 0.03)
 
+        # Team-centric view: own roster, batter matchups vs opposing SP
+        if opp_side is not None:
+            display_lu = side_info["own_lineup"]
+            matchup_pid = opp_side["pitcher_id"]
+        else:
+            display_lu = opp_lu
+            matchup_pid = pid
+
         # Section header
         st.markdown(
             f'<div class="tdd-section-hdr">'
             f'<span class="tdd-team-abbr" data-team="{side_abbr}">{side_abbr}</span>'
-            f' SP vs '
-            f'<span class="tdd-team-abbr" data-team="{opp_abbr}">{opp_abbr}</span>'
-            f' Lineup</div>',
+            f'</div>',
             unsafe_allow_html=True,
         )
 
-        if opp_lu.empty:
+        if display_lu.empty:
             st.markdown(
                 f'<div style="color:var(--tdd-slate); font-size:0.85rem; padding:0.5rem 0;">'
                 f'No probable lineup yet</div>',
@@ -1334,14 +1351,38 @@ def _render_matchup_tab(
             )
             continue
 
-        name_col = "batter_name" if "batter_name" in opp_lu.columns else "player_name"
-        id_col = "batter_id" if "batter_id" in opp_lu.columns else "player_id"
+        name_col = "batter_name" if "batter_name" in display_lu.columns else "player_name"
+        id_col = "batter_id" if "batter_id" in display_lu.columns else "player_id"
 
         rows_html: list[str] = []
         total_k_lift = total_bb_lift = 0.0
         n_scored = 0
 
-        for _, brow in opp_lu.head(9).iterrows():
+        # Pitcher card at top
+        if pid:
+            p_composite = p_proj.get("tdd_value_score")
+            p_diamond = diamond_rating_html(0, size="sm", precomputed=p_composite) if pd.notna(p_composite) else ""
+            p_arch_html = (
+                f'<span class="tdd-badge">{p_arch}</span>'
+            ) if p_arch else ""
+            p_hs = f'<span style="margin:0 0.3rem;">{headshot_html(pid, size=32)}</span>'
+
+            p_summary = (
+                f'<span style="color:var(--tdd-gold); font-size:var(--tdd-fs-meta); '
+                f'min-width:1.2rem; text-align:right; font-weight:700;">P</span>'
+                f'{p_hs}'
+                f'<span class="tdd-stat-label" style="min-width:1.8rem;">SP</span>'
+                f'<span class="tdd-player-name" style="flex:1; min-width:5rem;">{pitcher_name}</span>'
+                f'{p_arch_html}'
+                f'<span style="margin:0 0.3rem;">{p_diamond}</span>'
+            )
+            p_grades_html = _pitcher_grades_html(p_proj)
+            p_detail = p_grades_html if p_grades_html else (
+                '<span style="color:var(--tdd-slate); font-size:0.7rem;">No grade data</span>'
+            )
+            rows_html.append(expandable_card_html(p_summary, p_detail))
+
+        for _, brow in display_lu.head(9).iterrows():
             bid = int(brow[id_col]) if pd.notna(brow.get(id_col)) else None
             bname = brow.get(name_col, "Unknown")
             order = int(brow["batting_order"])
@@ -1362,12 +1403,12 @@ def _render_matchup_tab(
             if pd.notna(composite):
                 diamond_html = diamond_rating_html(0, size="sm", precomputed=composite)
 
-            # Matchup advantage
+            # Matchup advantage (batter vs opposing SP)
             advantage_html = ""
-            if pid and bid and not arsenal_df.empty and not vuln_df.empty:
-                k_result = score_matchup(pid, bid, arsenal_df, vuln_df, baselines_pt)
-                bb_result = score_matchup_bb(pid, bid, arsenal_df, vuln_df, baselines_pt)
-                hr_result = score_matchup_hr(pid, bid, arsenal_df, vuln_df, baselines_pt)
+            if matchup_pid and bid and not arsenal_df.empty and not vuln_df.empty:
+                k_result = score_matchup(matchup_pid, bid, arsenal_df, vuln_df, baselines_pt)
+                bb_result = score_matchup_bb(matchup_pid, bid, arsenal_df, vuln_df, baselines_pt)
+                hr_result = score_matchup_hr(matchup_pid, bid, arsenal_df, vuln_df, baselines_pt)
 
                 k_lift = k_result.get("matchup_k_logit_lift", 0.0)
                 bb_lift = bb_result.get("matchup_bb_logit_lift", 0.0)
@@ -1422,31 +1463,6 @@ def _render_matchup_tab(
 
             rows_html.append(expandable_card_html(summary, detail))
 
-        # Pitcher at bottom (expandable)
-        if pid:
-            p_composite = p_proj.get("tdd_value_score")
-            p_diamond = diamond_rating_html(0, size="sm", precomputed=p_composite) if pd.notna(p_composite) else ""
-            p_arch_html = (
-                f'<span class="tdd-badge">{p_arch}</span>'
-            ) if p_arch else ""
-            p_hs = f'<span style="margin:0 0.3rem;">{headshot_html(pid, size=32)}</span>'
-
-            p_summary = (
-                f'<span style="color:var(--tdd-gold); font-size:var(--tdd-fs-meta); '
-                f'min-width:1.2rem; text-align:right; font-weight:700;">P</span>'
-                f'{p_hs}'
-                f'<span class="tdd-stat-label" style="min-width:1.8rem;">SP</span>'
-                f'<span class="tdd-player-name" style="flex:1; min-width:5rem;">{pitcher_name}</span>'
-                f'{p_arch_html}'
-                f'<span style="margin:0 0.3rem;">{p_diamond}</span>'
-            )
-            p_grades_html = _pitcher_grades_html(p_proj)
-            p_detail = p_grades_html if p_grades_html else (
-                '<span style="color:var(--tdd-slate); font-size:0.7rem;">No grade data</span>'
-            )
-
-            rows_html.append(expandable_card_html(p_summary, p_detail))
-
         if rows_html:
             st.markdown(
                 EXPANDABLE_CARD_CSS
@@ -1456,7 +1472,22 @@ def _render_matchup_tab(
                 unsafe_allow_html=True,
             )
 
-        # Summary
+        # Avg K matchup for this side's pitcher vs opposing lineup
+        if opp_side is not None and pid and not opp_lu.empty:
+            opp_id_col = "batter_id" if "batter_id" in opp_lu.columns else "player_id"
+            total_k_lift = total_bb_lift = 0.0
+            n_scored = 0
+            for _, ob in opp_lu.head(9).iterrows():
+                ob_id = int(ob[opp_id_col]) if pd.notna(ob.get(opp_id_col)) else None
+                if ob_id and not arsenal_df.empty and not vuln_df.empty:
+                    kr = score_matchup(pid, ob_id, arsenal_df, vuln_df, baselines_pt)
+                    br = score_matchup_bb(pid, ob_id, arsenal_df, vuln_df, baselines_pt)
+                    kl = kr.get("matchup_k_logit_lift", 0.0)
+                    bl = br.get("matchup_bb_logit_lift", 0.0)
+                    total_k_lift += 0.0 if np.isnan(kl) else kl
+                    total_bb_lift += 0.0 if np.isnan(bl) else bl
+                    n_scored += 1
+
         if n_scored > 0:
             avg_k = total_k_lift / n_scored
             avg_bb = total_bb_lift / n_scored
@@ -1468,7 +1499,7 @@ def _render_matchup_tab(
                 k_color, k_word = SLATE, "neutral"
             st.markdown(
                 f'<div style="font-size:0.82rem; margin-bottom:0.5rem;">'
-                f'<span style="color:{k_color};">Avg K matchup: {avg_k:+.3f} '
+                f'<span style="color:{k_color};">{pitcher_name} avg K matchup: {avg_k:+.3f} '
                 f'({k_word})</span>'
                 f' · <span style="color:var(--tdd-slate);">BB: {avg_bb:+.3f}</span></div>',
                 unsafe_allow_html=True,
@@ -2418,7 +2449,7 @@ def _render_sim_tab(
             f"BB: {np.mean(result.bb_samples):.1f}",
             f"H: {np.mean(result.h_samples):.1f}",
             f"HR: {np.mean(result.hr_samples):.1f}",
-            f"IP: {np.mean(result.ip_samples()):.1f}",
+            f"IP: {format_ip(np.mean(result.outs_samples) / 3.0)}",
         ]
 
         st.markdown(
