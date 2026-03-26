@@ -556,6 +556,15 @@ def fetch_live_lineups(schedule_df: pd.DataFrame) -> pd.DataFrame:
     return fetch_all_lineups(schedule_df)
 
 
+@st.cache_data(ttl=600)  # 10-minute TTL for live game stats
+def fetch_live_boxscores(schedule_df: pd.DataFrame) -> pd.DataFrame:
+    """Fetch live player stats for in-progress/final games."""
+    from lib.schedule import fetch_live_boxscores as _fetch
+    if schedule_df.empty:
+        return pd.DataFrame()
+    return _fetch(schedule_df)
+
+
 @st.cache_data(ttl=_DATA_TTL)
 def load_milb_translated(player_type: str) -> pd.DataFrame:
     """Load MiLB translated stats (batters or pitchers)."""

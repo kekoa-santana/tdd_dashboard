@@ -535,7 +535,7 @@ def _render_ranking_card(
             if link_type == "pitcher":
                 _grade_cols = [("Stuff", "grade_stuff"), ("Command", "grade_command"), ("Durability", "grade_durability")]
             else:
-                _grade_cols = [("Hit", "grade_hit"), ("Power", "grade_power"), ("Speed", "grade_speed"), ("Fielding", "grade_fielding"), ("Discipline", "grade_discipline")]
+                _grade_cols = [("Contact", "grade_hit"), ("Power", "grade_power"), ("Speed", "grade_speed"), ("Fielding", "grade_fielding"), ("Discipline", "grade_discipline")]
             _grade_parts = []
             for _lbl, _col in _grade_cols:
                 _gv = row.get(_col)

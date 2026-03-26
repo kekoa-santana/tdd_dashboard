@@ -215,3 +215,111 @@ def fetch_all_lineups(
         return pd.DataFrame()
 
     return pd.concat(frames, ignore_index=True)
+
+
+def fetch_live_boxscores(
+    schedule_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Fetch live player stats for all in-progress or final games.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: game_pk, player_id, player_name, player_type,
+        team_abbr, game_status, K, H, HR, BB, TB (batters),
+        K, IP, H, BB, HR, Outs (pitchers).
+    """
+    import urllib.request
+
+    if schedule_df.empty:
+        return pd.DataFrame()
+
+    # Only fetch for games that are in progress or final
+    active_statuses = {
+        "In Progress", "Final", "Game Over", "Mid Inning",
+        "End Inning", "Top", "Bottom", "Middle",
+    }
+    active = schedule_df[
+        schedule_df["status"].str.contains(
+            "|".join(active_statuses), case=False, na=False,
+        )
+    ] if "status" in schedule_df.columns else schedule_df
+
+    if active.empty:
+        return pd.DataFrame()
+
+    rows: list[dict[str, Any]] = []
+    for gpk in active["game_pk"].unique():
+        url = f"{MLB_API_BASE}/game/{int(gpk)}/boxscore"
+        try:
+            with urllib.request.urlopen(url, timeout=15) as resp:
+                data = json.loads(resp.read().decode())
+        except Exception as e:
+            logger.warning("Failed to fetch boxscore for game %d: %s", gpk, e)
+            continue
+
+        # Determine game status from parent schedule row
+        game_row = active[active["game_pk"] == gpk].iloc[0]
+        game_status = game_row.get("status", "")
+
+        for side in ("away", "home"):
+            team_data = data.get("teams", {}).get(side, {})
+            team_abbr = team_data.get("team", {}).get("abbreviation", "")
+            players = team_data.get("players", {})
+
+            for pid_key, pdata in players.items():
+                person = pdata.get("person", {})
+                pid = person.get("id")
+                name = person.get("fullName", "")
+                stats = pdata.get("stats", {})
+
+                batting = stats.get("batting", {})
+                pitching = stats.get("pitching", {})
+
+                if batting and batting.get("atBats", 0) + batting.get("baseOnBalls", 0) > 0:
+                    rows.append({
+                        "game_pk": gpk,
+                        "player_id": pid,
+                        "player_name": name,
+                        "player_type": "batter",
+                        "team_abbr": team_abbr,
+                        "game_status": game_status,
+                        "actual_K": batting.get("strikeOuts", 0),
+                        "actual_H": batting.get("hits", 0),
+                        "actual_HR": batting.get("homeRuns", 0),
+                        "actual_BB": batting.get("baseOnBalls", 0),
+                        "actual_TB": batting.get("totalBases", 0),
+                    })
+
+                if pitching and pitching.get("inningsPitched"):
+                    ip_str = pitching.get("inningsPitched", "0")
+                    try:
+                        ip_val = float(ip_str)
+                    except (ValueError, TypeError):
+                        ip_val = 0.0
+                    outs = int(ip_val) * 3 + round((ip_val % 1) * 10)
+                    rows.append({
+                        "game_pk": gpk,
+                        "player_id": pid,
+                        "player_name": name,
+                        "player_type": "pitcher",
+                        "team_abbr": team_abbr,
+                        "game_status": game_status,
+                        "actual_K": pitching.get("strikeOuts", 0),
+                        "actual_H": pitching.get("hits", 0),
+                        "actual_HR": pitching.get("homeRuns", 0),
+                        "actual_BB": pitching.get("baseOnBalls", 0),
+                        "actual_TB": 0,
+                        "actual_IP": ip_val,
+                        "actual_Outs": outs,
+                    })
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    logger.info(
+        "Fetched live boxscores: %d player lines across %d games",
+        len(df), df["game_pk"].nunique(),
+    )
+    return df
