@@ -150,6 +150,21 @@ hr {
     white-space: nowrap;
 }
 
+/* Home link — logo + brand text */
+.topbar-home,
+.topbar-home:link,
+.topbar-home:visited,
+.topbar-home:hover,
+.topbar-home:active {
+    display: flex;
+    align-items: center;
+    text-decoration: none !important;
+    cursor: pointer;
+}
+.topbar-home:hover {
+    opacity: 0.75;
+}
+
 /* Nav buttons — inverted (light bar, dark text) */
 .topbar a.topbar-btn {
     color: var(--tdd-dark) !important;
@@ -554,16 +569,20 @@ hr {
     max-width: none;
 }
 
-/* Mobile: hide inline stats and team on all leaderboards.
-   Full-width cards: tap to expand for details.
-   Positional cards: hover tooltip still works on touch. */
-@media (max-width: 768px) {
+/* Tablet/iPad: hide inline stats, team, and diamond symbols on leaderboards.
+   Show only the numeric diamond rating. */
+@media (max-width: 1024px) {
     .lb-card .lb-stat-cell,
-    .lb-card .lb-team,
-    .lb-card .lb-info {
+    .lb-diamonds,
+    .tr-diamonds,
+    .lineup-diamonds,
+    .lineup-hs {
         display: none;
     }
+}
 
+/* Mobile: stack columns, extra card padding */
+@media (max-width: 768px) {
     /* Force Streamlit columns to stack vertically on mobile */
     div[data-testid="stHorizontalBlock"] {
         flex-direction: column !important;

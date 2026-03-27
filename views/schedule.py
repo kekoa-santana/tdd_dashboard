@@ -30,6 +30,7 @@ from services.data_loader import (
     load_pitcher_location_grid, load_hitter_zone_grid,
     load_roster, load_game_props,
     fetch_live_schedule, fetch_live_lineups, fetch_live_boxscores,
+    backfill_missing_lineups,
 )
 from utils.helpers import format_ip, get_team_lookup
 from components.charts import _STAT_CHART_CONFIG
@@ -93,6 +94,8 @@ def _render_todays_games() -> None:
     else:
         schedule = load_todays_games()
         lineups = load_todays_lineups()
+        # Auto-backfill lineups for games posted after the cache was built
+        lineups = backfill_missing_lineups(schedule, lineups)
 
     col_info, col_btn = st.columns([4, 1])
     with col_info:
@@ -1130,7 +1133,7 @@ def _render_hitter_projections_tab(
 
             hs = ""
             if bid:
-                hs = f'<span style="margin:0 0.3rem;">{headshot_html(bid, size=32)}</span>'
+                hs = f'<span class="lineup-hs" style="margin:0 0.3rem;">{headshot_html(bid, size=32)}</span>'
 
             _order_color = "var(--tdd-gold)" if order <= 3 else "var(--tdd-slate)"
             rows_html.append(
@@ -1139,11 +1142,11 @@ def _render_hitter_projections_tab(
                 f'<span style="color:{_order_color}; font-size:0.8rem; '
                 f'min-width:1.2rem; text-align:right; font-weight:700;">{order}</span>'
                 f'{hs}'
-                f'<span style="color:var(--tdd-slate); font-size:0.72rem; min-width:1.8rem;">{pos}</span>'
+                f'<span style="color:var(--tdd-slate); font-size:0.72rem; min-width:1.8rem; margin-left:0.3rem;">{pos}</span>'
                 f'<span style="color:var(--tdd-cream); font-size:0.88rem; font-weight:600; '
                 f'flex:1; min-width:5rem;">{bname}</span>'
                 f'{arch_html}'
-                f'<span style="margin:0 0.3rem;">{diamond_html}</span>'
+                f'<span class="lineup-diamonds" style="margin:0 0.3rem;">{diamond_html}</span>'
                 f'{stat_html}'
                 f'</div>'
             )
@@ -1155,7 +1158,7 @@ def _render_hitter_projections_tab(
             p_arch_html = (
                 f'<span class="tdd-badge">{p_arch}</span>'
             ) if p_arch else ""
-            p_hs = f'<span style="margin:0 0.3rem;">{headshot_html(pid, size=32)}</span>'
+            p_hs = f'<span class="lineup-hs" style="margin:0 0.3rem;">{headshot_html(pid, size=32)}</span>'
 
             rows_html.append(
                 f'<div class="tdd-lineup-row" style="background:rgba(200,169,110,0.06);">'
@@ -1165,7 +1168,7 @@ def _render_hitter_projections_tab(
                 f'<span class="tdd-stat-label" style="min-width:1.8rem;">SP</span>'
                 f'<span class="tdd-player-name" style="flex:1; min-width:5rem;">{pitcher_name}</span>'
                 f'{p_arch_html}'
-                f'<span style="margin:0 0.3rem;">{p_diamond}</span>'
+                f'<span class="lineup-diamonds" style="margin:0 0.3rem;">{p_diamond}</span>'
                 f'</div>'
             )
 
@@ -1464,7 +1467,7 @@ def _render_matchup_tab(
             p_arch_html = (
                 f'<span class="tdd-badge">{p_arch}</span>'
             ) if p_arch else ""
-            p_hs = f'<span style="margin:0 0.3rem;">{headshot_html(pid, size=32)}</span>'
+            p_hs = f'<span class="lineup-hs" style="margin:0 0.3rem;">{headshot_html(pid, size=32)}</span>'
 
             p_summary = (
                 f'<span style="color:var(--tdd-gold); font-size:var(--tdd-fs-meta); '
@@ -1473,7 +1476,7 @@ def _render_matchup_tab(
                 f'<span class="tdd-stat-label" style="min-width:1.8rem;">SP</span>'
                 f'<span class="tdd-player-name" style="flex:1; min-width:5rem;">{pitcher_name}</span>'
                 f'{p_arch_html}'
-                f'<span style="margin:0 0.3rem;">{p_diamond}</span>'
+                f'<span class="lineup-diamonds" style="margin:0 0.3rem;">{p_diamond}</span>'
             )
             p_grades_html = _pitcher_grades_html(p_proj)
             p_detail = p_grades_html if p_grades_html else (
@@ -1521,16 +1524,16 @@ def _render_matchup_tab(
                 if net > 0.03:
                     advantage_html = (
                         f'<span style="color:var(--tdd-ember); font-size:0.68rem; '
-                        f'font-weight:600;">Pitcher</span>'
+                        f'font-weight:600; margin-left:0.3rem;">Pitcher</span>'
                     )
                 elif net < -0.03:
                     advantage_html = (
                         f'<span style="color:var(--tdd-sage); font-size:0.68rem; '
-                        f'font-weight:600;">Hitter</span>'
+                        f'font-weight:600; margin-left:0.3rem;">Hitter</span>'
                     )
                 else:
                     advantage_html = (
-                        f'<span style="color:var(--tdd-slate); font-size:0.68rem;">Even</span>'
+                        f'<span style="color:var(--tdd-slate); font-size:0.68rem; margin-left:0.3rem;">Even</span>'
                     )
 
                 total_k_lift += k_lift
@@ -1540,17 +1543,17 @@ def _render_matchup_tab(
             # Headshot
             hs = ""
             if bid:
-                hs = f'<span style="margin:0 0.3rem;">{headshot_html(bid, size=32)}</span>'
+                hs = f'<span class="lineup-hs" style="margin:0 0.3rem;">{headshot_html(bid, size=32)}</span>'
 
             # Summary row (always visible)
             summary = (
                 f'<span style="color:{"var(--tdd-gold)" if order <= 3 else "var(--tdd-slate)"}; '
                 f'font-size:var(--tdd-fs-meta); min-width:1.2rem; text-align:right; font-weight:700;">{order}</span>'
                 f'{hs}'
-                f'<span class="tdd-stat-label" style="min-width:1.8rem;">{pos}</span>'
+                f'<span class="tdd-stat-label" style="min-width:1.8rem; margin-left:0.3rem;">{pos}</span>'
                 f'<span class="tdd-player-name" style="flex:1; min-width:5rem;">{bname}</span>'
                 f'{arch_html}'
-                f'<span style="margin:0 0.3rem;">{diamond_html}</span>'
+                f'<span class="lineup-diamonds" style="margin:0 0.3rem;">{diamond_html}</span>'
                 f'{advantage_html}'
             )
 
