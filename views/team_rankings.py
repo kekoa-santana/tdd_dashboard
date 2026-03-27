@@ -110,12 +110,14 @@ _CSS = f"""
     color: var(--tdd-gold) !important; cursor: pointer !important; }}
 
 /* ── responsive ───────────────────────────────────── */
+@media (max-width: 1024px) {{
+    .tr-diamonds {{ display: none; }}
+    .tr-stat {{ display: none; }}
+}}
 @media (max-width: 768px) {{
     .tr-detail-grid {{ flex-direction: column; }}
-    .tr-stat {{ margin-left: 0.3rem; font-size: 0.65rem; }}
 }}
 @media (max-width: 480px) {{
-    .tr-stat {{ display: none; }}
     .tr-name {{ font-size: 0.85rem; }}
 }}
 </style>

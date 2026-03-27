@@ -367,8 +367,10 @@ def main() -> None:
     st.markdown(f"""
     <div class="topbar-wrap">
     <div class="topbar">
-        {_logo_html}
-        <span class="topbar-brand-text">The Data Diamond</span>
+        <a href="?page=schedule" target="_self" class="topbar-home">
+            {_logo_html}
+            <span class="topbar-brand-text">The Data Diamond</span>
+        </a>
         <div class="topbar-nav-desktop">
             {nav_html}
         </div>
@@ -395,8 +397,11 @@ def main() -> None:
         )
         return
 
-    # Dispatch to selected page
-    st.query_params["page"] = page.lower().replace(" ", "_")
+    # Dispatch to selected page — only write query param when it differs
+    # to avoid pushing duplicate history entries (breaks browser back button)
+    _slug = page.lower().replace(" ", "_")
+    if st.query_params.get("page", "") != _slug:
+        st.query_params["page"] = _slug
     PAGES[page]()
 
 

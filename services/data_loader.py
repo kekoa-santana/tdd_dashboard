@@ -556,6 +556,52 @@ def fetch_live_lineups(schedule_df: pd.DataFrame) -> pd.DataFrame:
     return fetch_all_lineups(schedule_df)
 
 
+@st.cache_data(ttl=600)
+def backfill_missing_lineups(
+    schedule_df: pd.DataFrame,
+    lineups_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Fetch lineups from MLB API for games missing from the cached parquet.
+
+    Parameters
+    ----------
+    schedule_df : pd.DataFrame
+        Today's schedule (must have ``game_pk`` column).
+    lineups_df : pd.DataFrame
+        Cached lineup data (may be empty or missing some game_pks).
+
+    Returns
+    -------
+    pd.DataFrame
+        Original lineups with any newly-fetched lineups appended.
+    """
+    if schedule_df.empty:
+        return lineups_df
+
+    from lib.schedule import fetch_game_lineups
+
+    all_gpks = set(schedule_df["game_pk"].unique())
+    cached_gpks = set(lineups_df["game_pk"].unique()) if not lineups_df.empty else set()
+    missing_gpks = all_gpks - cached_gpks
+
+    if not missing_gpks:
+        return lineups_df
+
+    fetched: list[pd.DataFrame] = []
+    for gpk in missing_gpks:
+        lu = fetch_game_lineups(int(gpk))
+        if not lu.empty:
+            fetched.append(lu)
+
+    if not fetched:
+        return lineups_df
+
+    backfilled = pd.concat(fetched, ignore_index=True)
+    if lineups_df.empty:
+        return backfilled
+    return pd.concat([lineups_df, backfilled], ignore_index=True)
+
+
 @st.cache_data(ttl=600)  # 10-minute TTL for live game stats
 def fetch_live_boxscores(schedule_df: pd.DataFrame) -> pd.DataFrame:
     """Fetch live player stats for in-progress/final games."""

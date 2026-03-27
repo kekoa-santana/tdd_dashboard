@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from config import GOLD, SAGE, SLATE, CREAM, DARK_CARD, DARK_BORDER
-from services.data_loader import load_counting_sim, load_player_teams
+from services.data_loader import load_counting_sim, load_roster
 from components.headshot import headshot_html
 
 
@@ -415,7 +415,7 @@ def page_projections() -> None:
     name_col = "batter_name" if player_type == "Batter" else "pitcher_name"
 
     # Load teams + league
-    teams_df = load_player_teams()
+    teams_df = load_roster()
     teams_lookup: dict[int, str] = {}
     league_lookup: dict[int, str] = {}
     if not teams_df.empty:
@@ -428,7 +428,7 @@ def page_projections() -> None:
         df["career_pa"] = 999
 
     # Apply league filter
-    if st.session_state.proj_league != "ALL" and league_lookup:
+    if st.session_state.proj_league != "All" and league_lookup:
         target_league = "AL" if "American" in st.session_state.proj_league else "NL"
         league_ids = {pid for pid, lg in league_lookup.items() if lg == target_league}
         df = df[df[id_col].isin(league_ids)]
