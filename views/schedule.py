@@ -595,7 +595,7 @@ def _render_props_section(
         _confident = _all_props[
             (_all_props["game_status"] == "final")
             & (_all_props["over_hit"].notna())
-            & ((_all_props["p_over_mid"] >= 0.65) | (_all_props["p_over_high"] >= 0.65))
+            & ((_all_props["p_over_mid"] >= 0.63) | (_all_props["p_over_high"] >= 0.63))
         ]
         if len(_confident) > 0:
             _hits = int((_confident["over_hit"] == True).sum())  # noqa: E712
@@ -609,7 +609,7 @@ def _render_props_section(
                 f'<span style="color:{_color}; font-weight:700; font-size:0.85rem;">'
                 f'{_hits}/{_total}</span>'
                 f'<span class="tdd-meta">confident picks hit ({_pct:.0f}%) '
-                f'— P(over) \u2265 65% on mid/high lines</span>'
+                f'— P(over) \u2265 63% on mid/high lines</span>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
