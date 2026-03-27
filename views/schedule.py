@@ -407,7 +407,7 @@ def _render_schedule_cards(
             # Date/time/status row
             f'<div class="tdd-meta" style="margin-bottom:0.4rem;">{dt_line}</div>'
             # Team row: logos + abbreviations
-            f'<div style="display:flex; align-items:center; gap:0.6rem;">'
+            f'<div class="tdd-game-teams" style="display:flex; align-items:center; gap:0.6rem;">'
             f'{away_logo}'
             f'<span class="tdd-team-abbr" data-team="{away_abbr}">{away_abbr}</span>'
             f'<span style="color:var(--tdd-slate); font-size:0.9rem; margin:0 0.3rem;">@</span>'
