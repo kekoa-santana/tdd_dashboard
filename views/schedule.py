@@ -75,47 +75,6 @@ def _staleness_indicator(ts_str: str | None) -> str:
 _SCHEDULE_CSS = ""
 
 
-def _render_todays_games() -> None:
-    """Today's MLB games with matchup analysis and K prop projections.
-
-    Uses cached parquet data by default. Manual refresh button fetches
-    fresh lineups/pitchers from the MLB API on demand.
-    """
-    meta = load_update_metadata()
-    sims = load_game_props()
-
-    proj_ts = meta.get("last_updated")
-
-    # Use cached data; manual refresh pulls from MLB API
-    if st.session_state.get("schedule_refreshed"):
-        schedule = fetch_live_schedule()
-        lineups = fetch_live_lineups(schedule) if not schedule.empty else pd.DataFrame()
-        st.session_state["schedule_refreshed"] = False
-    else:
-        schedule = load_todays_games()
-        lineups = load_todays_lineups()
-        # Auto-backfill lineups for games posted after the cache was built
-        lineups = backfill_missing_lineups(schedule, lineups)
-
-    col_info, col_btn = st.columns([4, 1])
-    with col_info:
-        st.markdown(
-            f'<div style="color:var(--tdd-slate); font-size:0.85rem;">'
-            f'Projections from: {_staleness_indicator(proj_ts)}'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-    with col_btn:
-        if st.button("Refresh Lineups", key="schedule_refresh"):
-            st.session_state["schedule_refreshed"] = True
-            st.cache_data.clear()
-            st.rerun()
-
-    # Fetch live boxscores for in-progress / final games
-    live_stats = fetch_live_boxscores(schedule) if not schedule.empty else pd.DataFrame()
-
-    _render_schedule_cards(schedule, sims, lineups, meta, live_stats=live_stats)
-
 
 def _build_projection_lookup() -> dict:
     """Build pitcher_id → projection dict from pitcher_projections.parquet."""
@@ -3230,6 +3189,8 @@ def page_schedule() -> None:
         sims = load_game_props()
         schedule = load_todays_games()
         lineups = load_todays_lineups()
+        # Auto-backfill lineups for games posted after the cache was built
+        lineups = backfill_missing_lineups(schedule, lineups)
     else:
         # Other dates: fetch schedule from MLB API, no sims
         schedule = fetch_live_schedule(selected_date.isoformat())
