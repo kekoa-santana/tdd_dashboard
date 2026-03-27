@@ -1,22 +1,24 @@
 @echo off
 REM ──────────────────────────────────────────────────────────────
-REM  TDD Dashboard — Daily Update Runner
+REM  TDD Dashboard — Update Runner
 REM  Called by Windows Task Scheduler.
 REM
-REM  Full pipeline:
-REM    1. ETL — ingest yesterday's games into PostgreSQL
-REM    2. Projections — conjugate update + game sims (delegates to player_profiles)
-REM    3. Dashboard bookkeeping — roster export, snapshots, manifest
+REM  Modes:
+REM    daily_update.bat                 — full update (ETL + projections + props + push)
+REM    daily_update.bat --skip-etl      — skip ETL, projections + props + push
+REM    daily_update.bat --schedule-only — 30-min mode: schedule + lineups + props + push
+REM                                       (no ETL, no conjugate updates)
 REM
-REM  Usage:
-REM    daily_update.bat                 — full update (ETL + projections + schedule)
-REM    daily_update.bat --skip-etl      — skip ETL, projections + schedule only
-REM    daily_update.bat --schedule-only — hourly mode (no ETL, no projections)
+REM  Task Scheduler setup:
+REM    1. Full daily:   6:00 AM  → daily_update.bat
+REM    2. Game day:     every 30 min, 10 AM–1 AM → daily_update.bat --schedule-only
 REM ──────────────────────────────────────────────────────────────
 
 set PROJECT_DIR=C:\Users\kekoa\Documents\data_analytics\tdd-dashboard
+set PROFILES_DIR=C:\Users\kekoa\Documents\data_analytics\player_profiles
 set ETL_DIR=C:\Users\kekoa\Documents\data_analytics\mlb_fantasy_ETL
 set ETL_PYTHON=%ETL_DIR%\myenv\Scripts\python.exe
+set PROFILES_PYTHON=%PROFILES_DIR%\myenv\Scripts\python.exe
 set PYTHON=C:\Users\kekoa\AppData\Local\Programs\Python\Python311\python.exe
 set LOG_DIR=%PROJECT_DIR%\logs
 set LOG_FILE=%LOG_DIR%\update_%date:~-4,4%-%date:~-10,2%-%date:~-7,2%.log
@@ -24,10 +26,9 @@ set LOG_FILE=%LOG_DIR%\update_%date:~-4,4%-%date:~-10,2%-%date:~-7,2%.log
 REM Create logs directory if needed
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
-echo [%date% %time%] Starting daily update... >> "%LOG_FILE%" 2>&1
+echo [%date% %time%] Starting update... >> "%LOG_FILE%" 2>&1
 
 REM ── Compute yesterday's date (for ETL) ──
-REM   PowerShell one-liner to get yesterday in YYYY-MM-DD format
 for /f %%i in ('powershell -NoProfile -Command "(Get-Date).AddDays(-1).ToString('yyyy-MM-dd')"') do set YESTERDAY=%%i
 
 REM ── Step 1: ETL — skip for --schedule-only or --skip-etl ──
@@ -45,8 +46,7 @@ if %ERRORLEVEL% EQU 0 (
     )
 )
 
-REM ── Step 2-3: Dashboard update (projections + bookkeeping) ──
-REM   Strip --skip-etl from args before passing to update_in_season.py
+REM ── Step 2: Dashboard update (projections + bookkeeping) ──
 set DASH_ARGS=%*
 if defined DASH_ARGS (
     set DASH_ARGS=%DASH_ARGS:--skip-etl=%
@@ -56,9 +56,23 @@ echo [%date% %time%] Running dashboard update... >> "%LOG_FILE%" 2>&1
 
 if %ERRORLEVEL% NEQ 0 (
     echo [%date% %time%] Dashboard update FAILED with exit code %ERRORLEVEL% >> "%LOG_FILE%" 2>&1
-    goto :end
+    echo [%date% %time%] Continuing to props generation... >> "%LOG_FILE%" 2>&1
 ) else (
     echo [%date% %time%] Dashboard update completed successfully >> "%LOG_FILE%" 2>&1
+)
+
+REM ── Step 3: Regenerate game props (confident_picks) ──
+REM   Fetches fresh lineups from MLB API, runs game sims for all
+REM   today's + tomorrow's games, outputs game_props.parquet.
+REM   This runs every 30 min so props reflect confirmed lineups.
+echo [%date% %time%] Generating game props... >> "%LOG_FILE%" 2>&1
+cd /d "%PROFILES_DIR%"
+"%PROFILES_PYTHON%" -c "import sys; sys.path.insert(0, 'scripts/precompute'); sys.path.insert(0, 'scripts'); from confident_picks import run; run()" >> "%LOG_FILE%" 2>&1
+
+if %ERRORLEVEL% NEQ 0 (
+    echo [%date% %time%] Game props generation FAILED >> "%LOG_FILE%" 2>&1
+) else (
+    echo [%date% %time%] Game props generated successfully >> "%LOG_FILE%" 2>&1
 )
 
 REM ── Step 4: Git commit + push data to GitHub ──
@@ -83,3 +97,4 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 :end
+echo [%date% %time%] Update finished >> "%LOG_FILE%" 2>&1
