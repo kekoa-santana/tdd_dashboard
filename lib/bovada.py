@@ -168,3 +168,116 @@ def fetch_bovada_props() -> pd.DataFrame:
     else:
         logger.warning("No Bovada props found")
     return df
+
+
+def fetch_bovada_game_odds() -> pd.DataFrame:
+    """Fetch game-level odds: moneyline, spread (run line), over/under.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: game_description, market_type, team_or_label,
+        odds, implied_prob, line (for spread/total).
+    """
+    req = urllib.request.Request(
+        BOVADA_MLB_URL,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36"
+            ),
+            "Accept": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:
+        logger.error("Failed to fetch Bovada game odds: %s", e)
+        return pd.DataFrame()
+
+    rows: list[dict[str, Any]] = []
+
+    for group in data:
+        for event in group.get("events", []):
+            game_desc = event.get("description", "")
+
+            for dg in event.get("displayGroups", []):
+                dg_desc = dg.get("description", "").lower()
+                if "game lines" not in dg_desc:
+                    continue
+
+                for market in dg.get("markets", []):
+                    market_desc = market.get("description", "")
+                    outcomes = market.get("outcomes", [])
+
+                    # Skip 1H (first half) and 1I (first inning) variants
+                    has_half = any(
+                        "1H" in o.get("description", "") or "1I" in o.get("description", "")
+                        for o in outcomes
+                    )
+                    if has_half:
+                        continue
+
+                    # Moneyline
+                    if market_desc.lower() == "moneyline":
+                        for o in outcomes:
+                            price = o.get("price", {})
+                            american = price.get("american", "")
+                            rows.append({
+                                "game_description": game_desc,
+                                "market_type": "moneyline",
+                                "team_or_label": o.get("description", ""),
+                                "odds": american,
+                                "implied_prob": _american_to_implied(american),
+                                "line": None,
+                            })
+
+                    # Run line (spread)
+                    elif market_desc.lower() == "runline":
+                        for o in outcomes:
+                            price = o.get("price", {})
+                            american = price.get("american", "")
+                            handicap = price.get("handicap", "")
+                            try:
+                                spread = float(handicap)
+                            except (ValueError, TypeError):
+                                spread = None
+                            rows.append({
+                                "game_description": game_desc,
+                                "market_type": "spread",
+                                "team_or_label": o.get("description", ""),
+                                "odds": american,
+                                "implied_prob": _american_to_implied(american),
+                                "line": spread,
+                            })
+
+                    # Total runs (over/under)
+                    elif market_desc.lower() == "total":
+                        for o in outcomes:
+                            price = o.get("price", {})
+                            american = price.get("american", "")
+                            handicap = price.get("handicap", "")
+                            try:
+                                total = float(handicap)
+                            except (ValueError, TypeError):
+                                total = None
+                            rows.append({
+                                "game_description": game_desc,
+                                "market_type": "total",
+                                "team_or_label": o.get("description", ""),
+                                "odds": american,
+                                "implied_prob": _american_to_implied(american),
+                                "line": total,
+                            })
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        logger.info(
+            "Fetched %d game-level odds across %d games",
+            len(df), df["game_description"].nunique(),
+        )
+    else:
+        logger.warning("No Bovada game odds found")
+    return df

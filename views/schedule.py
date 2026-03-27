@@ -589,31 +589,6 @@ def _render_props_section(
         unsafe_allow_html=True,
     )
 
-    # Accuracy tracker — confident picks (mid/high P(over) >= 65%) with results
-    _all_props = props_df.copy() if not props_df.empty else pd.DataFrame()
-    if not _all_props.empty and "over_hit" in _all_props.columns:
-        _confident = _all_props[
-            (_all_props["game_status"] == "final")
-            & (_all_props["over_hit"].notna())
-            & ((_all_props["p_over_mid"] >= 0.63) | (_all_props["p_over_high"] >= 0.63))
-        ]
-        if len(_confident) > 0:
-            _hits = int((_confident["over_hit"] == True).sum())  # noqa: E712
-            _total = len(_confident)
-            _pct = _hits / _total * 100
-            _color = "var(--tdd-sage)" if _pct >= 55 else "var(--tdd-ember)"
-            st.markdown(
-                f'<div style="display:flex; align-items:center; gap:0.5rem; '
-                f'margin-bottom:0.5rem; padding:0.3rem 0.6rem; '
-                f'background:var(--tdd-dark-border); border-radius:4px;">'
-                f'<span style="color:{_color}; font-weight:700; font-size:0.85rem;">'
-                f'{_hits}/{_total}</span>'
-                f'<span class="tdd-meta">confident picks hit ({_pct:.0f}%) '
-                f'— P(over) \u2265 63% on mid/high lines</span>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
     st.markdown(
         '<div class="tdd-meta" style="margin-bottom:0.4rem;">'
         'Projections are most accurate near the expected value. '
@@ -637,6 +612,7 @@ def _prop_card_html(row: pd.Series) -> str:
     name = row["player_name"]
     stat = row["stat"]
     stat_label = _STAT_LABELS.get(stat, stat)
+    stat_short = stat  # K, H, HR, TB, BB
     team = row["team"]
     opp = row["opponent"]
     expected = row["expected"]
@@ -646,14 +622,12 @@ def _prop_card_html(row: pd.Series) -> str:
     type_badge = "P" if ptype == "pitcher" else "H"
 
     color = _edge_color(p_mid)
-    if p_mid >= 0.50:
-        direction = "Over"
-        pct = p_mid * 100
-    else:
-        direction = "Under"
-        pct = (1.0 - p_mid) * 100
+    pct = p_mid * 100
 
-    # Live result badge — checkmark if the over has already hit
+    # Format line as integer if whole number, else 1 decimal
+    line_str = f"{line_mid:.0f}" if line_mid == int(line_mid) else f"{line_mid:.1f}"
+
+    # Live result
     actual = row.get("actual")
     game_status = str(row.get("game_status", ""))
     is_final = "final" in game_status.lower() or "game over" in game_status.lower()
@@ -664,24 +638,23 @@ def _prop_card_html(row: pd.Series) -> str:
         if over_hit:
             result_html = (
                 f'<span style="color:var(--tdd-sage); font-size:0.8rem; '
-                f'font-weight:700; flex-shrink:0;" title="Over hit: {actual_val:.0f}">'
-                f'\u2705 {actual_val:.0f}</span>'
+                f'font-weight:700; flex-shrink:0;">'
+                f'\u2705 {actual_val:.0f} {stat_short}</span>'
             )
         elif is_final:
             result_html = (
                 f'<span style="color:var(--tdd-ember); font-size:0.8rem; '
-                f'flex-shrink:0; opacity:0.7;" title="Final: {actual_val:.0f}">'
-                f'\u274c {actual_val:.0f}</span>'
+                f'flex-shrink:0; opacity:0.7;">'
+                f'\u274c {actual_val:.0f} {stat_short}</span>'
             )
         else:
-            # In progress, not yet over
             result_html = (
                 f'<span style="color:var(--tdd-slate); font-size:0.75rem; '
-                f'flex-shrink:0;" title="In progress">'
-                f'{actual_val:.0f}</span>'
+                f'flex-shrink:0;">'
+                f'{actual_val:.0f} {stat_short}</span>'
             )
 
-    # Summary row: name | stat | expected vs line | P(over) badge | result
+    # Summary: Name | Stat Expected | P(Over > line) = X% | result
     summary = (
         f'<span style="display:flex; align-items:center; gap:0.5rem; width:100%;">'
         # Type badge
@@ -694,10 +667,10 @@ def _prop_card_html(row: pd.Series) -> str:
         # Stat + expected
         f'<span style="color:var(--tdd-cream); font-size:0.8rem; flex-shrink:0;">'
         f'{stat_label} {expected:.2f}</span>'
-        # Edge badge
+        # P(Over > line) = X%
         f'<span style="color:{color}; font-size:0.75rem; font-weight:600; '
-        f'flex-shrink:0; min-width:3.5rem; text-align:right;">'
-        f'{direction} {pct:.0f}%</span>'
+        f'flex-shrink:0; white-space:nowrap;">'
+        f'P(Over &gt; {line_str}) = {pct:.0f}%</span>'
         # Live result
         f'{result_html}'
         f'</span>'
