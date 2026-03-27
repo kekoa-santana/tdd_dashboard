@@ -41,7 +41,8 @@ _CSS = f"""
 .tr-title  {{ color: var(--tdd-cream); font-size: 1.7rem; font-weight: 800; letter-spacing: 1.5px; }}
 .tr-section {{ color: var(--tdd-gold); font-size: 1.1rem; font-weight: 700;
               letter-spacing: 0.5px; margin: 1.2rem 0 0.6rem 0;
-              padding-bottom: 0.3rem; border-bottom: 1px solid var(--tdd-dark-border); }}
+              padding-bottom: 0.3rem; border-bottom: 1px solid var(--tdd-dark-border);
+              text-align: center; }}
 
 /* ── summary row (inside <summary>) ───────────────── */
 .tr-row {{ display: flex; align-items: center; width: 100%; gap: 0; }}
@@ -63,9 +64,10 @@ _CSS = f"""
 .tr-stat b {{ color: var(--tdd-cream); font-weight: 600; }}
 
 /* ── expanded detail ──────────────────────────────── */
-.tr-detail-grid {{ display: flex; gap: 1.2rem; align-items: flex-start; }}
-.tr-detail-left  {{ flex-shrink: 0; }}
-.tr-detail-right {{ flex: 1; min-width: 0; }}
+.tr-detail-grid {{ display: flex; gap: 1.5rem; align-items: flex-start;
+                  margin: 0 auto; }}
+.tr-detail-left  {{ flex: 3; min-width: 0; }}
+.tr-detail-right {{ flex: 2; min-width: 0; }}
 .tr-view-link {{ display: inline-block; margin-top: 0.6rem; color: var(--tdd-gold);
                 font-size: 0.85rem; font-weight: 600; text-decoration: none; }}
 .tr-view-link:hover {{ text-decoration: underline; }}
@@ -114,8 +116,9 @@ _CSS = f"""
     .tr-diamonds {{ display: none; }}
     .tr-stat {{ display: none; }}
 }}
-@media (max-width: 768px) {{
+@media (max-width: 1024px) {{
     .tr-detail-grid {{ flex-direction: column; }}
+    .tr-detail-left, .tr-detail-right {{ width: 100%; }}
 }}
 @media (max-width: 480px) {{
     .tr-name {{ font-size: 0.85rem; }}
