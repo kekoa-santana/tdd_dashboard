@@ -580,18 +580,34 @@ def backfill_missing_lineups(
 
     from lib.schedule import fetch_game_lineups
 
-    all_gpks = set(schedule_df["game_pk"].unique())
-    cached_gpks = set(lineups_df["game_pk"].unique()) if not lineups_df.empty else set()
-    missing_gpks = all_gpks - cached_gpks
+    # Build set of (game_pk, team_abbr) pairs that should have lineups
+    expected: set[tuple[int, str]] = set()
+    for _, row in schedule_df.iterrows():
+        gpk = int(row["game_pk"])
+        expected.add((gpk, row["away_abbr"]))
+        expected.add((gpk, row["home_abbr"]))
 
-    if not missing_gpks:
+    # Determine which teams are missing from cached lineups
+    if not lineups_df.empty and "team_abbr" in lineups_df.columns:
+        cached = {(int(r["game_pk"]), r["team_abbr"]) for _, r in lineups_df.iterrows()}
+    else:
+        cached = set()
+
+    missing_pairs = expected - cached
+    if not missing_pairs:
         return lineups_df
 
+    # Fetch only the games that have incomplete lineups
+    missing_gpks = {gpk for gpk, _ in missing_pairs}
     fetched: list[pd.DataFrame] = []
     for gpk in missing_gpks:
-        lu = fetch_game_lineups(int(gpk))
+        lu = fetch_game_lineups(gpk)
         if not lu.empty:
-            fetched.append(lu)
+            # Only keep rows for teams that were actually missing
+            missing_teams = {t for g, t in missing_pairs if g == gpk}
+            lu = lu[lu["team_abbr"].isin(missing_teams)]
+            if not lu.empty:
+                fetched.append(lu)
 
     if not fetched:
         return lineups_df
