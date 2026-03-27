@@ -546,21 +546,23 @@ def _render_props_section(
         )
         return
 
-    # Merge live actuals if available
+    # Results: prefer backfilled actuals already in game_props,
+    # then overlay with live boxscore data for in-progress games.
+    for col in ("actual", "over_hit", "game_status"):
+        if col not in game_df.columns:
+            game_df[col] = None
+
     game_live = (
         live_stats_df[live_stats_df["game_pk"] == gpk]
         if live_stats_df is not None and not live_stats_df.empty
         else pd.DataFrame()
     )
-    # Map prop stat names to live boxscore column names
-    _STAT_TO_ACTUAL = {
-        "K": "actual_K", "H": "actual_H", "HR": "actual_HR",
-        "BB": "actual_BB", "TB": "actual_TB", "Outs": "actual_Outs",
-    }
-    game_df["actual"] = None
-    game_df["game_status"] = ""
     if not game_live.empty:
-        live_lookup: dict[tuple[int, str], dict] = {}
+        _STAT_TO_ACTUAL = {
+            "K": "actual_K", "H": "actual_H", "HR": "actual_HR",
+            "BB": "actual_BB", "TB": "actual_TB", "Outs": "actual_Outs",
+        }
+        live_lookup: dict[int, pd.Series] = {}
         for _, lr in game_live.iterrows():
             live_lookup[int(lr["player_id"])] = lr
         for idx, row in game_df.iterrows():
@@ -570,6 +572,7 @@ def _render_props_section(
                 actual_col = _STAT_TO_ACTUAL.get(row["stat"])
                 if actual_col and actual_col in lr.index and pd.notna(lr[actual_col]):
                     game_df.at[idx, "actual"] = float(lr[actual_col])
+                    game_df.at[idx, "over_hit"] = float(lr[actual_col]) > row["line_mid"]
                 game_df.at[idx, "game_status"] = lr.get("game_status", "")
 
     # Edge strength = distance of p_over_mid from 0.50
@@ -585,6 +588,32 @@ def _render_props_section(
         'margin:0.6rem 0 0.3rem; letter-spacing:0.3px;">Over Projections</div>',
         unsafe_allow_html=True,
     )
+
+    # Accuracy tracker — confident picks (mid/high P(over) >= 65%) with results
+    _all_props = props_df.copy() if not props_df.empty else pd.DataFrame()
+    if not _all_props.empty and "over_hit" in _all_props.columns:
+        _confident = _all_props[
+            (_all_props["game_status"] == "final")
+            & (_all_props["over_hit"].notna())
+            & ((_all_props["p_over_mid"] >= 0.65) | (_all_props["p_over_high"] >= 0.65))
+        ]
+        if len(_confident) > 0:
+            _hits = int((_confident["over_hit"] == True).sum())  # noqa: E712
+            _total = len(_confident)
+            _pct = _hits / _total * 100
+            _color = "var(--tdd-sage)" if _pct >= 55 else "var(--tdd-ember)"
+            st.markdown(
+                f'<div style="display:flex; align-items:center; gap:0.5rem; '
+                f'margin-bottom:0.5rem; padding:0.3rem 0.6rem; '
+                f'background:var(--tdd-dark-border); border-radius:4px;">'
+                f'<span style="color:{_color}; font-weight:700; font-size:0.85rem;">'
+                f'{_hits}/{_total}</span>'
+                f'<span class="tdd-meta">confident picks hit ({_pct:.0f}%) '
+                f'— P(over) \u2265 65% on mid/high lines</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
     st.markdown(
         '<div class="tdd-meta" style="margin-bottom:0.4rem;">'
         'Projections are most accurate near the expected value. '
