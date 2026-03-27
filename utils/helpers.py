@@ -15,16 +15,11 @@ logger = logging.getLogger(__name__)
 
 
 def format_ip(ip: float) -> str:
-    """Convert continuous decimal IP to baseball notation (e.g. 5.5 -> '5 2/3')."""
+    """Convert continuous decimal IP to baseball shorthand (e.g. 5.667 -> '5.2')."""
     total_outs = round(ip * 3)
     full = total_outs // 3
     partial = total_outs % 3
-    if partial == 0:
-        return str(full)
-    elif partial == 1:
-        return f"{full} 1/3"
-    else:
-        return f"{full} 2/3"
+    return f"{full}.{partial}"
 
 
 def strip_accents(s: str) -> str:
