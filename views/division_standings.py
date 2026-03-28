@@ -37,16 +37,24 @@ def _load_preseason_rankings() -> pd.DataFrame:
     return pd.read_parquet(_PRESEASON_SNAPSHOT)
 
 
-def _division_card(teams: pd.DataFrame, short_name: str) -> str:
+def _division_card(teams: pd.DataFrame, short_name: str,
+                   standings: dict[str, tuple[int, int]] | None = None) -> str:
     """Render a single division leaderboard card matching the lb-* style."""
+    if standings is None:
+        standings = {}
     rows_html = ""
     for i, (_, row) in enumerate(teams.iterrows(), 1):
         tid = int(row.get("team_id", 0))
         abbr = row.get("abbreviation", "")
-        wins = float(row.get("projected_wins", 0))
         score = float(row.get("tdd_score", 0))
         tier = row.get("tier", "")
         tier_color = _TIER_COLORS.get(tier, SLATE)
+        _rec = standings.get(abbr)
+        record_html = (
+            f'<span class="lb-elo-val" style="color:var(--tdd-gold);">'
+            f'{_rec[0]}-{_rec[1]}</span>'
+            if _rec else ""
+        )
 
         rank_cls = "lb-rank-top lb-rank" if i <= 2 else "lb-rank"
         logo = f'<span style="margin:0 0.4rem;">{team_logo_html(tid, size=28)}</span>'
@@ -63,9 +71,8 @@ def _division_card(teams: pd.DataFrame, short_name: str) -> str:
             # TDD score
             f'<span style="color:{SLATE}; font-size:0.75rem; '
             f'margin-right:0.6rem;">{score:.1f}</span>'
-            # Projected wins
-            f'<span class="lb-elo-val" style="color:var(--tdd-gold);">'
-            f'{wins:.0f}W</span>'
+            # Record
+            f'{record_html}'
             f'</div>'
         )
 
@@ -77,8 +84,18 @@ def _division_card(teams: pd.DataFrame, short_name: str) -> str:
     )
 
 
-def _render_divisions(rankings: pd.DataFrame) -> None:
+def _render_divisions(rankings: pd.DataFrame,
+                      standings: dict[str, tuple[int, int]] | None = None) -> None:
     """Render AL + NL division cards from a rankings dataframe."""
+    if standings is None:
+        standings = {}
+
+    # Add actual wins for sorting
+    rankings = rankings.copy()
+    rankings["_sort_wins"] = rankings["abbreviation"].map(
+        lambda a: standings[a][0] if a in standings else 0
+    )
+
     al_divs = [d for d in _DIVISIONS if d[0].startswith("American")]
     nl_divs = [d for d in _DIVISIONS if d[0].startswith("National")]
 
@@ -91,10 +108,10 @@ def _render_divisions(rankings: pd.DataFrame) -> None:
     cols = st.columns(3)
     for col, (div_full, div_short) in zip(cols, al_divs):
         div_teams = rankings[rankings["division"] == div_full].sort_values(
-            "projected_wins", ascending=False,
+            "_sort_wins", ascending=False,
         ).reset_index(drop=True)
         with col:
-            st.markdown(_division_card(div_teams, div_short), unsafe_allow_html=True)
+            st.markdown(_division_card(div_teams, div_short, standings), unsafe_allow_html=True)
 
     st.markdown(
         f'<div style="color:var(--tdd-gold); font-size:1.0rem; font-weight:700; '
@@ -105,27 +122,31 @@ def _render_divisions(rankings: pd.DataFrame) -> None:
     cols = st.columns(3)
     for col, (div_full, div_short) in zip(cols, nl_divs):
         div_teams = rankings[rankings["division"] == div_full].sort_values(
-            "projected_wins", ascending=False,
+            "_sort_wins", ascending=False,
         ).reset_index(drop=True)
         with col:
-            st.markdown(_division_card(div_teams, div_short), unsafe_allow_html=True)
+            st.markdown(_division_card(div_teams, div_short, standings), unsafe_allow_html=True)
 
 
 def page_division_standings() -> None:
     """Render the Division Standings page."""
+    from services.data_loader import load_standings
+
     st.markdown(
         '<div class="section-header">Division Standings</div>',
         unsafe_allow_html=True,
     )
 
-    tab_current, tab_preseason = st.tabs(["Current Projections", "Preseason Projections"])
+    _standings = load_standings()
+
+    tab_current, tab_preseason = st.tabs(["Current Standings", "Preseason Projections"])
 
     with tab_current:
         rankings = load_team_rankings()
         if rankings.empty:
             st.warning("No team rankings data found. Run precompute first.")
         else:
-            _render_divisions(rankings)
+            _render_divisions(rankings, _standings)
 
     with tab_preseason:
         preseason = _load_preseason_rankings()
