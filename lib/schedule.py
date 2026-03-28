@@ -20,6 +20,39 @@ logger = logging.getLogger(__name__)
 MLB_API_BASE = "https://statsapi.mlb.com/api/v1"
 
 
+def fetch_standings(season: int | None = None) -> dict[str, tuple[int, int]]:
+    """Fetch current W-L records from the MLB Stats API.
+
+    Returns a dict mapping team abbreviation to (wins, losses).
+    """
+    import urllib.request
+
+    if season is None:
+        season = date.today().year
+    url = (
+        f"{MLB_API_BASE}/standings"
+        f"?leagueId=103,104&season={season}&standingsTypes=regularSeason"
+        f"&hydrate=team"
+    )
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:
+        logger.warning("Failed to fetch standings: %s", e)
+        return {}
+
+    records: dict[str, tuple[int, int]] = {}
+    for division in data.get("records", []):
+        for team in division.get("teamRecords", []):
+            abbr = team.get("team", {}).get("abbreviation", "")
+            if abbr:
+                records[abbr] = (
+                    int(team.get("wins", 0)),
+                    int(team.get("losses", 0)),
+                )
+    return records
+
+
 def fetch_todays_schedule(
     game_date: str | None = None,
 ) -> pd.DataFrame:

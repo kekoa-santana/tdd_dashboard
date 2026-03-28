@@ -120,6 +120,10 @@ def _render_schedule_cards(
         for _, _r in _p_arch.iterrows():
             _p_arch_lookup[int(_r["pitcher_id"])] = _r["archetype_name"]
 
+    # Standings lookup: abbreviation → (wins, losses)
+    from services.data_loader import load_standings
+    _standings = load_standings()
+
     # Diamond rating lookup — always derived from tdd_value_score via score_to_diamonds
     from services.data_loader import load_rankings
     from lib.diamond_rating import score_to_diamonds
@@ -410,8 +414,10 @@ def _render_schedule_cards(
             f'<div class="tdd-game-teams" style="display:flex; align-items:center; gap:0.6rem;">'
             f'{away_logo}'
             f'<span class="tdd-team-abbr" data-team="{away_abbr}">{away_abbr}</span>'
+            f'{f"""<span class="tdd-meta" style="font-size:0.72rem; margin-left:-0.3rem;">{_standings[away_abbr][0]}-{_standings[away_abbr][1]}</span>""" if away_abbr in _standings else ""}'
             f'<span style="color:var(--tdd-slate); font-size:0.9rem; margin:0 0.3rem;">@</span>'
             f'<span class="tdd-team-abbr" data-team="{home_abbr}">{home_abbr}</span>'
+            f'{f"""<span class="tdd-meta" style="font-size:0.72rem; margin-left:-0.3rem;">{_standings[home_abbr][0]}-{_standings[home_abbr][1]}</span>""" if home_abbr in _standings else ""}'
             f'{home_logo}'
             f'</div>'
             # Pitcher summaries

@@ -219,8 +219,11 @@ def _render_power_rankings(
     df: pd.DataFrame,
     profiles: pd.DataFrame,
     elo_df: pd.DataFrame,
+    _standings: dict[str, tuple[int, int]] | None = None,
 ) -> None:
     """Section 1: expandable power rankings 1-30."""
+    if _standings is None:
+        _standings = {}
     # Merge profile scores not in rankings (org_score, schedule_score)
     extra_cols = ["abbreviation"]
     for col in ("org_score", "schedule_score"):
@@ -259,7 +262,6 @@ def _render_power_rankings(
         abbr = row.get("abbreviation", "")
         tier = row.get("tier", "")
         tdd = float(row.get("tdd_score", row.get("composite_score", 0)))
-        pyth_w = row.get("projected_wins", None)
         off_elo = row.get("offense_elo", None)
         pit_elo = row.get("pitching_elo", None)
 
@@ -276,10 +278,11 @@ def _render_power_rankings(
             f'</span>'
         )
 
-        # Summary stats: projected wins + composition scores (×10 for 1-10 display)
+        # Summary stats: record + composition scores (×10 for 1-10 display)
         stats_parts = []
-        if pyth_w is not None and not np.isnan(pyth_w):
-            stats_parts.append(f'<span class="tr-stat">W: <b>{pyth_w:.0f}</b></span>')
+        _rec = _standings.get(abbr)
+        if _rec:
+            stats_parts.append(f'<span class="tr-stat"><b>{_rec[0]}-{_rec[1]}</b></span>')
 
         off_s = float(row.get("offense_score", 0) or 0)
         rot_s = float(row.get("rotation_score", 0) or 0)
@@ -563,9 +566,11 @@ def page_team_rankings() -> None:
     )
 
     # ── data ──
+    from services.data_loader import load_standings
     rankings = load_team_rankings()
     profiles = load_team_profiles()
     elo_df = load_team_elo(preseason=True)
+    _standings = load_standings()
 
     if rankings.empty:
         st.warning("No team rankings data found. Run precompute first.")
@@ -593,7 +598,7 @@ def page_team_rankings() -> None:
     # ── Section 1: Power Rankings ──
     st.markdown('<div class="tr-section">Power Rankings</div>', unsafe_allow_html=True)
 
-    _render_power_rankings(filtered, profiles, elo_df)
+    _render_power_rankings(filtered, profiles, elo_df, _standings)
 
     # ── Section 2: Top Lineups / Rotations / Bullpens (composition scores) ──
     # Use the same scores that drive the power ranking composition bars (×10)

@@ -147,19 +147,21 @@ def _render_team_profile_tab(
     tier = tr.get("tier", "Competitive") if not tr.empty else "Competitive"
     tier_color = _TIER_COLORS.get(tier, SLATE)
     rank = int(tr["rank"]) if not tr.empty and pd.notna(tr.get("rank")) else None
-    proj_w = tr.get("projected_wins", None)
+    from services.data_loader import load_standings
+    _standings = load_standings()
+    _rec = _standings.get(selected_team)
+    record_html = (
+        f'<span class="tdd-context" style="color:var(--tdd-cream);">'
+        f'<span style="color:var(--tdd-gold); font-weight:700;">{_rec[0]}-{_rec[1]}</span></span>'
+        if _rec else ""
+    )
 
     rank_html = f'<span style="color:var(--tdd-gold); font-size:2rem; font-weight:800;">#{rank}</span>' if rank else ""
     tier_html = _pill(tier, tier_color)
-    proj_w_html = (
-        f'<span class="tdd-context" style="color:var(--tdd-cream);">'
-        f'Proj. W: <span style="color:var(--tdd-gold); font-weight:700;">{proj_w:.0f}</span></span>'
-        if proj_w and pd.notna(proj_w) else ""
-    )
 
     st.markdown(
         f'<div style="display:flex; align-items:center; gap:16px; margin-bottom:16px; flex-wrap:wrap;">'
-        f'{rank_html} {tier_html} {proj_w_html}'
+        f'{rank_html} {tier_html} {record_html}'
         f'</div>',
         unsafe_allow_html=True,
     )
@@ -482,13 +484,13 @@ def _render_team_profile_tab(
     # ── League-wide rankings table ───────────────────────────────────
     if not rankings.empty:
         with st.expander("League-Wide Power Rankings"):
-            display_cols = ["rank", "abbreviation", "tier", "composite_score", "projected_wins",
+            display_cols = ["rank", "abbreviation", "tier", "composite_score",
                             "offense_score", "pitching_score", "defense_score"]
             avail = [c for c in display_cols if c in rankings.columns]
             display = rankings[avail].copy()
             rename_map = {
                 "rank": "Rank", "abbreviation": "Team", "tier": "Tier",
-                "composite_score": "Score", "projected_wins": "Proj W",
+                "composite_score": "Score",
                 "offense_score": "Off", "pitching_score": "Pit",
                 "defense_score": "Field",
             }
@@ -502,7 +504,6 @@ def _render_team_profile_tab(
 
             styled = display.style.apply(_highlight_team, axis=1).format(
                 {c: "{:.2f}" for c in ["Score", "Off", "Pit", "Def"] if c in display.columns}
-                | ({} if "Proj W" not in display.columns else {"Proj W": "{:.0f}"})
             )
             st.dataframe(styled, width='stretch', hide_index=True, height=500)
 
@@ -1621,12 +1622,12 @@ def page_team_overview() -> None:
                 f'<span style="color:var(--tdd-gold); font-weight:700; '
                 f'margin-left:8px;">#{int(rank_val)}</span>'
             )
-    if not team_rank_row.empty:
-        pw = tr.get("projected_wins")
-        if pd.notna(pw):
-            proj_w_html = (
-                f'<span class="tdd-context" style="margin-left:10px;">{pw:.0f} proj W</span>'
-            )
+    _rec = _standings.get(selected_team)
+    if _rec:
+        proj_w_html = (
+            f'<span class="tdd-context" style="margin-left:10px;">'
+            f'<span style="color:var(--tdd-gold); font-weight:700;">{_rec[0]}-{_rec[1]}</span></span>'
+        )
 
     _inj_full = load_preseason_injuries()
     n_injured = len(_inj_full[

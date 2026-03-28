@@ -16,6 +16,13 @@ from utils.archetype_names import get_pitch_archetype_name
 _DATA_TTL = timedelta(minutes=5)
 
 
+@st.cache_data(ttl=timedelta(hours=1))
+def load_standings(season: int | None = None) -> dict[str, tuple[int, int]]:
+    """Fetch current W-L records from MLB API (cached 1 hour)."""
+    from lib.schedule import fetch_standings
+    return fetch_standings(season)
+
+
 @st.cache_data(ttl=_DATA_TTL)
 def load_projections(player_type: str) -> pd.DataFrame:
     path = DASHBOARD_DIR / f"{player_type}_projections.parquet"
