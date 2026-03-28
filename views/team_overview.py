@@ -22,6 +22,7 @@ from services.data_loader import (
     load_probable_starters,
     load_team_elo, load_team_profiles, load_team_rankings,
     load_team_elo_history,
+    load_standings,
 )
 from utils.helpers import get_team_lookup, get_injury_lookup
 from utils.formatters import fmt_stat
@@ -1622,6 +1623,7 @@ def page_team_overview() -> None:
                 f'<span style="color:var(--tdd-gold); font-weight:700; '
                 f'margin-left:8px;">#{int(rank_val)}</span>'
             )
+    _standings = load_standings()
     _rec = _standings.get(selected_team)
     if _rec:
         proj_w_html = (
