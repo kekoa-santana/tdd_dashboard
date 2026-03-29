@@ -493,6 +493,49 @@ def _edge_label(p_over: float) -> str:
     return "Neutral"
 
 
+def _over_record_html(props_df: pd.DataFrame) -> str:
+    """Build a compact over-pick record banner from completed games."""
+    final = props_df[
+        (props_df["game_status"] == "final") & props_df["actual"].notna()
+    ].copy()
+    if final.empty:
+        return ""
+
+    # Coalesce old (line_mid/p_over_mid) into line/p_over
+    if "line_mid" in final.columns:
+        if "line" not in final.columns:
+            final.rename(columns={"line_mid": "line", "p_over_mid": "p_over"},
+                         inplace=True)
+        else:
+            final["line"] = final["line"].fillna(final["line_mid"])
+            final["p_over"] = final["p_over"].fillna(final["p_over_mid"])
+
+    _MIN_P = 0.63
+    p_col = "p_over"
+    l_col = "line"
+
+    strong = final[final[p_col] >= _MIN_P]
+    if strong.empty:
+        return ""
+
+    hits = int((strong["actual"] > strong[l_col]).sum())
+    total = len(strong)
+    pct = hits / total * 100
+    pct_color = "var(--tdd-sage)" if pct >= 60 else "var(--tdd-gold)" if pct >= 55 else "var(--tdd-slate)"
+
+    return (
+        f'<div style="display:inline-flex; align-items:baseline; gap:0.5rem; '
+        f'margin-bottom:0.3rem;">'
+        f'<span style="color:var(--tdd-cream); font-size:0.8rem; font-weight:600;">'
+        f'Over Record</span>'
+        f'<span style="color:{pct_color}; font-size:0.95rem; font-weight:800;">'
+        f'{hits}/{total} ({pct:.0f}%)</span>'
+        f'<span style="color:var(--tdd-slate); font-size:0.72rem;">'
+        f'P(over) >= {_MIN_P*100:.0f}%</span>'
+        f'</div>'
+    )
+
+
 def _render_props_section(
     gpk: int,
     props_df: pd.DataFrame,
@@ -578,27 +621,34 @@ def _render_props_section(
                 actual_col = _STAT_TO_ACTUAL.get(row["stat"])
                 if actual_col and actual_col in lr.index and pd.notna(lr[actual_col]):
                     game_df.at[idx, "actual"] = float(lr[actual_col])
-                    game_df.at[idx, "over_hit"] = float(lr[actual_col]) > row["line_mid"]
+                    game_df.at[idx, "over_hit"] = float(lr[actual_col]) > row["line"]
                 game_df.at[idx, "game_status"] = lr.get("game_status", "")
 
-    # Edge strength = distance of p_over_mid from 0.50
-    game_df["edge"] = (game_df["p_over_mid"] - 0.50).abs()
+    # Compat: coalesce old (line_mid/p_over_mid) and new (line/p_over) columns
+    if "line_mid" in game_df.columns:
+        if "line" not in game_df.columns:
+            game_df.rename(columns={"line_mid": "line", "p_over_mid": "p_over"},
+                           inplace=True)
+        else:
+            game_df["line"] = game_df["line"].fillna(game_df["line_mid"])
+            game_df["p_over"] = game_df["p_over"].fillna(game_df["p_over_mid"])
 
-    # Over projections only — model is most reliable near the mean
-    pop_df = game_df[game_df["p_over_mid"] >= 0.58].sort_values("p_over_mid", ascending=False)
+    # Edge strength = distance of p_over from 0.50
+    game_df["edge"] = (game_df["p_over"] - 0.50).abs()
+
+    # Over projections only -- model is most reliable near the mean
+    pop_df = game_df[game_df["p_over"] >= 0.58].sort_values("p_over", ascending=False)
 
     st.markdown(EXPANDABLE_CARD_CSS, unsafe_allow_html=True)
+
+    # Over record banner (uses full props_df across all games)
+    record_html = _over_record_html(props_df)
+    if record_html:
+        st.markdown(record_html, unsafe_allow_html=True)
 
     st.markdown(
         '<div style="font-size:0.85rem; font-weight:600; color:var(--tdd-sage); '
         'margin:0.6rem 0 0.3rem; letter-spacing:0.3px;">Over Projections</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        '<div class="tdd-meta" style="margin-bottom:0.4rem;">'
-        'Projections are most accurate near the expected value. '
-        'Showing players with strong over signals only.</div>',
         unsafe_allow_html=True,
     )
     if pop_df.empty:
@@ -622,16 +672,16 @@ def _prop_card_html(row: pd.Series) -> str:
     team = row["team"]
     opp = row["opponent"]
     expected = row["expected"]
-    p_mid = row["p_over_mid"]
-    line_mid = row["line_mid"]
+    p_over = row["p_over"]
+    line = row["line"]
     ptype = row["player_type"]
     type_badge = "P" if ptype == "pitcher" else "H"
 
-    color = _edge_color(p_mid)
-    pct = p_mid * 100
+    color = _edge_color(p_over)
+    pct = p_over * 100
 
     # Format line as integer if whole number, else 1 decimal
-    line_str = f"{line_mid:.0f}" if line_mid == int(line_mid) else f"{line_mid:.1f}"
+    line_str = f"{line:.0f}" if line == int(line) else f"{line:.1f}"
 
     # Live result
     actual = row.get("actual")
@@ -640,7 +690,7 @@ def _prop_card_html(row: pd.Series) -> str:
     result_html = ""
     if pd.notna(actual) and actual is not None:
         actual_val = float(actual)
-        over_hit = actual_val > line_mid
+        over_hit = actual_val > line
         if over_hit:
             result_html = (
                 f'<span style="color:var(--tdd-sage); font-size:0.8rem; '
@@ -682,31 +732,31 @@ def _prop_card_html(row: pd.Series) -> str:
         f'</span>'
     )
 
-    # Detail: table with low/mid/high lines
-    detail = (
-        '<table style="width:100%; font-size:0.78rem; border-collapse:collapse; margin-top:0.2rem;">'
-        '<tr style="color:var(--tdd-slate); border-bottom:1px solid var(--tdd-dark-border);">'
-        '<th style="text-align:left; padding:0.25rem 0.5rem;">Line</th>'
-        '<th style="text-align:center; padding:0.25rem 0.5rem;">Threshold</th>'
-        '<th style="text-align:center; padding:0.25rem 0.5rem;">P(Over)</th>'
-        '</tr>'
-    )
-    for level, label in [("low", "Low"), ("mid", "Mid"), ("high", "High")]:
-        line_val = row[f"line_{level}"]
-        p_val = row[f"p_over_{level}"]
-        p_color = _edge_color(p_val)
-        highlight = ' font-weight:600;' if level == "mid" else ''
-        detail += (
-            f'<tr>'
-            f'<td style="padding:0.25rem 0.5rem; color:var(--tdd-cream);{highlight}">{label}</td>'
-            f'<td style="text-align:center; padding:0.25rem 0.5rem; color:var(--tdd-cream);{highlight}">{line_val:.1f}</td>'
-            f'<td style="text-align:center; padding:0.25rem 0.5rem; color:{p_color};{highlight}">{p_val*100:.0f}%</td>'
-            f'</tr>'
+    # Detail: model stats + vegas comparison
+    vegas_line = row.get("vegas_line")
+    vegas_odds = row.get("vegas_odds")
+    vegas_implied = row.get("vegas_implied")
+    vegas_html = ""
+    if pd.notna(vegas_line) and vegas_line is not None:
+        odds_str = str(vegas_odds) if pd.notna(vegas_odds) else ""
+        impl_str = f"{float(vegas_implied)*100:.0f}%" if pd.notna(vegas_implied) else ""
+        edge = (p_over - float(vegas_implied)) * 100 if pd.notna(vegas_implied) else None
+        edge_str = ""
+        if edge is not None:
+            e_color = "var(--tdd-sage)" if edge > 0 else "var(--tdd-ember)"
+            edge_str = (
+                f' | <span style="color:{e_color}; font-weight:600;">'
+                f'Edge: {edge:+.0f}%</span>'
+            )
+        vegas_html = (
+            f'<div style="margin-top:0.2rem; font-size:0.78rem; color:var(--tdd-slate);">'
+            f'DK Line: {float(vegas_line):.1f} ({odds_str}) '
+            f'Implied: {impl_str}{edge_str}</div>'
         )
-    detail += '</table>'
-    detail += (
+    detail = (
         f'<div class="tdd-meta" style="margin-top:0.3rem;">'
         f'Expected: {expected:.2f} | Std Dev: {row["std"]:.2f}</div>'
+        f'{vegas_html}'
     )
 
     return expandable_card_html(summary, detail)
@@ -3166,13 +3216,11 @@ def page_schedule() -> None:
         unsafe_allow_html=True,
     )
 
-    # Anchor "today" to the data date, not the system clock (server may be UTC)
+    # Use ET date as "today" (MLB games are scheduled in ET)
     meta = load_update_metadata()
-    data_date_str = meta.get("game_date", "")
-    if data_date_str:
-        today = date.fromisoformat(data_date_str)
-    else:
-        today = date.today()
+    utc_now = datetime.now(timezone.utc)
+    et_now = utc_now - timedelta(hours=4)  # EDT during baseball season
+    today = et_now.date()
 
     # Date range: 7 days back through 7 days forward
     dates = [today + timedelta(days=d) for d in range(-7, 8)]
