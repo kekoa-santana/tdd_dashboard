@@ -471,7 +471,7 @@ def _render_schedule_cards(
 # Projected Performers
 # ---------------------------------------------------------------------------
 
-_STAT_LABELS = {"TB": "Total Bases", "K": "Strikeouts", "H": "Hits", "Outs": "Outs Recorded"}
+_STAT_LABELS = {"TB": "Total Bases", "K": "Strikeouts", "H": "Hits", "HRR": "H+R+RBI", "Outs": "Outs Recorded"}
 _LINE_LABELS = {"low": "Low", "mid": "Mid", "high": "High"}
 
 
@@ -618,10 +618,21 @@ def _render_props_section(
             pid = int(row["player_id"])
             if pid in live_lookup:
                 lr = live_lookup[pid]
-                actual_col = _STAT_TO_ACTUAL.get(row["stat"])
-                if actual_col and actual_col in lr.index and pd.notna(lr[actual_col]):
-                    game_df.at[idx, "actual"] = float(lr[actual_col])
-                    game_df.at[idx, "over_hit"] = float(lr[actual_col]) > row["line"]
+                stat = row["stat"]
+                if stat == "HRR":
+                    # Combined: Hits + Runs + RBIs
+                    h = float(lr.get("actual_H", 0)) if pd.notna(lr.get("actual_H")) else 0
+                    r = float(lr.get("actual_R", 0)) if pd.notna(lr.get("actual_R")) else 0
+                    rbi = float(lr.get("actual_RBI", 0)) if pd.notna(lr.get("actual_RBI")) else 0
+                    if any(c in lr.index for c in ("actual_H", "actual_R", "actual_RBI")):
+                        actual = h + r + rbi
+                        game_df.at[idx, "actual"] = actual
+                        game_df.at[idx, "over_hit"] = actual > row["line"]
+                else:
+                    actual_col = _STAT_TO_ACTUAL.get(stat)
+                    if actual_col and actual_col in lr.index and pd.notna(lr[actual_col]):
+                        game_df.at[idx, "actual"] = float(lr[actual_col])
+                        game_df.at[idx, "over_hit"] = float(lr[actual_col]) > row["line"]
                 game_df.at[idx, "game_status"] = lr.get("game_status", "")
 
     # Compat: coalesce old (line_mid/p_over_mid) and new (line/p_over) columns
@@ -636,8 +647,8 @@ def _render_props_section(
     # Edge strength = distance of p_over from 0.50
     game_df["edge"] = (game_df["p_over"] - 0.50).abs()
 
-    # Over projections only -- model is most reliable near the mean
-    pop_df = game_df[game_df["p_over"] >= 0.58].sort_values("p_over", ascending=False)
+    # Over projections only -- P(over) >= 63%
+    pop_df = game_df[game_df["p_over"] >= 0.63].sort_values("p_over", ascending=False)
 
     st.markdown(EXPANDABLE_CARD_CSS, unsafe_allow_html=True)
 
@@ -750,7 +761,7 @@ def _prop_card_html(row: pd.Series) -> str:
             )
         vegas_html = (
             f'<div style="margin-top:0.2rem; font-size:0.78rem; color:var(--tdd-slate);">'
-            f'DK Line: {float(vegas_line):.1f} ({odds_str}) '
+            f'Market Line: {float(vegas_line):.1f} ({odds_str}) '
             f'Implied: {impl_str}{edge_str}</div>'
         )
     detail = (
