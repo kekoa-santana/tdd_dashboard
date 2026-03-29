@@ -20,6 +20,7 @@ _STAT_LABELS = {
     "BB": "Walks",
     "R": "Runs",
     "RBI": "RBIs",
+    "HRR": "H+R+RBI",
     "Outs": "Outs",
 }
 
