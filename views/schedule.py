@@ -468,7 +468,7 @@ def _render_schedule_cards(
 
 
 # ---------------------------------------------------------------------------
-# Projected Performers
+# Props Lab
 # ---------------------------------------------------------------------------
 
 _STAT_LABELS = {"TB": "Total Bases", "K": "Strikeouts", "H": "Hits", "HRR": "H+R+RBI", "Outs": "Outs Recorded"}
@@ -644,9 +644,6 @@ def _render_props_section(
             game_df["line"] = game_df["line"].fillna(game_df["line_mid"])
             game_df["p_over"] = game_df["p_over"].fillna(game_df["p_over_mid"])
 
-    # Edge strength = distance of p_over from 0.50
-    game_df["edge"] = (game_df["p_over"] - 0.50).abs()
-
     # Over projections only -- P(over) >= 63%
     pop_df = game_df[game_df["p_over"] >= 0.63].sort_values("p_over", ascending=False)
 
@@ -743,31 +740,9 @@ def _prop_card_html(row: pd.Series) -> str:
         f'</span>'
     )
 
-    # Detail: model stats + vegas comparison
-    vegas_line = row.get("vegas_line")
-    vegas_odds = row.get("vegas_odds")
-    vegas_implied = row.get("vegas_implied")
-    vegas_html = ""
-    if pd.notna(vegas_line) and vegas_line is not None:
-        odds_str = str(vegas_odds) if pd.notna(vegas_odds) else ""
-        impl_str = f"{float(vegas_implied)*100:.0f}%" if pd.notna(vegas_implied) else ""
-        edge = (p_over - float(vegas_implied)) * 100 if pd.notna(vegas_implied) else None
-        edge_str = ""
-        if edge is not None:
-            e_color = "var(--tdd-sage)" if edge > 0 else "var(--tdd-ember)"
-            edge_str = (
-                f' | <span style="color:{e_color}; font-weight:600;">'
-                f'Edge: {edge:+.0f}%</span>'
-            )
-        vegas_html = (
-            f'<div style="margin-top:0.2rem; font-size:0.78rem; color:var(--tdd-slate);">'
-            f'Market Line: {float(vegas_line):.1f} ({odds_str}) '
-            f'Implied: {impl_str}{edge_str}</div>'
-        )
     detail = (
         f'<div class="tdd-meta" style="margin-top:0.3rem;">'
         f'Expected: {expected:.2f} | Std Dev: {row["std"]:.2f}</div>'
-        f'{vegas_html}'
     )
 
     return expandable_card_html(summary, detail)
@@ -850,7 +825,7 @@ def _render_game_drilldown(
 
     # --- Inline toolbar: Section | Team | (Matchup picker) ---
     _SECTIONS = [
-        "Lineups", "Projected Performers",
+        "Lineups", "Props Lab",
         "Game Simulator", "Matchup Analysis",
     ]
     team_options = [away_abbr, home_abbr]
@@ -867,7 +842,7 @@ def _render_game_drilldown(
             "Team", team_options,
             key=f"dd_team_{gpk}",
             label_visibility="collapsed",
-            disabled=section in ("Lineups", "Projected Performers"),
+            disabled=section in ("Lineups", "Props Lab"),
         )
     side_idx = 0 if selected_team == away_abbr else 1
     active_side = sides[side_idx]
@@ -900,7 +875,7 @@ def _render_game_drilldown(
             pos_lookup=pos_lookup or {},
         )
 
-    elif section == "Projected Performers":
+    elif section == "Props Lab":
         _render_props_section(
             gpk,
             game_props if game_props is not None else pd.DataFrame(),
@@ -3252,12 +3227,26 @@ def page_schedule() -> None:
     is_today = selected_date == today
 
     if is_today:
-        # Today: use cached parquets (sims + lineups)
-        sims = load_game_props()
+        # Today: use cached parquets if they match today's date
         schedule = load_todays_games()
-        lineups = load_todays_lineups()
-        # Auto-backfill lineups for games posted after the cache was built
-        lineups = backfill_missing_lineups(schedule, lineups)
+        cached_date = (
+            schedule["game_date"].iloc[0]
+            if not schedule.empty and "game_date" in schedule.columns
+            else None
+        )
+        if cached_date == today.isoformat():
+            sims = load_game_props()
+            lineups = load_todays_lineups()
+            lineups = backfill_missing_lineups(schedule, lineups)
+        else:
+            # Parquets are stale (e.g. past midnight), fetch live
+            schedule = fetch_live_schedule(today.isoformat())
+            lineups = (
+                fetch_live_lineups(schedule)
+                if not schedule.empty
+                else pd.DataFrame()
+            )
+            sims = load_game_props()
     else:
         # Other dates: fetch schedule from MLB API, no sims
         schedule = fetch_live_schedule(selected_date.isoformat())
