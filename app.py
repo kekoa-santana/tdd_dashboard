@@ -272,7 +272,7 @@ PAGES = {
     "Lineup Creator": page_lineup_creator,
     "Model Performance": page_model_performance,
     "Data Health": page_data_health,
-    "Projected Performers": page_projected_performers,
+    "Props Lab": page_projected_performers,
     "Methodology": page_methodology,
 }
 
@@ -280,7 +280,7 @@ PAGE_URL_MAP = {name.lower().replace(" ", "_"): name for name in PAGES}
 
 # Nav structure: standalone items + dropdown groups
 _NAV = [
-    ("Games", ["Schedule", "Projected Performers"]),
+    ("Games", ["Schedule", "Props Lab"]),
     ("Players", [
         "Player Profile", "Player Rankings", "Stats",
         "Projections", "Breakout Candidates",
@@ -405,6 +405,14 @@ def main() -> None:
     if st.query_params.get("page", "") != _slug:
         st.query_params["page"] = _slug
     PAGES[page]()
+
+    # Site-wide disclaimer
+    st.markdown(
+        '<div style="text-align:center; color:var(--tdd-slate); font-size:0.7rem; '
+        'margin-top:3rem; padding:1rem 0; border-top:1px solid var(--tdd-dark-border); '
+        'opacity:0.6;">For entertainment and research purposes. Not financial advice.</div>',
+        unsafe_allow_html=True,
+    )
 
 
 if __name__ == "__main__":
