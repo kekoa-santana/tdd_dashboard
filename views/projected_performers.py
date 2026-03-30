@@ -1,5 +1,7 @@
-"""Props Lab -- model picks joined against book lines."""
+"""Props Lab -- model picks with inline filters."""
 from __future__ import annotations
+
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 import streamlit as st
@@ -9,8 +11,17 @@ from services.data_loader import load_projections, load_game_props, load_dk_prop
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Constants
 # ---------------------------------------------------------------------------
+
+_STAT_OPTIONS = {
+    "Hits": "H",
+    "Strikeouts": "K",
+    "H+R+RBI": "HRR",
+    "Total Bases": "TB",
+    "Walks": "BB",
+    "All": None,
+}
 
 _STAT_LABELS = {
     "K": "Strikeouts",
@@ -24,9 +35,34 @@ _STAT_LABELS = {
     "Outs": "Outs",
 }
 
+_CONFIDENCE_BUCKETS = {
+    "All": 0.0,
+    "Super High (75%+)": 0.75,
+    "High (63%+)": 0.63,
+    "Medium (55%+)": 0.55,
+    "Low (<55%)": -1.0,  # special: below 55%
+}
+
+_TIER_OPTIONS = {
+    "All": None,
+    "Market": "market",
+    "Floor": "goblin",
+    "Reach": "demon",
+}
+
+_TIER_BADGE = {
+    "standard": ("Market", SAGE),
+    "goblin": ("Floor", GOLD),
+    "demon": ("Reach", EMBER),
+    "market": ("Market", SAGE),
+}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _build_name_lookup() -> dict[int, str]:
-    """Build player_id -> name from projections."""
     lookup: dict[int, str] = {}
     hp = load_projections("hitter")
     if not hp.empty and "batter_name" in hp.columns:
@@ -40,7 +76,6 @@ def _build_name_lookup() -> dict[int, str]:
 
 
 def _lookup_p_over(row: pd.Series, line: float) -> float | None:
-    """Look up model P(over) at a specific line from the p_over_* columns."""
     col = f"p_over_{line:.1f}"
     if col in row.index and pd.notna(row.get(col)):
         return float(row[col])
@@ -48,7 +83,6 @@ def _lookup_p_over(row: pd.Series, line: float) -> float | None:
 
 
 def _american_to_implied(american: str | int | float | None) -> float | None:
-    """Convert American odds to implied probability."""
     if american is None or (isinstance(american, float) and pd.isna(american)):
         return None
     try:
@@ -69,22 +103,105 @@ def _edge_color(edge: float) -> str:
     return SLATE
 
 
-def _recommendation(edge: float) -> tuple[str, str]:
-    """Return (label, color) based on edge size."""
-    if edge >= 15:
-        return "Strong", SAGE
-    if edge >= 8:
-        return "Lean", GOLD
-    if edge >= 3:
-        return "Slight", SLATE
-    return "Pass", EMBER
+def _p_color(model_p: float) -> str:
+    if model_p >= 0.75:
+        return SAGE
+    if model_p >= 0.63:
+        return GOLD
+    return SLATE
 
 
-_PP_TIER_BADGE = {
-    "standard": ("Standard", SAGE),
-    "demon": ("Reach", EMBER),
-    "goblin": ("Floor", GOLD),
-}
+def _today_et() -> str:
+    """Return today's date in ET as ISO string."""
+    utc_now = datetime.now(timezone.utc)
+    et_now = utc_now - timedelta(hours=4)
+    return et_now.date().isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Data assembly
+# ---------------------------------------------------------------------------
+
+def _build_all_picks(props: pd.DataFrame) -> pd.DataFrame:
+    """Join model props against DK and PP lines into a unified DataFrame."""
+    dk = load_dk_props()
+    pp = load_pp_props()
+
+    picks: list[pd.DataFrame] = []
+
+    # --- DK picks ---
+    if not dk.empty:
+        dk_std = dk.copy()
+        dk_std["dk_implied"] = dk_std["over_odds"].apply(_american_to_implied)
+
+        merged = props.merge(
+            dk_std[["player_id", "stat", "line", "over_odds", "dk_implied"]].rename(
+                columns={"line": "book_line", "over_odds": "dk_odds"}
+            ),
+            on=["player_id", "stat"],
+            how="inner",
+        )
+        if not merged.empty:
+            merged["model_p"] = merged.apply(
+                lambda r: _lookup_p_over(r, r["book_line"]), axis=1,
+            )
+            merged["model_p"] = merged["model_p"].fillna(
+                merged.apply(
+                    lambda r: r["p_over"]
+                    if r.get("book_line") == r.get("line")
+                    else None,
+                    axis=1,
+                )
+            )
+            merged["edge"] = merged.apply(
+                lambda r: (r["model_p"] - r["dk_implied"]) * 100
+                if pd.notna(r.get("model_p")) and pd.notna(r.get("dk_implied"))
+                else None,
+                axis=1,
+            )
+            merged["source"] = "market"
+            merged["tier"] = "market"
+            picks.append(merged)
+
+    # --- PP picks ---
+    if not pp.empty:
+        merged = props.merge(
+            pp[["player_id", "stat", "line", "odds_type"]].rename(
+                columns={"line": "book_line"}
+            ),
+            on=["player_id", "stat"],
+            how="inner",
+        )
+        if not merged.empty:
+            merged["model_p"] = merged.apply(
+                lambda r: _lookup_p_over(r, r["book_line"]), axis=1,
+            )
+            merged["model_p"] = merged["model_p"].fillna(
+                merged.apply(
+                    lambda r: r["p_over"]
+                    if r.get("book_line") == r.get("line")
+                    else None,
+                    axis=1,
+                )
+            )
+            merged["edge"] = None
+            merged["dk_odds"] = None
+            merged["dk_implied"] = None
+            merged["source"] = "alt"
+            merged["tier"] = merged["odds_type"]
+            picks.append(merged)
+
+    if not picks:
+        return pd.DataFrame()
+
+    combined = pd.concat(picks, ignore_index=True)
+    combined = combined[combined["model_p"].notna()].copy()
+    combined = combined.drop_duplicates(
+        subset=["player_id", "stat", "book_line", "tier"],
+        keep="first",
+    )
+
+    return combined
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +220,7 @@ def page_projected_performers() -> None:
         st.warning("No game props data found.")
         return
 
-    # Compat: coalesce old and new column names
+    # Compat
     if "line_mid" in all_props.columns:
         if "line" not in all_props.columns:
             all_props.rename(
@@ -116,97 +233,92 @@ def page_projected_performers() -> None:
                 all_props["p_over_mid"]
             )
 
-    # Upcoming picks only
+    # Today only, scheduled games
+    today = _today_et()
     props = all_props[
-        (all_props["game_status"].isin(["scheduled", "in_progress", ""]))
-        | all_props["game_status"].isna()
+        (all_props["game_date"] == today)
+        & (
+            (all_props["game_status"].isin(["scheduled", "in_progress", ""]))
+            | all_props["game_status"].isna()
+        )
     ].copy()
 
     if props.empty:
-        st.info("No upcoming games with props data.")
+        st.info("No props for today's games.")
         return
 
-    # Resolve player names
     name_lookup = _build_name_lookup()
     props["player_name"] = props["player_id"].map(
         lambda pid: name_lookup.get(int(pid), str(pid))
     )
 
-    # Load book lines
-    dk = load_dk_props()
-    pp = load_pp_props()
+    all_picks = _build_all_picks(props)
+    if all_picks.empty:
+        st.info("No book lines matched to model projections.")
+        return
 
-    # --- DraftKings section ---
-    _render_dk_section(props, dk)
+    # --- Inline toolbar ---
+    col_prop, col_conf, col_tier = st.columns([1, 1, 1])
 
-    # --- Alternate Lines section ---
-    _render_pp_section(props, pp)
+    with col_prop:
+        prop_choice = st.selectbox(
+            "Prop", list(_STAT_OPTIONS.keys()),
+            index=0, key="lab_prop", label_visibility="collapsed",
+        )
+    with col_conf:
+        conf_choice = st.selectbox(
+            "Confidence", list(_CONFIDENCE_BUCKETS.keys()),
+            index=0, key="lab_conf", label_visibility="collapsed",
+        )
+    with col_tier:
+        tier_choice = st.selectbox(
+            "Line Type", list(_TIER_OPTIONS.keys()),
+            index=0, key="lab_tier", label_visibility="collapsed",
+        )
 
+    # --- Apply filters ---
+    filtered = all_picks.copy()
 
-def _render_dk_section(props: pd.DataFrame, dk: pd.DataFrame) -> None:
-    """Render DraftKings edge picks."""
+    # Prop filter
+    stat_key = _STAT_OPTIONS[prop_choice]
+    if stat_key is not None:
+        filtered = filtered[filtered["stat"] == stat_key]
+
+    # Confidence filter
+    conf_threshold = _CONFIDENCE_BUCKETS[conf_choice]
+    if conf_threshold == -1.0:
+        # Low: below 55%
+        filtered = filtered[filtered["model_p"] < 0.55]
+    elif conf_threshold > 0:
+        filtered = filtered[filtered["model_p"] >= conf_threshold]
+
+    # Tier filter -- "Market" matches both DK market and PP standard
+    tier_key = _TIER_OPTIONS[tier_choice]
+    if tier_key == "market":
+        filtered = filtered[filtered["tier"].isin(["market", "standard"])]
+    elif tier_key is not None:
+        filtered = filtered[filtered["tier"] == tier_key]
+
+    # Sort by confidence
+    filtered = filtered.sort_values("model_p", ascending=False)
+
+    # --- Render ---
+    if filtered.empty:
+        st.markdown(
+            '<div class="tdd-meta">No picks match the selected filters.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
     st.markdown(
-        '<div style="color:var(--tdd-gold); font-size:1.0rem; font-weight:700; '
-        'margin:1rem 0 0.5rem; letter-spacing:0.3px;">Market Lines</div>',
+        f'<div class="tdd-meta" style="margin-bottom:0.5rem;">'
+        f'{len(filtered)} picks</div>',
         unsafe_allow_html=True,
     )
 
-    if dk.empty:
-        st.markdown(
-            '<div class="tdd-meta">No market lines available. '
-            "Lines may not be posted yet for upcoming games.</div>",
-            unsafe_allow_html=True,
-        )
-        return
-
-    # Join DK lines to model props by (player_id, stat)
-    dk_std = dk.copy()
-    dk_std["dk_implied"] = dk_std["over_odds"].apply(_american_to_implied)
-
-    merged = props.merge(
-        dk_std[["player_id", "stat", "line", "over_odds", "dk_implied"]].rename(
-            columns={"line": "dk_line", "over_odds": "dk_odds"}
-        ),
-        on=["player_id", "stat"],
-        how="inner",
-    )
-
-    if merged.empty:
-        st.markdown(
-            '<div class="tdd-meta">No market lines matched to model projections.</div>',
-            unsafe_allow_html=True,
-        )
-        return
-
-    # Look up model P(over) at the DK line
-    merged["model_p"] = merged.apply(
-        lambda r: _lookup_p_over(r, r["dk_line"]), axis=1,
-    )
-    # Fall back to default p_over if the DK line matches the model line
-    merged["model_p"] = merged["model_p"].fillna(
-        merged.apply(
-            lambda r: r["p_over"] if r.get("dk_line") == r.get("line") else None,
-            axis=1,
-        )
-    )
-    merged = merged[merged["model_p"].notna()].copy()
-
-    # Compute edge
-    merged["edge"] = (merged["model_p"] - merged["dk_implied"]) * 100
-
-    # Filter: P(over) >= 63%
-    strong = merged[merged["model_p"] >= 0.63].sort_values("edge", ascending=False)
-
-    if strong.empty:
-        st.markdown(
-            '<div class="tdd-meta">No props above 63% with market lines.</div>',
-            unsafe_allow_html=True,
-        )
-        return
-
     rows_html = ""
-    for _, row in strong.iterrows():
-        rows_html += _dk_row(row)
+    for _, row in filtered.iterrows():
+        rows_html += _pick_row(row)
     st.markdown(
         f'<div style="display:flex; flex-direction:column; gap:4px;">'
         f"{rows_html}</div>",
@@ -214,79 +326,12 @@ def _render_dk_section(props: pd.DataFrame, dk: pd.DataFrame) -> None:
     )
 
 
-def _render_pp_section(props: pd.DataFrame, pp: pd.DataFrame) -> None:
-    """Render Alternate Lines picks by tier."""
-    st.markdown(
-        '<div style="color:var(--tdd-gold); font-size:1.0rem; font-weight:700; '
-        'margin:1.5rem 0 0.5rem; letter-spacing:0.3px;">Alternate Lines</div>',
-        unsafe_allow_html=True,
-    )
-
-    if pp.empty:
-        st.markdown(
-            '<div class="tdd-meta">No Alternate Lines lines available.</div>',
-            unsafe_allow_html=True,
-        )
-        return
-
-    # Join PP lines to model props by (player_id, stat)
-    merged = props.merge(
-        pp[["player_id", "stat", "line", "odds_type"]].rename(
-            columns={"line": "pp_line"}
-        ),
-        on=["player_id", "stat"],
-        how="inner",
-    )
-
-    if merged.empty:
-        st.markdown(
-            '<div class="tdd-meta">No Alternate Lines lines matched to model projections.</div>',
-            unsafe_allow_html=True,
-        )
-        return
-
-    # Look up model P(over) at each PP line
-    merged["model_p"] = merged.apply(
-        lambda r: _lookup_p_over(r, r["pp_line"]), axis=1,
-    )
-    merged["model_p"] = merged["model_p"].fillna(
-        merged.apply(
-            lambda r: r["p_over"] if r.get("pp_line") == r.get("line") else None,
-            axis=1,
-        )
-    )
-    merged = merged[merged["model_p"].notna()].copy()
-
-    # Show each tier
-    for tier in ("standard", "demon", "goblin"):
-        tier_df = merged[merged["odds_type"] == tier].copy()
-        if tier_df.empty:
-            continue
-
-        strong = tier_df[tier_df["model_p"] >= 0.63].sort_values(
-            "model_p", ascending=False
-        )
-        if strong.empty:
-            continue
-
-        label, color = _PP_TIER_BADGE[tier]
-        with st.expander(f"{label} ({len(strong)} picks)", expanded=(tier == "standard")):
-            rows_html = ""
-            for _, row in strong.iterrows():
-                rows_html += _pp_row(row, tier)
-            st.markdown(
-                f'<div style="display:flex; flex-direction:column; gap:4px;">'
-                f"{rows_html}</div>",
-                unsafe_allow_html=True,
-            )
-
-
 # ---------------------------------------------------------------------------
-# Row renderers
+# Row renderer
 # ---------------------------------------------------------------------------
 
-def _dk_row(row: pd.Series) -> str:
-    """Render a DK prop row with edge."""
+def _pick_row(row: pd.Series) -> str:
+    """Render a single prop pick row."""
     name = row["player_name"]
     stat = row["stat"]
     stat_label = _STAT_LABELS.get(stat, stat)
@@ -295,27 +340,42 @@ def _dk_row(row: pd.Series) -> str:
     ptype = row["player_type"]
     type_badge = "P" if ptype == "pitcher" else "H"
 
-    line = row["dk_line"]
+    line = row["book_line"]
     line_str = f"{line:.0f}" if line == int(line) else f"{line:.1f}"
     model_p = row["model_p"]
     pct = model_p * 100
-    edge = float(row["edge"])
-    dk_odds = str(row["dk_odds"]) if pd.notna(row.get("dk_odds")) else ""
-    dk_implied = row["dk_implied"]
-    dk_pct = f"{dk_implied * 100:.0f}%" if pd.notna(dk_implied) else ""
+    color = _p_color(model_p)
 
-    rec_label, rec_color = _recommendation(edge)
-    e_color = _edge_color(edge)
+    # Tier badge
+    tier = row.get("tier", "standard")
+    tier_label, tier_color = _TIER_BADGE.get(tier, ("", SLATE))
+    tier_html = (
+        f'<span style="background:{tier_color}22; color:{tier_color}; '
+        f'font-size:0.65rem; font-weight:700; padding:1px 6px; '
+        f'border-radius:3px; white-space:nowrap;">{tier_label}</span>'
+    )
+
+    # Edge info (market lines only)
+    edge_html = ""
+    if pd.notna(row.get("edge")) and tier == "market":
+        edge = float(row["edge"])
+        dk_implied = row.get("dk_implied")
+        dk_pct = f"{dk_implied * 100:.0f}%" if pd.notna(dk_implied) else ""
+        e_color = _edge_color(edge)
+        edge_html = (
+            f'<span style="color:{SLATE}; font-size:0.72rem; white-space:nowrap;">'
+            f'Mkt {dk_pct}</span>'
+            f'<span style="color:{e_color}; font-size:0.78rem; font-weight:700; '
+            f'white-space:nowrap;">{edge:+.0f}%</span>'
+        )
 
     return (
         f'<div style="display:flex; align-items:center; gap:0.5rem; '
         f'padding:6px 10px; background:var(--tdd-dark-card); '
         f'border:1px solid var(--tdd-dark-border); border-radius:6px; '
         f'flex-wrap:wrap;">'
-        # Rec badge
-        f'<span style="background:{rec_color}22; color:{rec_color}; '
-        f'font-size:0.7rem; font-weight:700; padding:2px 8px; '
-        f'border-radius:4px; white-space:nowrap;">{rec_label}</span>'
+        # Tier badge
+        f'{tier_html}'
         # Type badge
         f'<span style="font-size:0.65rem; color:{SLATE}; '
         f'border:1px solid var(--tdd-dark-border); border-radius:3px; '
@@ -329,56 +389,9 @@ def _dk_row(row: pd.Series) -> str:
         f'<span style="color:{CREAM}; font-size:0.8rem; white-space:nowrap;">'
         f'{stat_label} O {line_str}</span>'
         # Model P(over)
-        f'<span style="color:{SAGE}; font-size:0.8rem; font-weight:600; '
+        f'<span style="color:{color}; font-size:0.8rem; font-weight:600; '
         f'white-space:nowrap;">{pct:.0f}%</span>'
-        # Odds
-        f'<span style="color:{SLATE}; font-size:0.75rem; white-space:nowrap;">'
-        f'{dk_odds} ({dk_pct})</span>'
-        # Edge
-        f'<span style="color:{e_color}; font-size:0.8rem; font-weight:700; '
-        f'white-space:nowrap; min-width:60px; text-align:right;">'
-        f'{edge:+.0f}%</span>'
-        f'</div>'
-    )
-
-
-def _pp_row(row: pd.Series, tier: str) -> str:
-    """Render a Alternate Lines prop row."""
-    name = row["player_name"]
-    stat = row["stat"]
-    stat_label = _STAT_LABELS.get(stat, stat)
-    team = row["team"]
-    opp = row["opponent"]
-    ptype = row["player_type"]
-    type_badge = "P" if ptype == "pitcher" else "H"
-
-    line = row["pp_line"]
-    line_str = f"{line:.0f}" if line == int(line) else f"{line:.1f}"
-    model_p = row["model_p"]
-    pct = model_p * 100
-
-    _, tier_color = _PP_TIER_BADGE.get(tier, ("PP", SLATE))
-    p_color = SAGE if model_p >= 0.68 else GOLD if model_p >= 0.63 else SLATE
-
-    return (
-        f'<div style="display:flex; align-items:center; gap:0.5rem; '
-        f'padding:6px 10px; background:var(--tdd-dark-card); '
-        f'border:1px solid var(--tdd-dark-border); border-radius:6px; '
-        f'flex-wrap:wrap;">'
-        # Type badge
-        f'<span style="font-size:0.65rem; color:{SLATE}; '
-        f'border:1px solid var(--tdd-dark-border); border-radius:3px; '
-        f'padding:0 0.25rem;">{type_badge}</span>'
-        # Name + matchup
-        f'<span style="color:{CREAM}; font-size:0.85rem; font-weight:600; '
-        f'min-width:0; flex:1;">{name}'
-        f'<span style="color:{SLATE}; font-size:0.75rem; margin-left:0.4rem;">'
-        f'{team} vs {opp}</span></span>'
-        # Stat + line
-        f'<span style="color:{CREAM}; font-size:0.8rem; white-space:nowrap;">'
-        f'{stat_label} O {line_str}</span>'
-        # Model P(over)
-        f'<span style="color:{p_color}; font-size:0.8rem; font-weight:600; '
-        f'white-space:nowrap;">{pct:.0f}%</span>'
+        # Edge (market only)
+        f'{edge_html}'
         f'</div>'
     )
