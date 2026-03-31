@@ -399,11 +399,11 @@ def main() -> None:
         )
         return
 
-    # Dispatch to selected page — only write query param when it differs
-    # to avoid pushing duplicate history entries (breaks browser back button)
+    # Always write the page slug so the browser URL bar stays in sync.
+    # (Streamlit may intercept anchor-tag clicks internally without updating
+    # the URL bar; unconditionally setting the param forces replaceState.)
     _slug = page.lower().replace(" ", "_")
-    if st.query_params.get("page", "") != _slug:
-        st.query_params["page"] = _slug
+    st.query_params["page"] = _slug
     PAGES[page]()
 
     # Site-wide disclaimer
