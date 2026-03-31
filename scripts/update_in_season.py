@@ -46,6 +46,21 @@ logger = logging.getLogger(__name__)
 
 SEASON = CURRENT_SEASON
 
+# Major transaction keywords that trigger a precompute refresh
+_MAJOR_MOVE_KEYWORDS = [
+    "Injured List",
+    "Disabled List",
+    "Trade",
+    "Traded",
+    "Designated for Assignment",
+    "Released",
+    "Recalled From",
+    "Selected to Roster",
+    "Placed on Waivers",
+]
+
+_PRECOMPUTE_GROUPS = ["team", "rankings", "game_data", "health"]
+
 
 # ---------------------------------------------------------------------------
 # Weather / umpire parsing helpers
@@ -113,6 +128,126 @@ def export_roster() -> bool:
     except Exception as e:
         logger.warning("Roster export failed: %s", e)
         return False
+
+
+# ---------------------------------------------------------------------------
+# Roster move detection → precompute trigger
+# ---------------------------------------------------------------------------
+
+def _trigger_precompute(groups: list[str]) -> bool:
+    """Run precompute_dashboard_data.py for the given groups.
+
+    Returns True on success.
+    """
+    engine_python = PLAYER_PROFILES_DIR / "myenv" / "Scripts" / "python.exe"
+    if not engine_python.exists():
+        engine_python = PLAYER_PROFILES_DIR / "myenv" / "bin" / "python"
+    if not engine_python.exists():
+        logger.error("player_profiles virtualenv not found")
+        return False
+
+    script = PLAYER_PROFILES_DIR / "scripts" / "precompute_dashboard_data.py"
+    if not script.exists():
+        logger.error("precompute_dashboard_data.py not found at %s", script)
+        return False
+
+    groups_str = ",".join(groups)
+    cmd = [str(engine_python), str(script), "--include", groups_str]
+    logger.info("Triggering precompute: %s", groups_str)
+    result = subprocess.run(cmd, cwd=str(PLAYER_PROFILES_DIR))
+
+    if result.returncode != 0:
+        logger.error("Precompute exited with code %d", result.returncode)
+        return False
+
+    logger.info("Precompute refresh completed: %s", groups_str)
+    return True
+
+
+def check_roster_moves(game_date: str) -> bool:
+    """Check for major roster moves and trigger precompute if needed.
+
+    Fetches today's transactions from the MLB API, compares against
+    previously seen transaction IDs, and triggers a precompute refresh
+    of team, rankings, game_data, and health if new major moves found.
+
+    Returns True if a precompute was triggered.
+    """
+    from lib.schedule import fetch_recent_transactions
+
+    state_path = DASHBOARD_DIR / "roster_move_state.json"
+
+    # Load state; reset if new day
+    known_ids: set[int] = set()
+    if state_path.exists():
+        with open(state_path) as f:
+            state = json.load(f)
+        if state.get("game_date") == game_date:
+            known_ids = {int(x) for x in state.get("known_transaction_ids", [])}
+        else:
+            logger.info("New game date %s — resetting roster move state", game_date)
+
+    # Fetch today's transactions
+    txns = fetch_recent_transactions(game_date)
+    if txns.empty:
+        logger.info("No transactions for %s", game_date)
+        return False
+
+    # Filter for major moves
+    major = txns[
+        txns["type_desc"].str.contains(
+            "|".join(_MAJOR_MOVE_KEYWORDS), case=False, na=False,
+        )
+    ]
+
+    # Collect all valid IDs to persist
+    all_ids = set(txns["transaction_id"].dropna().astype(int).tolist())
+
+    if major.empty:
+        logger.info("No major roster moves for %s", game_date)
+        _save_roster_state(state_path, game_date, known_ids | all_ids)
+        return False
+
+    # Check for NEW major moves
+    major_ids = set(major["transaction_id"].dropna().astype(int).tolist())
+    new_ids = major_ids - known_ids
+
+    if not new_ids:
+        logger.info("No new major moves (all %d already processed)", len(major_ids))
+        _save_roster_state(state_path, game_date, known_ids | all_ids)
+        return False
+
+    new_major = major[major["transaction_id"].isin(new_ids)]
+    for _, move in new_major.iterrows():
+        logger.info(
+            "NEW ROSTER MOVE: %s — %s",
+            move.get("player_name", "Unknown"),
+            move.get("description", move.get("type_desc", "")),
+        )
+
+    logger.info(
+        "Triggering precompute for %d new major moves...", len(new_major),
+    )
+    _trigger_precompute(_PRECOMPUTE_GROUPS)
+
+    _save_roster_state(state_path, game_date, known_ids | all_ids)
+    return True
+
+
+def _save_roster_state(
+    state_path: Path, game_date: str, known_ids: set[int],
+) -> None:
+    """Persist known transaction IDs for dedup across 30-min cycles."""
+    with open(state_path, "w") as f:
+        json.dump(
+            {
+                "game_date": game_date,
+                "last_check": datetime.now().isoformat(),
+                "known_transaction_ids": sorted(known_ids),
+            },
+            f,
+            indent=2,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -995,6 +1130,10 @@ def main() -> None:
     # Schedule-only mode: lightweight refresh, then exit
     if args.schedule_only:
         logger.info("Mode: schedule-only (hourly refresh)")
+
+        # Check for major roster moves → precompute if needed
+        check_roster_moves(game_date)
+
         run_schedule_refresh(game_date)
         run_batter_sims(game_date)
 

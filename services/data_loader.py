@@ -857,3 +857,35 @@ def load_team_rankings() -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
     return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_hitter_grade_ci() -> pd.DataFrame:
+    """Load hitter scouting grade confidence intervals.
+
+    Returns
+    -------
+    pd.DataFrame
+        Per-player grade CIs with ``player_id``, ``grade_*_lo``,
+        ``grade_*_hi``, and ``diamond_rating_lo/hi`` columns.
+    """
+    path = DASHBOARD_DIR / "hitter_grade_ci.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_pitcher_grade_ci() -> pd.DataFrame:
+    """Load pitcher scouting grade confidence intervals.
+
+    Returns
+    -------
+    pd.DataFrame
+        Per-player grade CIs with ``player_id``, ``grade_*_lo``,
+        ``grade_*_hi``, and ``diamond_rating_lo/hi`` columns.
+    """
+    path = DASHBOARD_DIR / "pitcher_grade_ci.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)

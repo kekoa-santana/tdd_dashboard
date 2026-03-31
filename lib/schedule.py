@@ -356,3 +356,59 @@ def fetch_live_boxscores(
         len(df), df["game_pk"].nunique(),
     )
     return df
+
+
+def fetch_recent_transactions(
+    game_date: str | None = None,
+) -> pd.DataFrame:
+    """Fetch today's transactions from the MLB Stats API.
+
+    Parameters
+    ----------
+    game_date : str | None
+        Date as 'YYYY-MM-DD'. Defaults to today.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: transaction_id, player_id, player_name, type_code,
+        type_desc, description, date, to_team_name, from_team_name.
+    """
+    import urllib.request
+
+    if game_date is None:
+        game_date = date.today().isoformat()
+
+    url = (
+        f"{MLB_API_BASE}/transactions"
+        f"?startDate={game_date}&endDate={game_date}"
+    )
+
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:
+        logger.warning("Failed to fetch transactions: %s", e)
+        return pd.DataFrame()
+
+    rows = []
+    for txn in data.get("transactions", []):
+        person = txn.get("person") or {}
+        to_team = txn.get("toTeam") or {}
+        from_team = txn.get("fromTeam") or {}
+        rows.append({
+            "transaction_id": txn.get("id"),
+            "player_id": person.get("id"),
+            "player_name": person.get("fullName", ""),
+            "type_code": txn.get("typeCode", ""),
+            "type_desc": txn.get("typeDesc", ""),
+            "description": txn.get("description", ""),
+            "date": txn.get("date", ""),
+            "to_team_name": to_team.get("name", ""),
+            "from_team_name": from_team.get("name", ""),
+        })
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        logger.info("Fetched %d transactions for %s", len(df), game_date)
+    return df

@@ -18,6 +18,8 @@ from services.data_loader import (
     load_milb_factors,
     load_hitter_archetypes,
     load_pitcher_archetypes,
+    load_hitter_grade_ci,
+    load_pitcher_grade_ci,
 )
 
 
@@ -531,7 +533,7 @@ def _render_ranking_card(
                     f'</div>'
                 )
 
-            # Scouting grades (20-80 scale)
+            # Scouting grades (20-80 scale) with CI ranges
             if link_type == "pitcher":
                 _grade_cols = [("Stuff", "grade_stuff"), ("Command", "grade_command"), ("Durability", "grade_durability")]
             else:
@@ -540,9 +542,18 @@ def _render_ranking_card(
             for _lbl, _col in _grade_cols:
                 _gv = row.get(_col)
                 if pd.notna(_gv):
+                    _ci_html = ""
+                    _lo = row.get(f"{_col}_lo")
+                    _hi = row.get(f"{_col}_hi")
+                    if pd.notna(_lo) and pd.notna(_hi):
+                        _ci_html = (
+                            f'<span style="color:var(--tdd-slate); font-size:0.68rem; '
+                            f'opacity:0.65; margin-left:2px;">({int(_lo)}-{int(_hi)})</span>'
+                        )
                     _grade_parts.append(
                         f'<span style="color:var(--tdd-slate); font-size:0.78rem;">{_lbl}: </span>'
                         f'<span style="color:var(--tdd-cream); font-size:0.78rem; font-weight:600;">{int(_gv)}</span>'
+                        f'{_ci_html}'
                     )
             if _grade_parts:
                 detail_parts.append(
@@ -1169,6 +1180,14 @@ def page_player_rankings() -> None:
         if df.empty:
             st.warning("No batter rankings data found. Run precompute first.")
             return
+        # Merge grade CIs into rankings
+        _h_ci = load_hitter_grade_ci()
+        if not _h_ci.empty:
+            _ci_cols = [c for c in _h_ci.columns if c.endswith("_lo") or c.endswith("_hi")]
+            df = df.merge(
+                _h_ci[["player_id"] + _ci_cols].rename(columns={"player_id": "batter_id"}),
+                on="batter_id", how="left",
+            )
         _render_batter_rankings(df, teams_lookup, league_filter, search, value_mode=value_mode)
 
     elif category == "Pitchers":
@@ -1176,6 +1195,14 @@ def page_player_rankings() -> None:
         if df.empty:
             st.warning("No pitcher rankings data found. Run precompute first.")
             return
+        # Merge grade CIs into rankings
+        _p_ci = load_pitcher_grade_ci()
+        if not _p_ci.empty:
+            _ci_cols = [c for c in _p_ci.columns if c.endswith("_lo") or c.endswith("_hi")]
+            df = df.merge(
+                _p_ci[["player_id"] + _ci_cols].rename(columns={"player_id": "pitcher_id"}),
+                on="pitcher_id", how="left",
+            )
         _render_pitcher_rankings(df, teams_lookup, league_filter, search, value_mode=value_mode)
 
     elif category == "Hitting Prospects":

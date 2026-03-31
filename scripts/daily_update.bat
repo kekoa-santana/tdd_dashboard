@@ -46,6 +46,22 @@ if %ERRORLEVEL% EQU 0 (
     )
 )
 
+REM ── Step 1b: Precompute daily groups — skip for --schedule-only ──
+echo %* | findstr /i "schedule-only" >nul
+if %ERRORLEVEL% EQU 0 (
+    echo [%date% %time%] Skipping precompute (schedule-only mode) >> "%LOG_FILE%" 2>&1
+) else (
+    echo [%date% %time%] Running daily precompute... >> "%LOG_FILE%" 2>&1
+    cd /d "%PROFILES_DIR%"
+    "%PROFILES_PYTHON%" scripts\precompute_dashboard_data.py --include team,rankings,game_data,traditional,glicko,profiles,game_sim,health >> "%LOG_FILE%" 2>&1
+    if %ERRORLEVEL% NEQ 0 (
+        echo [%date% %time%] Precompute FAILED with exit code %ERRORLEVEL% >> "%LOG_FILE%" 2>&1
+        echo [%date% %time%] Continuing with dashboard update using existing data... >> "%LOG_FILE%" 2>&1
+    ) else (
+        echo [%date% %time%] Precompute completed successfully >> "%LOG_FILE%" 2>&1
+    )
+)
+
 REM ── Step 2: Dashboard update (projections + bookkeeping) ──
 set DASH_ARGS=%*
 if defined DASH_ARGS (
