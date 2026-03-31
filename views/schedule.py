@@ -519,78 +519,6 @@ def _edge_label(p_over: float) -> str:
     return "Neutral"
 
 
-def _over_record_html(props_df: pd.DataFrame) -> str:
-    """Build a compact over-pick record banner from completed games."""
-    final = props_df[
-        (props_df["game_status"] == "final") & props_df["actual"].notna()
-    ].copy()
-    if final.empty:
-        return ""
-
-    # Coalesce old (line_mid/p_over_mid) into line/p_over
-    if "line_mid" in final.columns:
-        if "line" not in final.columns:
-            final.rename(columns={"line_mid": "line", "p_over_mid": "p_over"},
-                         inplace=True)
-        else:
-            final["line"] = final["line"].fillna(final["line_mid"])
-            final["p_over"] = final["p_over"].fillna(final["p_over_mid"])
-
-    _MIN_P = 0.63
-    strong = final[final["p_over"] >= _MIN_P]
-    if strong.empty:
-        return ""
-
-    # Split old model vs new model (new has p_over_0.5 column populated)
-    has_new_col = "p_over_0.5" in strong.columns
-    if has_new_col:
-        is_new = strong["p_over_0.5"].notna()
-        old = strong[~is_new]
-        new = strong[is_new]
-    else:
-        old = strong
-        new = pd.DataFrame()
-
-    parts = []
-
-    # New model record
-    if not new.empty:
-        hits = int((new["actual"] > new["line"]).sum())
-        total = len(new)
-        pct = hits / total * 100
-        pct_color = "var(--tdd-sage)" if pct >= 60 else "var(--tdd-gold)" if pct >= 55 else "var(--tdd-slate)"
-        parts.append(
-            f'<span style="color:var(--tdd-cream); font-size:0.8rem; font-weight:600;">'
-            f'Over Record</span>'
-            f'<span style="color:{pct_color}; font-size:0.95rem; font-weight:800;">'
-            f'{hits}/{total} ({pct:.0f}%)</span>'
-        )
-
-    # Old model record (if any)
-    if not old.empty:
-        hits = int((old["actual"] > old["line"]).sum())
-        total = len(old)
-        pct = hits / total * 100
-        pct_color = "var(--tdd-slate)"
-        label = "Legacy" if not new.empty else "Over Record"
-        parts.append(
-            f'<span style="color:var(--tdd-slate); font-size:0.75rem;">'
-            f'{label}: {hits}/{total} ({pct:.0f}%)</span>'
-        )
-
-    if not parts:
-        return ""
-
-    return (
-        f'<div style="display:inline-flex; align-items:baseline; gap:0.5rem; '
-        f'flex-wrap:wrap; margin-bottom:0.3rem;">'
-        + "".join(parts)
-        + f'<span style="color:var(--tdd-slate); font-size:0.72rem;">'
-        f'P(over) >= {_MIN_P*100:.0f}%</span>'
-        f'</div>'
-    )
-
-
 def _render_props_section(
     gpk: int,
     props_df: pd.DataFrame,
@@ -703,11 +631,6 @@ def _render_props_section(
     pop_df = game_df[game_df["p_over"] >= 0.63].sort_values("p_over", ascending=False)
 
     st.markdown(EXPANDABLE_CARD_CSS, unsafe_allow_html=True)
-
-    # Over record banner (uses full props_df across all games)
-    record_html = _over_record_html(props_df)
-    if record_html:
-        st.markdown(record_html, unsafe_allow_html=True)
 
     st.markdown(
         '<div style="font-size:0.85rem; font-weight:600; color:var(--tdd-sage); '
