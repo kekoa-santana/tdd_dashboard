@@ -273,7 +273,7 @@ def page_projected_performers() -> None:
     with col_tier:
         tier_choice = st.selectbox(
             "Line Type", list(_TIER_OPTIONS.keys()),
-            index=0, key="lab_tier", label_visibility="collapsed",
+            index=1, key="lab_tier", label_visibility="collapsed",
         )
 
     # --- Apply filters ---
