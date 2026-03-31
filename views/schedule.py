@@ -191,6 +191,32 @@ def _render_schedule_cards(
             grades["tdd_value_score"] = _diamond_lookup.get(pid)
             _p_grade_lookup[pid] = grades
 
+    # Inject grade confidence intervals into lookups
+    from services.data_loader import load_hitter_grade_ci, load_pitcher_grade_ci
+    _h_ci = load_hitter_grade_ci()
+    _p_ci = load_pitcher_grade_ci()
+    _h_ci_cols = ["grade_hit_lo", "grade_hit_hi", "grade_power_lo", "grade_power_hi",
+                  "grade_speed_lo", "grade_speed_hi", "grade_discipline_lo", "grade_discipline_hi",
+                  "grade_fielding_lo", "grade_fielding_hi"]
+    if not _h_ci.empty:
+        for _, _r in _h_ci.iterrows():
+            bid = int(_r["player_id"])
+            ci_vals = {c: int(_r[c]) for c in _h_ci_cols if c in _r.index and pd.notna(_r.get(c))}
+            if bid in _h_stat_lookup:
+                _h_stat_lookup[bid].update(ci_vals)
+            else:
+                _h_stat_lookup[bid] = ci_vals
+    _p_ci_cols = ["grade_stuff_lo", "grade_stuff_hi", "grade_command_lo", "grade_command_hi",
+                  "grade_durability_lo", "grade_durability_hi"]
+    if not _p_ci.empty:
+        for _, _r in _p_ci.iterrows():
+            pid = int(_r["player_id"])
+            ci_vals = {c: int(_r[c]) for c in _p_ci_cols if c in _r.index and pd.notna(_r.get(c))}
+            if pid in _p_grade_lookup:
+                _p_grade_lookup[pid].update(ci_vals)
+            else:
+                _p_grade_lookup[pid] = ci_vals
+
     # Position lookup from roster + prospect rankings
     _roster = load_roster()
     _pos_lookup: dict[int, str] = {}
@@ -511,26 +537,55 @@ def _over_record_html(props_df: pd.DataFrame) -> str:
             final["p_over"] = final["p_over"].fillna(final["p_over_mid"])
 
     _MIN_P = 0.63
-    p_col = "p_over"
-    l_col = "line"
-
-    strong = final[final[p_col] >= _MIN_P]
+    strong = final[final["p_over"] >= _MIN_P]
     if strong.empty:
         return ""
 
-    hits = int((strong["actual"] > strong[l_col]).sum())
-    total = len(strong)
-    pct = hits / total * 100
-    pct_color = "var(--tdd-sage)" if pct >= 60 else "var(--tdd-gold)" if pct >= 55 else "var(--tdd-slate)"
+    # Split old model vs new model (new has p_over_0.5 column populated)
+    has_new_col = "p_over_0.5" in strong.columns
+    if has_new_col:
+        is_new = strong["p_over_0.5"].notna()
+        old = strong[~is_new]
+        new = strong[is_new]
+    else:
+        old = strong
+        new = pd.DataFrame()
+
+    parts = []
+
+    # New model record
+    if not new.empty:
+        hits = int((new["actual"] > new["line"]).sum())
+        total = len(new)
+        pct = hits / total * 100
+        pct_color = "var(--tdd-sage)" if pct >= 60 else "var(--tdd-gold)" if pct >= 55 else "var(--tdd-slate)"
+        parts.append(
+            f'<span style="color:var(--tdd-cream); font-size:0.8rem; font-weight:600;">'
+            f'Over Record</span>'
+            f'<span style="color:{pct_color}; font-size:0.95rem; font-weight:800;">'
+            f'{hits}/{total} ({pct:.0f}%)</span>'
+        )
+
+    # Old model record (if any)
+    if not old.empty:
+        hits = int((old["actual"] > old["line"]).sum())
+        total = len(old)
+        pct = hits / total * 100
+        pct_color = "var(--tdd-slate)"
+        label = "Legacy" if not new.empty else "Over Record"
+        parts.append(
+            f'<span style="color:var(--tdd-slate); font-size:0.75rem;">'
+            f'{label}: {hits}/{total} ({pct:.0f}%)</span>'
+        )
+
+    if not parts:
+        return ""
 
     return (
         f'<div style="display:inline-flex; align-items:baseline; gap:0.5rem; '
-        f'margin-bottom:0.3rem;">'
-        f'<span style="color:var(--tdd-cream); font-size:0.8rem; font-weight:600;">'
-        f'Over Record</span>'
-        f'<span style="color:{pct_color}; font-size:0.95rem; font-weight:800;">'
-        f'{hits}/{total} ({pct:.0f}%)</span>'
-        f'<span style="color:var(--tdd-slate); font-size:0.72rem;">'
+        f'flex-wrap:wrap; margin-bottom:0.3rem;">'
+        + "".join(parts)
+        + f'<span style="color:var(--tdd-slate); font-size:0.72rem;">'
         f'P(over) >= {_MIN_P*100:.0f}%</span>'
         f'</div>'
     )
@@ -1219,7 +1274,7 @@ def _grade_color(grade: int) -> str:
 
 
 def _hitter_grades_html(stats: dict) -> str:
-    """Compact grade chips for a hitter: Con/Pow/Spd/Disc/Fld."""
+    """Compact grade chips for a hitter: Con/Pow/Spd/Disc/Fld with CI ranges."""
     labels = [
         ("Con", "grade_hit"), ("Pow", "grade_power"), ("Spd", "grade_speed"),
         ("Disc", "grade_discipline"), ("Fld", "grade_fielding"),
@@ -1229,7 +1284,15 @@ def _hitter_grades_html(stats: dict) -> str:
         v = stats.get(key)
         if v is not None:
             c = _grade_color(v)
-            parts.append(f'<span style="color:{c};">{abbr} {v}</span>')
+            lo = stats.get(f"{key}_lo")
+            hi = stats.get(f"{key}_hi")
+            ci_html = ""
+            if lo is not None and hi is not None:
+                ci_html = (
+                    f'<span style="color:var(--tdd-slate); font-size:0.55rem; '
+                    f'opacity:0.7; margin-left:1px;">({lo}-{hi})</span>'
+                )
+            parts.append(f'<span style="color:{c};">{abbr} {v}{ci_html}</span>')
     if not parts:
         return ""
     return (
@@ -1240,7 +1303,7 @@ def _hitter_grades_html(stats: dict) -> str:
 
 
 def _pitcher_grades_html(proj: dict) -> str:
-    """Compact grade chips for a pitcher: Stuff/Cmd/Dur."""
+    """Compact grade chips for a pitcher: Stuff/Cmd/Dur with CI ranges."""
     labels = [
         ("Stuff", "grade_stuff"), ("Cmd", "grade_command"), ("Dur", "grade_durability"),
     ]
@@ -1249,7 +1312,15 @@ def _pitcher_grades_html(proj: dict) -> str:
         v = proj.get(key)
         if v is not None:
             c = _grade_color(v)
-            parts.append(f'<span style="color:{c};">{abbr} {v}</span>')
+            lo = proj.get(f"{key}_lo")
+            hi = proj.get(f"{key}_hi")
+            ci_html = ""
+            if lo is not None and hi is not None:
+                ci_html = (
+                    f'<span style="color:var(--tdd-slate); font-size:0.55rem; '
+                    f'opacity:0.7; margin-left:1px;">({lo}-{hi})</span>'
+                )
+            parts.append(f'<span style="color:{c};">{abbr} {v}{ci_html}</span>')
     if not parts:
         return ""
     return (

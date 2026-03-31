@@ -49,6 +49,7 @@ from services.data_loader import (
     load_hitter_archetypes, load_pitcher_archetypes,
     load_archetype_matchup_matrix,
     load_hitter_breakout_candidates,
+    load_hitter_grade_ci, load_pitcher_grade_ci,
     season_selector,
 )
 from utils.helpers import get_team_lookup, get_injury_lookup
@@ -1204,16 +1205,34 @@ def page_player_profile() -> None:
         composite = player_row["composite_score"]
         diamond_html = diamond_rating_html_composite(composite, size="lg")
 
+    # Load grade confidence intervals
+    _grade_ci_df = load_pitcher_grade_ci() if player_type == "Pitcher" else load_hitter_grade_ci()
+    _grade_ci_row = pd.DataFrame()
+    if not _grade_ci_df.empty:
+        _grade_ci_row = _grade_ci_df[_grade_ci_df["player_id"] == player_id]
+
     # Tools Grade — scouting-based rating (shown below diamond rating with tooltip)
     _tools_html = ""
     if not _rank_row.empty and "tools_rating" in _rank_row.columns and pd.notna(_rank_row["tools_rating"].iloc[0]):
         _tools_val = float(_rank_row["tools_rating"].iloc[0])
         _role_label = "pitchers" if player_type == "Pitcher" else "hitters"
+        # Add diamond rating CI range if available
+        _dr_ci_html = ""
+        if not _grade_ci_row.empty:
+            _ci = _grade_ci_row.iloc[0]
+            _dr_lo = _ci.get("diamond_rating_lo")
+            _dr_hi = _ci.get("diamond_rating_hi")
+            if pd.notna(_dr_lo) and pd.notna(_dr_hi):
+                _dr_ci_html = (
+                    f' <span style="color:{SLATE}; font-size:0.65rem; opacity:0.7;">'
+                    f'({_dr_lo:.1f}-{_dr_hi:.1f})</span>'
+                )
         _tools_html = (
             f'<div style="margin-top:4px; font-size:0.8rem; cursor:help;" '
             f'title="Tools Grade: scaled 1-10 against all {_role_label} in the system based on scouting grades (20-80 scale)">'
             f'<span style="color:{SLATE}; font-size:0.7rem;">TOOLS </span>'
             f'<span style="color:{GOLD}; font-weight:600;">{_tools_val:.1f}</span>'
+            f'{_dr_ci_html}'
             f'</div>'
         )
 
@@ -1269,12 +1288,22 @@ def page_player_profile() -> None:
     # --- Scouting grades for regular (non-two-way) players ---
     if not is_two_way_player and not _rank_row.empty:
         _rr_grades = _rank_row.iloc[0]
+        _ci_data = _grade_ci_row.iloc[0] if not _grade_ci_row.empty else None
         if player_type == "Pitcher":
             _g_parts = []
             for _lbl, _col in [("Stuff", "grade_stuff"), ("Command", "grade_command"), ("Durability", "grade_durability")]:
                 _v = _rr_grades.get(_col)
                 if pd.notna(_v):
-                    _g_parts.append(f"{_lbl}:{int(_v)}")
+                    _ci_str = ""
+                    if _ci_data is not None:
+                        _lo = _ci_data.get(f"{_col}_lo")
+                        _hi = _ci_data.get(f"{_col}_hi")
+                        if pd.notna(_lo) and pd.notna(_hi):
+                            _ci_str = (
+                                f' <span style="color:var(--tdd-slate); font-size:0.75em; '
+                                f'opacity:0.65;">({int(_lo)}-{int(_hi)})</span>'
+                            )
+                    _g_parts.append(f"{_lbl}:{int(_v)}{_ci_str}")
             if _g_parts:
                 st.markdown(
                     f'<div style="margin-top:-8px; margin-bottom:8px; font-size:0.85em;">'
@@ -1286,7 +1315,16 @@ def page_player_profile() -> None:
             for _lbl, _col in [("Contact", "grade_hit"), ("Power", "grade_power"), ("Speed", "grade_speed"), ("Fielding", "grade_fielding"), ("Discipline", "grade_discipline")]:
                 _v = _rr_grades.get(_col)
                 if pd.notna(_v):
-                    _g_parts.append(f"{_lbl}:{int(_v)}")
+                    _ci_str = ""
+                    if _ci_data is not None:
+                        _lo = _ci_data.get(f"{_col}_lo")
+                        _hi = _ci_data.get(f"{_col}_hi")
+                        if pd.notna(_lo) and pd.notna(_hi):
+                            _ci_str = (
+                                f' <span style="color:var(--tdd-slate); font-size:0.75em; '
+                                f'opacity:0.65;">({int(_lo)}-{int(_hi)})</span>'
+                            )
+                    _g_parts.append(f"{_lbl}:{int(_v)}{_ci_str}")
             if _g_parts:
                 st.markdown(
                     f'<div style="margin-top:-8px; margin-bottom:8px; font-size:0.85em;">'
@@ -1302,26 +1340,52 @@ def page_player_profile() -> None:
         h_row = h_ranks[h_ranks["batter_id"] == player_id]
         p_row = p_ranks[p_ranks["pitcher_id"] == player_id]
 
+        # Load grade CIs for two-way player
+        _tw_h_ci_df = load_hitter_grade_ci()
+        _tw_p_ci_df = load_pitcher_grade_ci()
+        _tw_h_ci = _tw_h_ci_df[_tw_h_ci_df["player_id"] == player_id] if not _tw_h_ci_df.empty else pd.DataFrame()
+        _tw_p_ci = _tw_p_ci_df[_tw_p_ci_df["player_id"] == player_id] if not _tw_p_ci_df.empty else pd.DataFrame()
+
         tw_parts = []
         if not h_row.empty:
             hr = h_row.iloc[0]
+            _tw_hci = _tw_h_ci.iloc[0] if not _tw_h_ci.empty else None
             h_tvs = hr.get("tdd_value_score")
             h_dr_s = f"{score_to_diamonds(h_tvs):.1f}" if pd.notna(h_tvs) else ""
+            _h_grade_parts = []
+            for _lbl, _col in [("Contact", "grade_hit"), ("Power", "grade_power"), ("Speed", "grade_speed"), ("Discipline", "grade_discipline")]:
+                _gv = int(hr.get(_col, 0))
+                _ci_str = ""
+                if _tw_hci is not None:
+                    _lo = _tw_hci.get(f"{_col}_lo")
+                    _hi = _tw_hci.get(f"{_col}_hi")
+                    if pd.notna(_lo) and pd.notna(_hi):
+                        _ci_str = f'<span style="opacity:0.6; font-size:0.8em;">({int(_lo)}-{int(_hi)})</span>'
+                _h_grade_parts.append(f'{_lbl}:{_gv}{_ci_str}')
             tw_parts.append(
                 f'<span style="color:var(--tdd-gold); font-weight:700;">Batting: {h_dr_s}</span>'
                 f' <span style="color:var(--tdd-slate); font-size:0.85em;">'
-                f'Contact:{int(hr.get("grade_hit", 0))} Power:{int(hr.get("grade_power", 0))} '
-                f'Speed:{int(hr.get("grade_speed", 0))} Discipline:{int(hr.get("grade_discipline", 0))}</span>'
+                f'{" ".join(_h_grade_parts)}</span>'
             )
         if not p_row.empty:
             pr = p_row.iloc[0]
+            _tw_pci = _tw_p_ci.iloc[0] if not _tw_p_ci.empty else None
             p_tvs = pr.get("tdd_value_score")
             p_dr_s = f"{score_to_diamonds(p_tvs):.1f}" if pd.notna(p_tvs) else ""
+            _p_grade_parts = []
+            for _lbl, _col in [("Stuff", "grade_stuff"), ("Command", "grade_command"), ("Durability", "grade_durability")]:
+                _gv = int(pr.get(_col, 0))
+                _ci_str = ""
+                if _tw_pci is not None:
+                    _lo = _tw_pci.get(f"{_col}_lo")
+                    _hi = _tw_pci.get(f"{_col}_hi")
+                    if pd.notna(_lo) and pd.notna(_hi):
+                        _ci_str = f'<span style="opacity:0.6; font-size:0.8em;">({int(_lo)}-{int(_hi)})</span>'
+                _p_grade_parts.append(f'{_lbl}:{_gv}{_ci_str}')
             tw_parts.append(
                 f'<span style="color:var(--tdd-gold); font-weight:700;">Pitching: {p_dr_s}</span>'
                 f' <span style="color:var(--tdd-slate); font-size:0.85em;">'
-                f'Stuff:{int(pr.get("grade_stuff", 0))} Command:{int(pr.get("grade_command", 0))} '
-                f'Durability:{int(pr.get("grade_durability", 0))}</span>'
+                f'{" ".join(_p_grade_parts)}</span>'
             )
         if tw_parts:
             tw_html = (
