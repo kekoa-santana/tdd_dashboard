@@ -20,6 +20,9 @@ _URL = (
 # Map Prize Picks stat names to our internal stat keys
 _STAT_MAP: dict[str, tuple[str, str]] = {
     "Pitcher Strikeouts": ("K", "pitcher"),
+    "Hits Allowed": ("H", "pitcher"),
+    "Walks Allowed": ("BB", "pitcher"),
+    "Pitching Outs": ("Outs", "pitcher"),
     "Hitter Strikeouts": ("K", "batter"),
     "Hits": ("H", "batter"),
     "Total Bases": ("TB", "batter"),
