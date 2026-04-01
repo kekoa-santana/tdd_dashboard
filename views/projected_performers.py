@@ -258,8 +258,13 @@ def page_projected_performers() -> None:
         return
 
     # --- Inline toolbar ---
-    col_prop, col_conf, col_tier = st.columns([1, 1, 1])
+    col_type, col_prop, col_conf, col_tier = st.columns([1, 1, 1, 1])
 
+    with col_type:
+        type_choice = st.selectbox(
+            "Player Type", ["All", "Pitchers", "Hitters"],
+            index=0, key="lab_type", label_visibility="collapsed",
+        )
     with col_prop:
         prop_choice = st.selectbox(
             "Prop", list(_STAT_OPTIONS.keys()),
@@ -278,6 +283,12 @@ def page_projected_performers() -> None:
 
     # --- Apply filters ---
     filtered = all_picks.copy()
+
+    # Player type filter
+    if type_choice == "Pitchers":
+        filtered = filtered[filtered["player_type"] == "pitcher"]
+    elif type_choice == "Hitters":
+        filtered = filtered[filtered["player_type"] != "pitcher"]
 
     # Prop filter
     stat_key = _STAT_OPTIONS[prop_choice]
