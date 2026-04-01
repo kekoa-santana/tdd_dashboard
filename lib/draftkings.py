@@ -24,11 +24,15 @@ _BASE = (
 # (category_id, subcategory_id, stat_name, player_type)
 _PROP_ENDPOINTS: list[tuple[int, int, str, str]] = [
     (1031, 15221, "K", "pitcher"),     # Strikeouts Thrown O/U
+    (1031, 9886, "H", "pitcher"),      # Hits Allowed O/U
+    (1031, 15219, "BB", "pitcher"),    # Walks Allowed O/U
+    (1031, 17413, "Outs", "pitcher"),  # Outs Recorded O/U
     (743, 6719, "H", "batter"),        # Hits O/U
     (743, 6607, "TB", "batter"),       # Total Bases O/U
     (743, 17411, "BB", "batter"),      # Walks (Batter) O/U
     (743, 17407, "R", "batter"),       # Runs O/U
     (743, 8025, "RBI", "batter"),      # RBIs O/U
+    (743, 17406, "HRR", "batter"),     # Hits + Runs + RBIs O/U
 ]
 
 # HR has no O/U market -- use milestone 1+ as Over 0.5 proxy
