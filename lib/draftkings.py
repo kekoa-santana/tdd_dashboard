@@ -1,8 +1,7 @@
-"""DraftKings player prop odds scraper.
+"""DraftKings MLB odds scraper.
 
-Fetches MLB player props (K, H, HR, TB, BB, R) from DraftKings'
-sportscontent API. Used as a Vegas baseline to compare against TDD
-model projections.
+Fetches MLB player props (K, H, HR, TB, BB, R) and game-level odds
+(moneyline, run line, total) from DraftKings' sportscontent API.
 
 Requires ``curl_cffi`` for TLS fingerprinting (regular urllib/requests
 gets 403 from Cloudflare).
@@ -181,4 +180,79 @@ def fetch_dk_player_props() -> pd.DataFrame:
         )
     else:
         logger.warning("No DraftKings player props found")
+    return df
+
+
+# -----------------------------------------------------------------------
+# Game-level odds (moneyline, run line, total)
+# -----------------------------------------------------------------------
+_GAME_LINES_CATEGORY = 493
+
+
+def fetch_dk_game_odds() -> pd.DataFrame:
+    """Fetch game-level MLB odds from DraftKings.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: game_description, market_type, team_or_label,
+        outcome_type, odds, implied_prob, line.
+
+        ``market_type`` is one of ``'moneyline'``, ``'spread'``, ``'total'``.
+        ``outcome_type`` is ``'Home'``/``'Away'`` for ML/spread,
+        ``'Over'``/``'Under'`` for totals.
+    """
+    from curl_cffi import requests as cffi_requests
+
+    url = f"{_BASE}/categories/{_GAME_LINES_CATEGORY}"
+    try:
+        resp = cffi_requests.get(url, impersonate="chrome110", timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        logger.error("DK game odds fetch failed: %s", e)
+        return pd.DataFrame()
+
+    events_by_id = {e["id"]: e for e in data.get("events", [])}
+    markets_by_id = {m["id"]: m for m in data.get("markets", [])}
+
+    _MKT_MAP = {
+        "moneyline": "moneyline",
+        "run line": "spread",
+        "total": "total",
+    }
+
+    rows: list[dict[str, Any]] = []
+    for sel in data.get("selections", []):
+        mid = sel.get("marketId", "")
+        mkt = markets_by_id.get(mid, {})
+        mkt_name = mkt.get("name", "").lower()
+
+        market_type = _MKT_MAP.get(mkt_name)
+        if market_type is None:
+            continue
+
+        evt = events_by_id.get(mkt.get("eventId", ""), {})
+        odds_str = sel.get("displayOdds", {}).get("american", "")
+        points = sel.get("points")
+        line_val = float(points) if points not in (None, "") else None
+
+        rows.append({
+            "game_description": evt.get("name", ""),
+            "market_type": market_type,
+            "team_or_label": sel.get("label", ""),
+            "outcome_type": sel.get("outcomeType", ""),
+            "odds": odds_str,
+            "implied_prob": _american_to_implied(odds_str),
+            "line": line_val,
+        })
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        logger.info(
+            "Fetched %d DK game odds across %d games",
+            len(df), df["game_description"].nunique(),
+        )
+    else:
+        logger.warning("No DraftKings game odds found")
     return df
