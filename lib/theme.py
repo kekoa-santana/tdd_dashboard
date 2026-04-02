@@ -1,11 +1,9 @@
 """
-The Data Diamond -- dashboard theme (thin wrapper around tdd_theme).
+The Data Diamond -- player_profiles theme (thin wrapper around tdd_theme).
 
 Re-exports the shared brand package with project-specific paths
 and backward-compatible aliases.  Falls back to inline definitions
 when tdd_theme is not installed (e.g. deployed environments).
-
-Synced from: player_profiles/src/viz/theme.py
 """
 from __future__ import annotations
 
@@ -18,7 +16,7 @@ import matplotlib as mpl
 # ---------------------------------------------------------------------------
 try:
     from tdd_theme import (                       # noqa: F401 -- re-exports
-        GOLD, EMBER, SAGE, SLATE, CREAM, DARK, DARK_CARD, DARK_BORDER,
+        GOLD, EMBER, SAGE, SLATE, CREAM, DARK,
         apply_theme, add_watermark, add_brand_footer, add_header,
         save_card, format_pct,
         ASPECT_SIZES, SUBTITLE_PRESETS, LOGO_PATH,
@@ -39,7 +37,7 @@ except ImportError:
         "highlight": "Game Highlight",
         "projection": "Bayesian Projection Model",
     }
-    LOGO_PATH = Path(__file__).resolve().parents[1] / "iconTransparent.png"
+    LOGO_PATH = Path(__file__).resolve().parents[2] / "iconTransparent.png"
 
     def apply_theme() -> None:
         mpl.rcParams.update({
@@ -63,12 +61,9 @@ except ImportError:
         })
 
     def add_watermark(fig) -> None:
-        # Scale font size to figure dimensions so watermark fits consistently
-        w, h = fig.get_size_inches()
-        fontsize = min(w, h) * 5  # ~15-25pt for typical 3-5 inch charts
         fig.text(
             0.5, 0.5, "TheDataDiamond",
-            fontsize=fontsize, color=SLATE, alpha=0.02,
+            fontsize=60, color=SLATE, alpha=0.03,
             ha="center", va="center", rotation=30,
             transform=fig.transFigure, zorder=0,
         )
@@ -113,7 +108,7 @@ WHITE = "#FFFFFF"
 # ---------------------------------------------------------------------------
 # Project-specific paths
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUTS_DIR = PROJECT_ROOT / "outputs" / "content"
 
 # Backward-compat alias

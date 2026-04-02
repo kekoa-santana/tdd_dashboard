@@ -32,6 +32,8 @@ from services.data_loader import (
     load_roster, load_game_props,
     fetch_live_schedule, fetch_live_lineups, fetch_live_boxscores,
     backfill_missing_lineups,
+    load_batter_platoon_splits, load_batter_glicko, load_pitcher_glicko,
+    load_pitcher_gb_pct, load_matchup_baselines,
 )
 from utils.helpers import format_ip, get_team_lookup
 from components.charts import _STAT_CHART_CONFIG
@@ -965,7 +967,7 @@ def _render_hitter_projections_tab(
 ) -> None:
     """Hitter projection cards | MLB-style lineup with game-level sim projections."""
     from lib.game_sim.batter_simulator import simulate_batter_game
-    from lib.matchup import score_matchup, score_matchup_bb, score_matchup_hr
+    from lib.matchup import score_matchup, score_matchup_advantage, score_matchup_bb, score_matchup_hr
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
 
     if pos_lookup is None:
@@ -982,6 +984,9 @@ def _render_hitter_projections_tab(
         arsenal_df = pd.DataFrame()
     if vuln_df is None:
         vuln_df = pd.DataFrame()
+
+    _matchup_aux_h = _load_matchup_aux()
+    _hitter_proj_h = load_projections("hitter")
 
     # Use sides_all for opposing pitcher lookup when sides is a single-element list
     _all_sides = sides_all if sides_all is not None else sides
@@ -1098,18 +1103,18 @@ def _render_hitter_projections_tab(
                         opp_pid and bid
                         and not arsenal_df.empty and not vuln_df.empty
                     ):
-                        k_res = score_matchup(
-                            opp_pid, bid, arsenal_df, vuln_df, baselines_pt,
+                        _op_ars = arsenal_df[arsenal_df["pitcher_id"] == opp_pid]
+                        _op_hand = _op_ars["pitch_hand"].iloc[0] if not _op_ars.empty and "pitch_hand" in _op_ars.columns else None
+                        _akw = _build_advantage_kwargs(
+                            _matchup_aux_h, opp_pid, bid,
+                            pitcher_hand=_op_hand, hitter_proj=_hitter_proj_h,
                         )
-                        bb_res = score_matchup_bb(
-                            opp_pid, bid, arsenal_df, vuln_df, baselines_pt,
+                        _ar = score_matchup_advantage(
+                            opp_pid, bid, arsenal_df, vuln_df, baselines_pt, **_akw,
                         )
-                        hr_res = score_matchup_hr(
-                            opp_pid, bid, arsenal_df, vuln_df, baselines_pt,
-                        )
-                        matchup_k_lift = k_res.get("matchup_k_logit_lift", 0.0)
-                        matchup_bb_lift = bb_res.get("matchup_bb_logit_lift", 0.0)
-                        matchup_hr_lift = hr_res.get("matchup_hr_logit_lift", 0.0)
+                        matchup_k_lift = _ar["breakdown"]["k_lift"]
+                        matchup_bb_lift = _ar["breakdown"]["bb_lift"]
+                        matchup_hr_lift = _ar["breakdown"]["hr_lift"]
 
                     sim_result = simulate_batter_game(
                         batter_k_rate_samples=hitter_k_samples[bid_key],
@@ -1439,49 +1444,123 @@ def _build_scouting_bullets(
 
 
 # ---------------------------------------------------------------------------
-# Matchup advantage badge with short explanation
+# Matchup advantage helpers
 # ---------------------------------------------------------------------------
+
+def _load_matchup_aux() -> dict:
+    """Load auxiliary data for score_matchup_advantage (cached per session)."""
+    platoon_df = load_batter_platoon_splits()
+    pitcher_glicko_df = load_pitcher_glicko()
+    batter_glicko_df = load_batter_glicko()
+    pitcher_gb_df = load_pitcher_gb_pct()
+    matchup_baselines = load_matchup_baselines()
+    scales = None
+    if matchup_baselines:
+        scales = {
+            "trajectory_scale": matchup_baselines.get("trajectory_scale", 5.0),
+            "glicko_scale": matchup_baselines.get("glicko_scale", 0.001),
+        }
+    return {
+        "platoon_df": platoon_df,
+        "pitcher_glicko_df": pitcher_glicko_df,
+        "batter_glicko_df": batter_glicko_df,
+        "pitcher_gb_df": pitcher_gb_df,
+        "matchup_baselines": matchup_baselines,
+        "scales": scales,
+    }
+
+
+def _build_advantage_kwargs(
+    aux: dict,
+    pitcher_id: int,
+    batter_id: int,
+    pitcher_hand: str | None = None,
+    str_df: pd.DataFrame | None = None,
+    hitter_proj: pd.DataFrame | None = None,
+) -> dict:
+    """Build keyword arguments for score_matchup_advantage from aux data."""
+    kwargs: dict = {}
+
+    # Hitter strength
+    if str_df is not None and not str_df.empty:
+        kwargs["hitter_str"] = str_df
+
+    # Pitcher hand
+    if pitcher_hand:
+        kwargs["pitcher_hand"] = pitcher_hand
+
+    # Platoon splits
+    platoon_df = aux["platoon_df"]
+    if not platoon_df.empty:
+        bp = platoon_df[platoon_df["batter_id"] == batter_id]
+        if not bp.empty:
+            d: dict = {}
+            for _, row in bp.iterrows():
+                d[row["pitch_hand"]] = {
+                    "k_rate": float(row["k_rate"]),
+                    "bb_rate": float(row["bb_rate"]),
+                    "pa": int(row["pa"]),
+                }
+            d["overall_k_rate"] = float(bp["overall_k_rate"].iloc[0])
+            d["overall_bb_rate"] = float(bp["overall_bb_rate"].iloc[0])
+            kwargs["batter_platoon_splits"] = d
+
+    # Glicko
+    p_glicko_df = aux["pitcher_glicko_df"]
+    if not p_glicko_df.empty:
+        pg = p_glicko_df[p_glicko_df["pitcher_id"] == pitcher_id]
+        if not pg.empty:
+            kwargs["pitcher_glicko_mu"] = float(pg["mu"].iloc[0])
+    b_glicko_df = aux["batter_glicko_df"]
+    if not b_glicko_df.empty:
+        bg = b_glicko_df[b_glicko_df["batter_id"] == batter_id]
+        if not bg.empty:
+            kwargs["batter_glicko_mu"] = float(bg["mu"].iloc[0])
+
+    # Pitcher GB%
+    pgb_df = aux["pitcher_gb_df"]
+    if not pgb_df.empty:
+        pgb = pgb_df[pgb_df["pitcher_id"] == pitcher_id]
+        if not pgb.empty:
+            kwargs["pitcher_gb_pct"] = float(pgb["gb_pct"].iloc[0])
+
+    # Batter GB/FB from projections
+    if hitter_proj is not None and not hitter_proj.empty:
+        hp = hitter_proj[hitter_proj["batter_id"] == batter_id]
+        if not hp.empty:
+            if "gb_rate" in hp.columns:
+                v = hp["gb_rate"].iloc[0]
+                if pd.notna(v):
+                    kwargs["batter_gb_rate"] = float(v)
+            if "fb_rate" in hp.columns:
+                v = hp["fb_rate"].iloc[0]
+                if pd.notna(v):
+                    kwargs["batter_fb_rate"] = float(v)
+
+    # League baselines and scales
+    if aux["matchup_baselines"]:
+        kwargs["league_platoon"] = aux["matchup_baselines"]
+    if aux["scales"]:
+        kwargs["matchup_scales"] = aux["scales"]
+
+    return kwargs
+
+
 def _matchup_advantage_html(
-    k_result: dict,
-    bb_result: dict,
-    hr_result: dict,
-    arsenal_df: pd.DataFrame,
-    vuln_df: pd.DataFrame,
-    str_df: pd.DataFrame | None,
-    bid: int,
-    matchup_pid: int,
+    advantage: dict,
 ) -> tuple[str, float, float, float]:
     """Return (HTML badge + short reason, k_lift, bb_lift, hr_lift).
 
-    Analyzes per-pitch-type data to find the specific pitch driving the edge
-    and references a concrete stat (whiff rate, xwOBA, chase rate).
+    Uses the unified score_matchup_advantage result dict.
     """
-    k_lift = k_result.get("matchup_k_logit_lift", 0.0)
-    bb_lift = bb_result.get("matchup_bb_logit_lift", 0.0)
-    hr_lift = hr_result.get("matchup_hr_logit_lift", 0.0)
-    k_lift = 0.0 if np.isnan(k_lift) else k_lift
-    bb_lift = 0.0 if np.isnan(bb_lift) else bb_lift
-    hr_lift = 0.0 if np.isnan(hr_lift) else hr_lift
+    bd = advantage["breakdown"]
+    k_lift = bd["k_lift"]
+    bb_lift = bd["bb_lift"]
+    hr_lift = bd["hr_lift"]
+    adv = advantage["advantage"]
+    reason = advantage["reason"]
 
-    net = k_lift - bb_lift * 0.5 - hr_lift * 0.5
-
-    # Determine which outcome channel dominates
-    abs_k = abs(k_lift)
-    abs_bb = abs(bb_lift) * 0.5
-    abs_hr = abs(hr_lift) * 0.5
-
-    # Gather per-pitch detail from arsenal/vuln for the dominant pitch
-    p_ars = arsenal_df[arsenal_df["pitcher_id"] == matchup_pid].copy()
-    p_ars = p_ars[p_ars["pitches"] >= 20]
-    h_vuln = vuln_df[vuln_df["batter_id"] == bid].copy()
-    s_df_b = (
-        str_df[(str_df["batter_id"] == bid)]
-        if str_df is not None and not str_df.empty and "batter_id" in str_df.columns
-        else pd.DataFrame()
-    )
-
-    if abs(net) <= 0.03:
-        reason = _find_even_reason(p_ars, h_vuln, s_df_b)
+    if adv == "neutral":
         html_out = (
             f'<span style="color:var(--tdd-slate); font-size:0.68rem; '
             f'margin-left:0.3rem;" title="{reason}">'
@@ -1489,20 +1568,12 @@ def _matchup_advantage_html(
         )
         return html_out, k_lift, bb_lift, hr_lift
 
-    if net > 0.03:
+    if adv == "pitcher":
         color_var = "--tdd-ember"
         label = "Pitcher"
-        reason = _find_pitcher_reason(
-            k_lift, bb_lift, hr_lift, abs_k, abs_bb, abs_hr,
-            p_ars, h_vuln, s_df_b,
-        )
     else:
         color_var = "--tdd-sage"
         label = "Hitter"
-        reason = _find_hitter_reason(
-            k_lift, bb_lift, hr_lift, abs_k, abs_bb, abs_hr,
-            p_ars, h_vuln, s_df_b,
-        )
 
     html_out = (
         f'<span style="color:var({color_var}); font-size:0.68rem; '
@@ -1757,7 +1828,7 @@ def _render_matchup_tab(
       - Avg K matchup summary for own SP vs opposing lineup
     """
     from scipy.special import expit, logit as sp_logit
-    from lib.matchup import score_matchup, score_matchup_bb, score_matchup_hr
+    from lib.matchup import score_matchup, score_matchup_advantage, score_matchup_bb, score_matchup_hr
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
     from components.scouting import build_matchup_scouting_bullets
 
@@ -1782,6 +1853,10 @@ def _render_matchup_tab(
         }
         for pt, vals in LEAGUE_AVG_BY_PITCH_TYPE.items()
     }
+
+    # Load auxiliary matchup data once for all batters
+    _matchup_aux = _load_matchup_aux()
+    _hitter_proj_df = load_projections("hitter")
 
     def _safe_rate(r: object, default: float) -> float:
         if pd.notna(r) and 0 < float(r) < 1:
@@ -1896,15 +1971,17 @@ def _render_matchup_tab(
             advantage_html = ""
             k_lift = bb_lift = hr_lift = 0.0
             if matchup_pid and bid and not arsenal_df.empty and not vuln_df.empty:
-                k_result = score_matchup(matchup_pid, bid, arsenal_df, vuln_df, baselines_pt)
-                bb_result = score_matchup_bb(matchup_pid, bid, arsenal_df, vuln_df, baselines_pt)
-                hr_result = score_matchup_hr(matchup_pid, bid, arsenal_df, vuln_df, baselines_pt)
-
-                advantage_html, k_lift, bb_lift, hr_lift = _matchup_advantage_html(
-                    k_result, bb_result, hr_result,
-                    arsenal_df, vuln_df, str_df,
-                    bid, matchup_pid,
+                # Get pitcher hand from arsenal
+                _mp_ars = arsenal_df[arsenal_df["pitcher_id"] == matchup_pid]
+                _mp_hand = _mp_ars["pitch_hand"].iloc[0] if not _mp_ars.empty and "pitch_hand" in _mp_ars.columns else None
+                _adv_kw = _build_advantage_kwargs(
+                    _matchup_aux, matchup_pid, bid,
+                    pitcher_hand=_mp_hand, str_df=str_df, hitter_proj=_hitter_proj_df,
                 )
+                _adv_result = score_matchup_advantage(
+                    matchup_pid, bid, arsenal_df, vuln_df, baselines_pt, **_adv_kw,
+                )
+                advantage_html, k_lift, bb_lift, hr_lift = _matchup_advantage_html(_adv_result)
 
                 total_k_lift += k_lift
                 total_bb_lift += bb_lift
@@ -2023,15 +2100,22 @@ def _render_matchup_tab(
         # Avg K matchup for this side's pitcher vs opposing lineup
         if opp_side is not None and pid and not opp_lu.empty:
             opp_id_col = "batter_id" if "batter_id" in opp_lu.columns else "player_id"
+            _pid_ars = arsenal_df[arsenal_df["pitcher_id"] == pid]
+            _pid_hand = _pid_ars["pitch_hand"].iloc[0] if not _pid_ars.empty and "pitch_hand" in _pid_ars.columns else None
             total_k_lift = total_bb_lift = 0.0
             n_scored = 0
             for _, ob in opp_lu.head(9).iterrows():
                 ob_id = int(ob[opp_id_col]) if pd.notna(ob.get(opp_id_col)) else None
                 if ob_id and not arsenal_df.empty and not vuln_df.empty:
-                    kr = score_matchup(pid, ob_id, arsenal_df, vuln_df, baselines_pt)
-                    br = score_matchup_bb(pid, ob_id, arsenal_df, vuln_df, baselines_pt)
-                    kl = kr.get("matchup_k_logit_lift", 0.0)
-                    bl = br.get("matchup_bb_logit_lift", 0.0)
+                    _akw = _build_advantage_kwargs(
+                        _matchup_aux, pid, ob_id,
+                        pitcher_hand=_pid_hand, hitter_proj=_hitter_proj_df,
+                    )
+                    _ar = score_matchup_advantage(
+                        pid, ob_id, arsenal_df, vuln_df, baselines_pt, **_akw,
+                    )
+                    kl = _ar["breakdown"]["k_lift"]
+                    bl = _ar["breakdown"]["bb_lift"]
                     total_k_lift += 0.0 if np.isnan(kl) else kl
                     total_bb_lift += 0.0 if np.isnan(bl) else bl
                     n_scored += 1
@@ -2205,11 +2289,14 @@ def _render_sim_tab(
     from lib.game_sim.exit_model import ExitModel
     from lib.game_sim.tto_model import build_all_tto_lifts
     from lib.game_sim.pitch_count_model import build_pitch_count_features
-    from lib.matchup import score_matchup, score_matchup_bb, score_matchup_hr
+    from lib.matchup import score_matchup, score_matchup_advantage, score_matchup_bb, score_matchup_hr
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
 
     hitter_k_samples = hitter_k_samples or {}
     hitter_bb_samples = hitter_bb_samples or {}
+
+    _matchup_aux = _load_matchup_aux()
+    _hitter_proj_df = load_projections("hitter")
     hitter_hr_samples = hitter_hr_samples or {}
     h_arch_lookup = h_arch_lookup or {}
     pos_lookup = pos_lookup or {}
@@ -2327,24 +2414,29 @@ def _render_sim_tab(
         if not opp_lu.empty and not arsenal_df.empty and not vuln_df.empty:
             id_col = "batter_id" if "batter_id" in opp_lu.columns else "player_id"
             name_col = "batter_name" if "batter_name" in opp_lu.columns else "player_name"
+            _p_ars_hand = arsenal_df[arsenal_df["pitcher_id"] == pid]
+            _p_hand = _p_ars_hand["pitch_hand"].iloc[0] if not _p_ars_hand.empty and "pitch_hand" in _p_ars_hand.columns else None
 
             k_lifts, bb_lifts, hr_lifts = [], [], []
             for _, brow in opp_lu.head(9).iterrows():
                 bid = int(brow[id_col]) if pd.notna(brow.get(id_col)) else None
                 if bid:
                     lineup_batter_ids.append(bid)
-                    k_m = score_matchup(pid, bid, arsenal_df, vuln_df, baselines_pt)
-                    kl = k_m.get("matchup_k_logit_lift", 0.0)
+                    _akw = _build_advantage_kwargs(
+                        _matchup_aux, pid, bid,
+                        pitcher_hand=_p_hand, str_df=str_df, hitter_proj=_hitter_proj_df,
+                    )
+                    _ar = score_matchup_advantage(
+                        pid, bid, arsenal_df, vuln_df, baselines_pt, **_akw,
+                    )
+                    kl = _ar["breakdown"]["k_lift"]
                     k_lifts.append(0.0 if np.isnan(kl) else kl)
-
-                    bb_m = score_matchup_bb(pid, bid, arsenal_df, vuln_df, baselines_pt)
-                    bl = bb_m.get("matchup_bb_logit_lift", 0.0)
+                    bl = _ar["breakdown"]["bb_lift"]
                     bb_lifts.append(0.0 if np.isnan(bl) else bl)
-
-                    hr_m = score_matchup_hr(pid, bid, arsenal_df, vuln_df, baselines_pt)
-                    hl = hr_m.get("matchup_hr_logit_lift", 0.0)
+                    hl = _ar["breakdown"]["hr_lift"]
                     hr_lifts.append(0.0 if np.isnan(hl) else hl)
 
+                    k_m = _ar["k_result"]
                     k_m["batter_name"] = brow.get(name_col, "Unknown")
                     k_m["batting_order"] = int(brow["batting_order"])
                     per_batter_details.append(k_m)
@@ -2623,9 +2715,18 @@ def _render_sim_tab(
                         # Matchup lifts
                         mk_lift = mb_lift = mh_lift = 0.0
                         if opp_pid and not arsenal_df.empty and not vuln_df.empty:
-                            mk_lift = score_matchup(opp_pid, sel_bid, arsenal_df, vuln_df, baselines_pt).get("matchup_k_logit_lift", 0.0)
-                            mb_lift = score_matchup_bb(opp_pid, sel_bid, arsenal_df, vuln_df, baselines_pt).get("matchup_bb_logit_lift", 0.0)
-                            mh_lift = score_matchup_hr(opp_pid, sel_bid, arsenal_df, vuln_df, baselines_pt).get("matchup_hr_logit_lift", 0.0)
+                            _opp_ars = arsenal_df[arsenal_df["pitcher_id"] == opp_pid]
+                            _opp_hand = _opp_ars["pitch_hand"].iloc[0] if not _opp_ars.empty and "pitch_hand" in _opp_ars.columns else None
+                            _akw = _build_advantage_kwargs(
+                                _matchup_aux, opp_pid, sel_bid,
+                                pitcher_hand=_opp_hand, str_df=str_df, hitter_proj=_hitter_proj_df,
+                            )
+                            _ar = score_matchup_advantage(
+                                opp_pid, sel_bid, arsenal_df, vuln_df, baselines_pt, **_akw,
+                            )
+                            mk_lift = _ar["breakdown"]["k_lift"]
+                            mb_lift = _ar["breakdown"]["bb_lift"]
+                            mh_lift = _ar["breakdown"]["hr_lift"]
 
                         b_result = simulate_batter_game(
                             batter_k_rate_samples=hitter_k_samples[bid_key],
