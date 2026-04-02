@@ -1,6 +1,7 @@
 """HTML table builders for pitch profiles and matchups."""
 from __future__ import annotations
 
+import html
 import numpy as np
 import pandas as pd
 
@@ -392,12 +393,33 @@ def build_matchup_table(
             edge_score -= (h_hh - lg_hh) * 2.0
 
         if edge_score > 0.10:
-            edge_color = SAGE
+            edge_sym, edge_color = "P+", SAGE
         elif edge_score < -0.10:
-            edge_color = EMBER
+            edge_sym, edge_color = "H+", EMBER
         else:
-            edge_color = SLATE
-        edge_cell = f'<span class="edge-dot" style="background:{edge_color};"></span>'
+            edge_sym, edge_color = "~", SLATE
+        mag = min(abs(edge_score) / 0.22, 1.0) * 49.0
+        if edge_score > 0.10:
+            bar_fill = (
+                f'<div style="position:absolute;left:50%;top:1px;bottom:1px;width:{mag:.1f}%;'
+                f'max-width:49%;background:{SAGE};border-radius:0 4px 4px 0;"></div>'
+            )
+        elif edge_score < -0.10:
+            bar_fill = (
+                f'<div style="position:absolute;right:50%;top:1px;bottom:1px;width:{mag:.1f}%;'
+                f'max-width:49%;background:{EMBER};border-radius:4px 0 0 4px;"></div>'
+            )
+        else:
+            bar_fill = ""
+        edge_cell = (
+            f'<div style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;">'
+            f'<span style="color:{edge_color};font-weight:700;font-size:0.72rem;">{edge_sym}</span>'
+            f'<div style="position:relative;width:48px;height:10px;background:rgba(255,255,255,0.08);'
+            f'border-radius:5px;">'
+            f'<div style="position:absolute;left:50%;top:0;bottom:0;width:2px;margin-left:-1px;'
+            f'background:{SLATE};z-index:1;"></div>'
+            f'{bar_fill}</div></div>'
+        )
 
         rows_html += (
             f'<tr>'
@@ -411,12 +433,19 @@ def build_matchup_table(
             f'</tr>'
         )
 
+    _edge_tip = html.escape(
+        "Composite: pitcher whiff vs league (+), hitter whiff/chase (+), "
+        "contact damage (−xwOBA, −hard-hit). P+ favors pitcher, H+ favors hitter, ~ neutral.",
+        quote=True,
+    )
+
     return (
         f'<div class="table-scroll">'
         f'<table class="matchup-table">'
         f'<thead><tr>'
         f'<th>Pitch</th><th>Usage</th><th>P Whiff%</th>'
-        f'<th>H Whiff%</th><th>H Chase%</th><th>H xwOBA</th><th>Edge</th>'
+        f'<th>H Whiff%</th><th>H Chase%</th><th>H xwOBA</th>'
+        f'<th title="{_edge_tip}">Edge</th>'
         f'</tr></thead>'
         f'<tbody>{rows_html}</tbody>'
         f'</table>'

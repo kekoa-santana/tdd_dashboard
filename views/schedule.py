@@ -1,7 +1,10 @@
 """Schedule page | date-based game browser with projections and live data."""
 from __future__ import annotations
 
+import html
+import sys
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,15 +18,13 @@ from config import (
     SCHEDULE_REFRESH_MINUTES, GAME_WINDOW_START_HOUR, GAME_WINDOW_END_HOUR,
 )
 from services.data_loader import (
-    load_todays_games, load_todays_lineups,
+    load_todays_games, load_todays_lineups, load_todays_batter_sims,
     load_update_metadata, load_pitcher_arsenal, load_hitter_vulnerability,
     load_hitter_strength,
     load_projections, load_counting, load_game_info, load_player_teams,
     load_hitter_archetypes, load_pitcher_archetypes,
     load_k_samples, load_bb_samples, load_hr_samples, load_bf_priors,
     load_hitter_k_samples, load_hitter_bb_samples, load_hitter_hr_samples,
-    load_pitcher_offerings, load_cluster_metadata,
-    load_archetype_matchup_matrix,
     load_exit_model, load_pitcher_pitch_count_features,
     load_batter_pitch_count_features, load_tto_profiles,
     load_pitcher_exit_tendencies,
@@ -74,6 +75,66 @@ def _staleness_indicator(ts_str: str | None) -> str:
 
 _SCHEDULE_CSS = ""
 
+
+def _detect_lineup_changes(
+    current_lineups: pd.DataFrame,
+    precomputed_sims: pd.DataFrame,
+    game_pk: int,
+) -> dict:
+    """Compare live lineups vs precomputed batter sims for a game.
+
+    Parameters
+    ----------
+    current_lineups : pd.DataFrame
+        Live lineup data (must have ``game_pk``, ``batter_id`` or
+        ``player_id``, and ``team_id`` columns).
+    precomputed_sims : pd.DataFrame
+        Precomputed batter sims (must have ``game_pk``, ``batter_id``,
+        and ``opp_starter_id`` columns).
+    game_pk : int
+        The game to check.
+
+    Returns
+    -------
+    dict
+        ``changed``: bool, ``new_batters``: list[int],
+        ``missing_batters``: list[int], ``pitcher_changed``: bool.
+    """
+    result = {
+        "changed": False,
+        "new_batters": [],
+        "missing_batters": [],
+        "pitcher_changed": False,
+    }
+
+    if precomputed_sims.empty:
+        return result
+
+    # Batter IDs in current lineup for this game
+    if not current_lineups.empty and "game_pk" in current_lineups.columns:
+        game_lu = current_lineups[current_lineups["game_pk"] == game_pk]
+    else:
+        game_lu = pd.DataFrame()
+    current_bids: set[int] = set()
+    if not game_lu.empty:
+        id_col = "batter_id" if "batter_id" in game_lu.columns else "player_id"
+        if id_col in game_lu.columns:
+            current_bids = {int(b) for b in game_lu[id_col].dropna()}
+
+    # Batter IDs in precomputed sims for this game
+    sim_game = precomputed_sims[precomputed_sims["game_pk"] == game_pk]
+    sim_bids: set[int] = set()
+    if not sim_game.empty:
+        sim_bids = {int(b) for b in sim_game["batter_id"].dropna()}
+
+    new_batters = sorted(current_bids - sim_bids)
+    missing_batters = sorted(sim_bids - current_bids)
+
+    result["new_batters"] = new_batters
+    result["missing_batters"] = missing_batters
+    result["changed"] = len(new_batters) > 0 or len(missing_batters) > 0
+
+    return result
 
 
 def _build_projection_lookup() -> dict:
@@ -239,9 +300,6 @@ def _render_schedule_cards(
     _bf_priors = load_bf_priors()
     _arsenal_df = load_pitcher_arsenal()
     _vuln_df = load_hitter_vulnerability(career=True)
-    _offerings_df = load_pitcher_offerings()
-    _cluster_meta_df = load_cluster_metadata()
-    _matchup_matrix_df = load_archetype_matchup_matrix()
     _str_df = load_hitter_strength(career=True)
     _ploc_df = load_pitcher_location_grid()
     _hzone_df = load_hitter_zone_grid(career=True)
@@ -257,6 +315,9 @@ def _render_schedule_cards(
     _batter_pc = load_batter_pitch_count_features()
     _tto_profiles = load_tto_profiles()
     _exit_tendencies = load_pitcher_exit_tendencies()
+
+    # Precomputed batter game sims (10K sims from daily pipeline)
+    _batter_sims_df = load_todays_batter_sims()
 
     # Game props (player projection edges)
     _game_props = load_game_props()
@@ -462,7 +523,6 @@ def _render_schedule_cards(
                 game, lineups, _h_arch_lookup, _p_arch_lookup, _h_stat_lookup,
                 _k_samples_dict, _bf_priors, _arsenal_df, _vuln_df,
                 proj_lookup, gpk,
-                _offerings_df, _cluster_meta_df, _matchup_matrix_df,
                 bb_samples_dict=_bb_samples_dict,
                 hr_samples_dict=_hr_samples_dict,
                 exit_model=_exit_model,
@@ -479,6 +539,7 @@ def _render_schedule_cards(
                 hzone_df=_hzone_df,
                 game_props=_game_props,
                 live_stats=live_stats,
+                batter_sims_df=_batter_sims_df,
             )
 
     if not sims.empty and not sims_stale:
@@ -742,9 +803,6 @@ def _render_game_drilldown(
     vuln_df: pd.DataFrame,
     proj_lookup: dict[int, dict],
     gpk: int,
-    offerings_df: pd.DataFrame | None = None,
-    cluster_meta_df: pd.DataFrame | None = None,
-    matchup_matrix_df: pd.DataFrame | None = None,
     bb_samples_dict: dict[str, np.ndarray] | None = None,
     hr_samples_dict: dict[str, np.ndarray] | None = None,
     exit_model: object | None = None,
@@ -761,6 +819,7 @@ def _render_game_drilldown(
     hzone_df: pd.DataFrame | None = None,
     game_props: pd.DataFrame | None = None,
     live_stats: pd.DataFrame | None = None,
+    batter_sims_df: pd.DataFrame | None = None,
 ) -> None:
     """Rich game drill-down: lineup matchups, matchup analysis, and game simulator."""
     away_abbr = game.get("away_abbr", "?")
@@ -801,14 +860,14 @@ def _render_game_drilldown(
     # Resolve umpire + weather context for this game
     game_context = _resolve_game_context(game)
 
-    # --- Inline toolbar: Section | Team | (Matchup picker) ---
+    # --- Inline toolbar: Section | Team ---
     _SECTIONS = [
         "Lineups", "Props Lab",
-        "Game Simulator", "Matchup Analysis",
+        "Game Simulator",
     ]
     team_options = [away_abbr, home_abbr]
 
-    tb_cols = st.columns([2, 1, 3])
+    tb_cols = st.columns([2, 1])
     with tb_cols[0]:
         section = st.selectbox(
             "Section", _SECTIONS,
@@ -825,32 +884,40 @@ def _render_game_drilldown(
     side_idx = 0 if selected_team == away_abbr else 1
     active_side = sides[side_idx]
 
-    # Matchup picker (only for Matchup Analysis)
-    matchup_choice = None
-    if section == "Matchup Analysis":
-        pid = active_side["pitcher_id"]
-        p_name = active_side["pitcher_name"]
-        opp_lu = active_side["opp_lineup"]
-        if not opp_lu.empty and pid:
-            name_col = "batter_name" if "batter_name" in opp_lu.columns else "player_name"
-            id_col = "batter_id" if "batter_id" in opp_lu.columns else "player_id"
-            matchup_options = [
-                f"{p_name} vs {brow[name_col]}"
-                for _, brow in opp_lu.head(9).iterrows()
-            ]
-            with tb_cols[2]:
-                matchup_choice = st.selectbox(
-                    "Matchup", matchup_options,
-                    key=f"dd_matchup_{gpk}_{active_side['side']}",
-                    label_visibility="collapsed",
-                )
+    _batter_sims = batter_sims_df if batter_sims_df is not None else pd.DataFrame()
 
     # --- Render selected section ---
     if section == "Lineups":
+        # Detect lineup changes vs precomputed sims
+        changes = _detect_lineup_changes(game_lu, _batter_sims, gpk)
+        if changes["changed"]:
+            n_new = len(changes["new_batters"])
+            n_miss = len(changes["missing_batters"])
+            parts = []
+            if n_new:
+                parts.append(f"{n_new} new batter(s)")
+            if n_miss:
+                parts.append(f"{n_miss} removed")
+            st.warning(f"Lineup changed since last update. {', '.join(parts)}.")
+            if st.button("Re-run sims", key=f"resim_{gpk}"):
+                import subprocess
+                subprocess.Popen(
+                    [sys.executable, "scripts/update_in_season.py", "--batter-sims-only"],
+                    cwd=str(Path(__file__).resolve().parents[1]),
+                )
+                st.success("Batter sims re-triggered. Refresh in ~30 seconds.")
+                st.cache_data.clear()
+
         _render_matchup_tab_sidebyside(
             sides, h_arch_lookup, h_stat_lookup,
             arsenal_df, vuln_df, gpk,
             pos_lookup=pos_lookup or {},
+            str_df=str_df if str_df is not None else pd.DataFrame(),
+            hitter_k_samples=hitter_k_samples or {},
+            hitter_bb_samples=hitter_bb_samples or {},
+            hitter_hr_samples=hitter_hr_samples or {},
+            bf_priors=bf_priors if bf_priors is not None else pd.DataFrame(),
+            batter_sims_df=_batter_sims,
         )
 
     elif section == "Props Lab":
@@ -859,21 +926,6 @@ def _render_game_drilldown(
             game_props if game_props is not None else pd.DataFrame(),
             lineups_df=game_lu,
             live_stats_df=live_stats,
-        )
-
-    elif section == "Matchup Analysis":
-        _render_matchup_analysis(
-            active_side, matchup_choice, gpk,
-            arsenal_df=arsenal_df,
-            vuln_df=vuln_df,
-            str_df=str_df if str_df is not None else pd.DataFrame(),
-            ploc_df=ploc_df if ploc_df is not None else pd.DataFrame(),
-            hzone_df=hzone_df if hzone_df is not None else pd.DataFrame(),
-            offerings_df=offerings_df if offerings_df is not None else pd.DataFrame(),
-            cluster_meta_df=cluster_meta_df if cluster_meta_df is not None else pd.DataFrame(),
-            matchup_matrix_df=matchup_matrix_df if matchup_matrix_df is not None else pd.DataFrame(),
-            h_arch_lookup=h_arch_lookup,
-            p_arch_lookup=p_arch_lookup,
         )
 
     elif section == "Game Simulator":
@@ -1171,6 +1223,12 @@ def _render_matchup_tab_sidebyside(
     vuln_df: pd.DataFrame,
     gpk: int,
     pos_lookup: dict[int, str] | None = None,
+    str_df: pd.DataFrame | None = None,
+    hitter_k_samples: dict[str, np.ndarray] | None = None,
+    hitter_bb_samples: dict[str, np.ndarray] | None = None,
+    hitter_hr_samples: dict[str, np.ndarray] | None = None,
+    bf_priors: pd.DataFrame | None = None,
+    batter_sims_df: pd.DataFrame | None = None,
 ) -> None:
     """Lineup matchups for both sides rendered in side-by-side columns."""
     col_away, col_home = st.columns(2)
@@ -1182,6 +1240,12 @@ def _render_matchup_tab_sidebyside(
                 arsenal_df, vuln_df, gpk,
                 pos_lookup=pos_lookup or {},
                 opp_side=opp_side,
+                str_df=str_df if str_df is not None else pd.DataFrame(),
+                hitter_k_samples=hitter_k_samples or {},
+                hitter_bb_samples=hitter_bb_samples or {},
+                hitter_hr_samples=hitter_hr_samples or {},
+                bf_priors=bf_priors if bf_priors is not None else pd.DataFrame(),
+                batter_sims_df=batter_sims_df if batter_sims_df is not None else pd.DataFrame(),
             )
 
 
@@ -1374,6 +1438,299 @@ def _build_scouting_bullets(
     return bullets[:4]  # cap at 4
 
 
+# ---------------------------------------------------------------------------
+# Matchup advantage badge with short explanation
+# ---------------------------------------------------------------------------
+def _matchup_advantage_html(
+    k_result: dict,
+    bb_result: dict,
+    hr_result: dict,
+    arsenal_df: pd.DataFrame,
+    vuln_df: pd.DataFrame,
+    str_df: pd.DataFrame | None,
+    bid: int,
+    matchup_pid: int,
+) -> tuple[str, float, float, float]:
+    """Return (HTML badge + short reason, k_lift, bb_lift, hr_lift).
+
+    Analyzes per-pitch-type data to find the specific pitch driving the edge
+    and references a concrete stat (whiff rate, xwOBA, chase rate).
+    """
+    k_lift = k_result.get("matchup_k_logit_lift", 0.0)
+    bb_lift = bb_result.get("matchup_bb_logit_lift", 0.0)
+    hr_lift = hr_result.get("matchup_hr_logit_lift", 0.0)
+    k_lift = 0.0 if np.isnan(k_lift) else k_lift
+    bb_lift = 0.0 if np.isnan(bb_lift) else bb_lift
+    hr_lift = 0.0 if np.isnan(hr_lift) else hr_lift
+
+    net = k_lift - bb_lift * 0.5 - hr_lift * 0.5
+
+    # Determine which outcome channel dominates
+    abs_k = abs(k_lift)
+    abs_bb = abs(bb_lift) * 0.5
+    abs_hr = abs(hr_lift) * 0.5
+
+    # Gather per-pitch detail from arsenal/vuln for the dominant pitch
+    p_ars = arsenal_df[arsenal_df["pitcher_id"] == matchup_pid].copy()
+    p_ars = p_ars[p_ars["pitches"] >= 20]
+    h_vuln = vuln_df[vuln_df["batter_id"] == bid].copy()
+    s_df_b = (
+        str_df[(str_df["batter_id"] == bid)]
+        if str_df is not None and not str_df.empty and "batter_id" in str_df.columns
+        else pd.DataFrame()
+    )
+
+    if abs(net) <= 0.03:
+        reason = _find_even_reason(p_ars, h_vuln, s_df_b)
+        html_out = (
+            f'<span style="color:var(--tdd-slate); font-size:0.68rem; '
+            f'margin-left:0.3rem;" title="{reason}">'
+            f'Even</span>'
+        )
+        return html_out, k_lift, bb_lift, hr_lift
+
+    if net > 0.03:
+        color_var = "--tdd-ember"
+        label = "Pitcher"
+        reason = _find_pitcher_reason(
+            k_lift, bb_lift, hr_lift, abs_k, abs_bb, abs_hr,
+            p_ars, h_vuln, s_df_b,
+        )
+    else:
+        color_var = "--tdd-sage"
+        label = "Hitter"
+        reason = _find_hitter_reason(
+            k_lift, bb_lift, hr_lift, abs_k, abs_bb, abs_hr,
+            p_ars, h_vuln, s_df_b,
+        )
+
+    html_out = (
+        f'<span style="color:var({color_var}); font-size:0.68rem; '
+        f'font-weight:600; margin-left:0.3rem;" title="{reason}">'
+        f'{label} - '
+        f'<span style="font-weight:400; font-size:0.62rem;">{reason}</span>'
+        f'</span>'
+    )
+    return html_out, k_lift, bb_lift, hr_lift
+
+
+def _find_pitcher_reason(
+    k_lift: float,
+    bb_lift: float,
+    hr_lift: float,
+    abs_k: float,
+    abs_bb: float,
+    abs_hr: float,
+    p_ars: pd.DataFrame,
+    h_vuln: pd.DataFrame,
+    s_df: pd.DataFrame,
+) -> str:
+    """Build a short reason string for pitcher advantage."""
+    from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE, LEAGUE_AVG_OVERALL
+
+    _MIN_USAGE = 0.10  # ignore pitches thrown <10% of the time
+
+    # K-driven advantage: find the pitch with highest usage-weighted whiff edge
+    if abs_k >= abs_bb and abs_k >= abs_hr and not p_ars.empty:
+        best_pt, best_score = "", 0.0
+        for _, row in p_ars.iterrows():
+            pt = row["pitch_type"]
+            usage = row.get("usage_pct", 0)
+            if pd.isna(usage) or usage < _MIN_USAGE:
+                continue
+            p_whiff = row.get("whiff_rate", 0)
+            if pd.isna(p_whiff):
+                continue
+            lg_whiff = LEAGUE_AVG_BY_PITCH_TYPE.get(
+                pt, LEAGUE_AVG_OVERALL,
+            ).get("whiff_rate", 0.25)
+            hv = h_vuln[h_vuln["pitch_type"] == pt]
+            h_whiff = (
+                hv.iloc[0].get("whiff_rate", lg_whiff) if len(hv) > 0
+                else lg_whiff
+            )
+            if pd.isna(h_whiff):
+                h_whiff = lg_whiff
+            combined = p_whiff * 0.6 + h_whiff * 0.4
+            score = combined * usage  # weight by how often it's actually thrown
+            if score > best_score:
+                best_score = score
+                best_pt = pt
+                _best_whiff = combined
+
+        if best_pt and _best_whiff > 0.25:
+            pt_name = PITCH_DISPLAY.get(best_pt, best_pt).lower()
+            pct = int(_best_whiff * 100)
+            return f"whiffs on {pt_name} ({pct}%)"
+
+        return "K matchup favors pitcher"
+
+    # BB-driven (pitcher induces chases): find highest chase pitch by usage
+    if abs_bb >= abs_k and abs_bb >= abs_hr and not p_ars.empty:
+        best_pt, best_score = "", 0.0
+        _best_chase = 0.0
+        for _, row in p_ars.iterrows():
+            pt = row["pitch_type"]
+            usage = row.get("usage_pct", 0)
+            if pd.isna(usage) or usage < _MIN_USAGE:
+                continue
+            hv = h_vuln[h_vuln["pitch_type"] == pt]
+            if len(hv) > 0:
+                cs = hv.iloc[0].get("chase_swings", 0)
+                oz = hv.iloc[0].get("out_of_zone_pitches", 0)
+                if pd.notna(oz) and oz > 0 and pd.notna(cs):
+                    chase = cs / oz
+                    score = chase * usage
+                    if score > best_score:
+                        best_score = score
+                        _best_chase = chase
+                        best_pt = pt
+        if best_pt and _best_chase > 0.30:
+            pt_name = PITCH_DISPLAY.get(best_pt, best_pt).lower()
+            pct = int(_best_chase * 100)
+            return f"chases {pt_name} ({pct}%)"
+
+        return "high chase rate"
+
+    # HR-driven (pitcher suppresses barrels)
+    if not p_ars.empty:
+        return "weak contact expected"
+
+    return "K matchup favors pitcher"
+
+
+def _find_hitter_reason(
+    k_lift: float,
+    bb_lift: float,
+    hr_lift: float,
+    abs_k: float,
+    abs_bb: float,
+    abs_hr: float,
+    p_ars: pd.DataFrame,
+    h_vuln: pd.DataFrame,
+    s_df: pd.DataFrame,
+) -> str:
+    """Build a short reason string for hitter advantage."""
+    from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE, LEAGUE_AVG_OVERALL
+
+    _MIN_USAGE = 0.10
+
+    # HR-driven advantage: find pitch with highest xwOBA (weighted by usage)
+    if abs_hr >= abs_k and abs_hr >= abs_bb:
+        best_pt, best_score, _best_xwoba = "", 0.0, 0.0
+        # Check hitter strength data first
+        if not s_df.empty and "xwoba_contact" in s_df.columns:
+            for _, row in p_ars.iterrows():
+                pt = row["pitch_type"]
+                usage = row.get("usage_pct", 0)
+                if pd.isna(usage) or usage < _MIN_USAGE:
+                    continue
+                sr = (
+                    s_df[s_df["pitch_type"] == pt]
+                    if "pitch_type" in s_df.columns
+                    else pd.DataFrame()
+                )
+                if len(sr) > 0:
+                    xw = sr.iloc[0].get("xwoba_contact", 0)
+                    if pd.notna(xw):
+                        score = xw * usage
+                        if score > best_score:
+                            best_score = score
+                            _best_xwoba = xw
+                            best_pt = pt
+        # Fallback to vuln data
+        if not best_pt:
+            for _, row in p_ars.iterrows():
+                pt = row["pitch_type"]
+                usage = row.get("usage_pct", 0)
+                if pd.isna(usage) or usage < _MIN_USAGE:
+                    continue
+                hv = h_vuln[h_vuln["pitch_type"] == pt]
+                if len(hv) > 0 and "xwoba_contact" in hv.columns:
+                    xw = hv.iloc[0].get("xwoba_contact", 0)
+                    if pd.notna(xw):
+                        score = xw * usage
+                        if score > best_score:
+                            best_score = score
+                            _best_xwoba = xw
+                            best_pt = pt
+
+        if best_pt and _best_xwoba > 0.350:
+            pt_name = PITCH_DISPLAY.get(best_pt, best_pt).lower()
+            return f"barrels {pt_name} (.{int(_best_xwoba * 1000):03d})"
+
+        return "power matchup favors hitter"
+
+    # BB-driven (hitter has plate discipline): find pitcher's most-used pitch
+    # that the hitter lays off
+    if abs_bb >= abs_k and abs_bb >= abs_hr:
+        best_pt, best_score, _best_chase = "", 0.0, 1.0
+        for _, row in p_ars.iterrows():
+            pt = row["pitch_type"]
+            usage = row.get("usage_pct", 0)
+            if pd.isna(usage) or usage < _MIN_USAGE:
+                continue
+            hv = h_vuln[h_vuln["pitch_type"] == pt]
+            if len(hv) > 0:
+                cs = hv.iloc[0].get("chase_swings", 0)
+                oz = hv.iloc[0].get("out_of_zone_pitches", 0)
+                if pd.notna(oz) and oz > 10 and pd.notna(cs):
+                    chase = cs / oz
+                    # Score: low chase on high-usage pitches matters most
+                    score = (1 - chase) * usage
+                    if score > best_score:
+                        best_score = score
+                        _best_chase = chase
+                        best_pt = pt
+        if best_pt and _best_chase < 0.30:
+            pt_name = PITCH_DISPLAY.get(best_pt, best_pt).lower()
+            pct = int(_best_chase * 100)
+            return f"lays off {pt_name} ({pct}% chase)"
+
+        return "patient, low chase rate"
+
+    # K-driven (hitter resists whiffs): find the high-usage pitch hitter handles
+    if not p_ars.empty:
+        best_pt, best_score, _best_whiff = "", 0.0, 1.0
+        for _, row in p_ars.iterrows():
+            pt = row["pitch_type"]
+            usage = row.get("usage_pct", 0)
+            p_whiff = row.get("whiff_rate", 0)
+            if pd.isna(usage) or usage < _MIN_USAGE:
+                continue
+            if pd.isna(p_whiff) or p_whiff < 0.20:
+                continue  # only consider pitches pitcher uses to get whiffs
+            hv = h_vuln[h_vuln["pitch_type"] == pt]
+            if len(hv) > 0:
+                h_whiff = hv.iloc[0].get("whiff_rate", 1.0)
+                if pd.notna(h_whiff):
+                    # Score: low hitter whiff on high-usage whiff pitches
+                    score = (1 - h_whiff) * usage
+                    if score > best_score:
+                        best_score = score
+                        _best_whiff = h_whiff
+                        best_pt = pt
+        if best_pt and _best_whiff < 0.25:
+            pt_name = PITCH_DISPLAY.get(best_pt, best_pt).lower()
+            pct = int(_best_whiff * 100)
+            return f"handles {pt_name} ({pct}% whiff)"
+
+        return "low whiff rate vs arsenal"
+
+    return "matchup favors hitter"
+
+
+def _find_even_reason(
+    p_ars: pd.DataFrame,
+    h_vuln: pd.DataFrame,
+    s_df: pd.DataFrame,
+) -> str:
+    """Build a short reason for an even matchup."""
+    if p_ars.empty:
+        return "limited data"
+    return "no strong pitch edges"
+
+
 def _render_matchup_tab(
     sides: list[dict],
     h_arch_lookup: dict[int, str],
@@ -1383,21 +1740,39 @@ def _render_matchup_tab(
     gpk: int,
     pos_lookup: dict[int, str] | None = None,
     opp_side: dict | None = None,
+    str_df: pd.DataFrame | None = None,
+    hitter_k_samples: dict[str, np.ndarray] | None = None,
+    hitter_bb_samples: dict[str, np.ndarray] | None = None,
+    hitter_hr_samples: dict[str, np.ndarray] | None = None,
+    bf_priors: pd.DataFrame | None = None,
+    batter_sims_df: pd.DataFrame | None = None,
 ) -> None:
-    """Team roster with matchup advantage badges.
+    """Team roster with inline matchup scouting on expand.
 
     When *opp_side* is provided (side-by-side view), each column shows:
       - Team header
       - Own SP at top
       - Own lineup with batter matchup badges vs opposing SP
+      - Expanding a batter shows matchup scouting bullets + grades + game projections
       - Avg K matchup summary for own SP vs opposing lineup
     """
     from scipy.special import expit, logit as sp_logit
     from lib.matchup import score_matchup, score_matchup_bb, score_matchup_hr
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
+    from components.scouting import build_matchup_scouting_bullets
 
     if pos_lookup is None:
         pos_lookup = {}
+    if hitter_k_samples is None:
+        hitter_k_samples = {}
+    if hitter_bb_samples is None:
+        hitter_bb_samples = {}
+    if hitter_hr_samples is None:
+        hitter_hr_samples = {}
+    if bf_priors is None:
+        bf_priors = pd.DataFrame()
+    if batter_sims_df is None:
+        batter_sims_df = pd.DataFrame()
 
     baselines_pt = {
         pt: {
@@ -1430,9 +1805,24 @@ def _render_matchup_tab(
         if opp_side is not None:
             display_lu = side_info["own_lineup"]
             matchup_pid = opp_side["pitcher_id"]
+            _opp_proj = opp_side.get("pitcher_proj") or {}
         else:
             display_lu = opp_lu
             matchup_pid = pid
+            _opp_proj = p_proj
+
+        # Opposing pitcher rates + BF priors for batter sim
+        _opp_k_rate = _safe_rate(_opp_proj.get("projected_k_rate"), 0.22)
+        _opp_bb_rate = _safe_rate(_opp_proj.get("projected_bb_rate"), 0.08)
+        _opp_hr_rate = _safe_rate(_opp_proj.get("projected_hr_per_bf"), 0.03)
+        _opp_bf_mu = 22.0
+        _opp_bf_sigma = 4.5
+        if matchup_pid and not bf_priors.empty:
+            _bp_row = bf_priors[bf_priors["pitcher_id"] == matchup_pid]
+            if not _bp_row.empty:
+                _bp_last = _bp_row.sort_values("season").iloc[-1]
+                _opp_bf_mu = float(_bp_last["mu_bf"])
+                _opp_bf_sigma = float(_bp_last["sigma_bf"])
 
         # Section header
         st.markdown(
@@ -1504,34 +1894,17 @@ def _render_matchup_tab(
 
             # Matchup advantage (batter vs opposing SP)
             advantage_html = ""
+            k_lift = bb_lift = hr_lift = 0.0
             if matchup_pid and bid and not arsenal_df.empty and not vuln_df.empty:
                 k_result = score_matchup(matchup_pid, bid, arsenal_df, vuln_df, baselines_pt)
                 bb_result = score_matchup_bb(matchup_pid, bid, arsenal_df, vuln_df, baselines_pt)
                 hr_result = score_matchup_hr(matchup_pid, bid, arsenal_df, vuln_df, baselines_pt)
 
-                k_lift = k_result.get("matchup_k_logit_lift", 0.0)
-                bb_lift = bb_result.get("matchup_bb_logit_lift", 0.0)
-                hr_lift = hr_result.get("matchup_hr_logit_lift", 0.0)
-                k_lift = 0.0 if np.isnan(k_lift) else k_lift
-                bb_lift = 0.0 if np.isnan(bb_lift) else bb_lift
-                hr_lift = 0.0 if np.isnan(hr_lift) else hr_lift
-
-                # Net advantage: positive k_lift = pitcher advantage, negative = hitter
-                net = k_lift - bb_lift * 0.5 - hr_lift * 0.5
-                if net > 0.03:
-                    advantage_html = (
-                        f'<span style="color:var(--tdd-ember); font-size:0.68rem; '
-                        f'font-weight:600; margin-left:0.3rem;">Pitcher</span>'
-                    )
-                elif net < -0.03:
-                    advantage_html = (
-                        f'<span style="color:var(--tdd-sage); font-size:0.68rem; '
-                        f'font-weight:600; margin-left:0.3rem;">Hitter</span>'
-                    )
-                else:
-                    advantage_html = (
-                        f'<span style="color:var(--tdd-slate); font-size:0.68rem; margin-left:0.3rem;">Even</span>'
-                    )
+                advantage_html, k_lift, bb_lift, hr_lift = _matchup_advantage_html(
+                    k_result, bb_result, hr_result,
+                    arsenal_df, vuln_df, str_df,
+                    bid, matchup_pid,
+                )
 
                 total_k_lift += k_lift
                 total_bb_lift += bb_lift
@@ -1554,10 +1927,86 @@ def _render_matchup_tab(
                 f'{advantage_html}'
             )
 
-            # Detail section (grades)
+            # Detail section: scouting + grades + game projections + link
+            detail_parts: list[str] = []
+            matchup_link_html = ""
+
+            # Matchup scouting bullets (batter vs opposing SP)
+            if matchup_pid and bid and not arsenal_df.empty and not vuln_df.empty:
+                _p_arsenal = arsenal_df[arsenal_df["pitcher_id"] == matchup_pid]
+                _h_vuln = vuln_df[vuln_df["batter_id"] == bid]
+                _h_str = (
+                    str_df[str_df["batter_id"] == bid]
+                    if str_df is not None and not str_df.empty
+                    else pd.DataFrame()
+                )
+                _opp_pname = opp_side["pitcher_name"] if opp_side else pitcher_name
+                bullets = build_matchup_scouting_bullets(
+                    _p_arsenal, _h_vuln, _h_str,
+                    pitcher_name=_opp_pname, hitter_name=bname,
+                )
+                if bullets:
+                    bullet_html = "".join(
+                        f'<div style="color:{c}; font-size:0.78rem; margin:0.12rem 0; '
+                        f'padding-left:0.65rem; border-left:2px solid {c};">{t}</div>'
+                        for c, t in bullets[:3]
+                    )
+                    detail_parts.append(bullet_html)
+
+                # Prepare matchup link for bottom
+                matchup_link_html = (
+                    f'<a href="?page=matchup_explorer&pitcher_id={matchup_pid}&hitter_id={bid}" '
+                    f'target="_self" style="color:var(--tdd-gold); font-size:0.75rem; '
+                    f'text-decoration:none;">View full matchup</a>'
+                )
+
+            # Hitter grades
             grades_html = _hitter_grades_html(stats)
-            detail = grades_html if grades_html else (
-                '<span style="color:var(--tdd-slate); font-size:0.7rem;">No grade data</span>'
+            if grades_html:
+                detail_parts.append(grades_html)
+
+            # Game-level batter projections (from precomputed sims)
+            _precomp_row = pd.DataFrame()
+            if bid and not batter_sims_df.empty:
+                _precomp_row = batter_sims_df[
+                    (batter_sims_df["game_pk"] == gpk)
+                    & (batter_sims_df["batter_id"] == bid)
+                ]
+            if not _precomp_row.empty:
+                _pr = _precomp_row.iloc[0]
+                _e_k = float(_pr["expected_k"])
+                _e_bb = float(_pr["expected_bb"])
+                _e_h = float(_pr["expected_h"])
+                _e_hr = float(_pr["expected_hr"])
+
+                detail_parts.append(
+                    f'<div style="display:flex; gap:0.6rem; font-size:0.72rem; '
+                    f'margin:0.25rem 0; padding:0.2rem 0; '
+                    f'border-top:1px solid var(--tdd-dark-border-faint);">'
+                    f'<span style="color:var(--tdd-slate);">Game Proj</span>'
+                    f'<span style="color:var(--tdd-cream);">{_e_k:.2f} K</span>'
+                    f'<span style="color:var(--tdd-cream);">{_e_bb:.2f} BB</span>'
+                    f'<span style="color:var(--tdd-cream);">{_e_h:.2f} H</span>'
+                    f'<span style="color:var(--tdd-cream);">{_e_hr:.2f} HR</span>'
+                    f'</div>'
+                )
+            elif bid and batter_sims_df.empty:
+                pass  # No precomputed sims available at all
+            elif bid:
+                detail_parts.append(
+                    f'<div style="font-size:0.72rem; color:var(--tdd-slate); '
+                    f'margin:0.25rem 0; padding:0.2rem 0; '
+                    f'border-top:1px solid var(--tdd-dark-border-faint);">'
+                    f'Sim pending - lineup may have changed</div>'
+                )
+
+            # Matchup Explorer link at bottom
+            if matchup_link_html:
+                detail_parts.append(matchup_link_html)
+
+            detail = (
+                "".join(detail_parts) if detail_parts
+                else '<span style="color:var(--tdd-slate); font-size:0.7rem;">No scouting data</span>'
             )
 
             rows_html.append(expandable_card_html(summary, detail))
@@ -1624,588 +2073,6 @@ def _render_matchup_tab(
                     f'color:var(--tdd-cream);">{bullet_html}</ul></div>',
                     unsafe_allow_html=True,
                 )
-
-
-def _render_archetype_tab(
-    sides: list[dict],
-    h_arch_lookup: dict[int, str],
-    p_arch_lookup: dict[int, str],
-    offerings_df: pd.DataFrame,
-    cluster_meta_df: pd.DataFrame,
-    matchup_matrix_df: pd.DataFrame,
-    gpk: int,
-) -> None:
-    """Pitcher archetype vs lineup archetype analysis."""
-    if matchup_matrix_df.empty:
-        st.info("Archetype matchup data is not yet available.")
-        return
-
-    for side_info in sides:
-        pitcher_name = side_info["pitcher_name"]
-        pid = side_info["pitcher_id"]
-        p_arch = side_info["pitcher_arch"]
-        opp_lu = side_info["opp_lineup"]
-        opp_abbr = side_info["opp_abbr"]
-        side_abbr = side_info["abbr"]
-
-        arch_tag = f" ({p_arch})" if p_arch else ""
-        st.markdown(
-            f'<div class="tdd-section-hdr" style="margin:0.5rem 0 0.3rem;">'
-            f'<span class="tdd-team-abbr" data-team="{side_abbr}">{side_abbr}</span>'
-            f' SP: {pitcher_name}{arch_tag}</div>',
-            unsafe_allow_html=True,
-        )
-
-        # --- Section A: Pitcher Arsenal Profile ---
-        if pid and not offerings_df.empty and not cluster_meta_df.empty:
-            p_offers = offerings_df[offerings_df["pitcher_id"] == pid].copy()
-            if not p_offers.empty:
-                total_pitches = p_offers["pitches"].sum()
-                p_offers = p_offers.merge(
-                    cluster_meta_df[["pitch_archetype", "archetype_name"]],
-                    on="pitch_archetype", how="left",
-                )
-                p_offers["usage"] = p_offers["pitches"] / total_pitches
-                p_offers = p_offers.sort_values("usage", ascending=False)
-
-                st.markdown(
-                    f'<div style="color:var(--tdd-cream); font-size:0.9rem; font-weight:500; '
-                    f'margin:0.5rem 0 0.3rem;">Arsenal Profile</div>',
-                    unsafe_allow_html=True,
-                )
-
-                # Donut chart with pitch type + velo annotations
-                fig, ax = plt.subplots(figsize=(4, 4))
-                fig.patch.set_facecolor(DARK)
-                ax.set_facecolor(DARK)
-
-                from config import PITCH_TYPE_COLORS
-                colors = [
-                    PITCH_TYPE_COLORS.get(row.get("pitch_type", ""), SLATE)
-                    for _, row in p_offers.iterrows()
-                ]
-
-                wedges, _ = ax.pie(
-                    p_offers["usage"],
-                    colors=colors,
-                    startangle=90,
-                    wedgeprops=dict(width=0.38, edgecolor=DARK, linewidth=1.5),
-                )
-
-                # Annotate each wedge with pitch name + velo
-                for i, (_, row) in enumerate(p_offers.iterrows()):
-                    ang = (wedges[i].theta2 + wedges[i].theta1) / 2
-                    x = np.cos(np.deg2rad(ang))
-                    y = np.sin(np.deg2rad(ang))
-                    label = row["pitch_name"]
-                    velo = row.get("release_speed")
-                    if pd.notna(velo):
-                        label += f"  {velo:.0f} mph"
-                    pct = row["usage"]
-                    label += f"  ({pct:.0%})"
-                    ha = "left" if x >= 0 else "right"
-                    ax.annotate(
-                        label,
-                        xy=(x * 0.62, y * 0.62),
-                        xytext=(x * 1.25, y * 1.25),
-                        fontsize=8, color=CREAM, fontweight=500,
-                        ha=ha, va="center",
-                        arrowprops=dict(
-                            arrowstyle="-",
-                            color=SLATE,
-                            lw=0.8,
-                        ),
-                    )
-
-                ax.set_aspect("equal")
-                plt.tight_layout()
-                st.pyplot(fig, use_container_width=False)
-                plt.close(fig)
-
-        # --- Section B: Archetype Matchup Matrix (filtered) ---
-        if p_arch and not matchup_matrix_df.empty:
-            p_row = matchup_matrix_df[
-                matchup_matrix_df["pitcher_archetype_name"] == p_arch
-            ].copy()
-
-            if not p_row.empty:
-                # Determine which hitter archetypes are in the opposing lineup
-                lineup_archs: set[str] = set()
-                if not opp_lu.empty:
-                    id_col = (
-                        "batter_id" if "batter_id" in opp_lu.columns
-                        else "player_id"
-                    )
-                    for _, brow in opp_lu.head(9).iterrows():
-                        bid = (
-                            int(brow[id_col])
-                            if pd.notna(brow.get(id_col)) else None
-                        )
-                        if bid and bid in h_arch_lookup:
-                            lineup_archs.add(h_arch_lookup[bid])
-
-                if not lineup_archs:
-                    st.markdown(
-                        f'<div style="color:var(--tdd-slate); font-size:0.85rem;">'
-                        f'No lineup archetypes available</div>',
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    stat_choice = st.radio(
-                        "Stat", ["K%", "BB%", "HR%"],
-                        horizontal=True,
-                        key=f"arch_stat_{side_info['side']}_{gpk}",
-                    )
-                    stat_col = {
-                        "K%": "k_pct", "BB%": "bb_pct", "HR%": "hr_pct",
-                    }[stat_choice]
-
-                    # Filter matrix to this pitcher's row + lineup hitter columns
-                    filtered_df = matchup_matrix_df[
-                        (matchup_matrix_df["pitcher_archetype_name"] == p_arch)
-                        & (matchup_matrix_df["hitter_archetype_name"].isin(lineup_archs))
-                    ]
-
-                    if not filtered_df.empty:
-                        heatmap_html = _render_matchup_heatmap(
-                            filtered_df,
-                            stat_col=stat_col,
-                            stat_label=stat_choice,
-                            pitcher_arch=p_arch,
-                            lineup_archetypes=lineup_archs,
-                        )
-                        st.markdown(heatmap_html, unsafe_allow_html=True)
-
-        st.markdown("---")
-
-
-# ---------------------------------------------------------------------------
-# Matchup Analysis | individual pitcher-vs-batter breakdowns
-# ---------------------------------------------------------------------------
-
-def _render_matchup_analysis(
-    side_info: dict,
-    matchup_choice: str | None,
-    gpk: int,
-    arsenal_df: pd.DataFrame,
-    vuln_df: pd.DataFrame,
-    str_df: pd.DataFrame,
-    ploc_df: pd.DataFrame,
-    hzone_df: pd.DataFrame,
-    offerings_df: pd.DataFrame,
-    cluster_meta_df: pd.DataFrame,
-    matchup_matrix_df: pd.DataFrame,
-    h_arch_lookup: dict[int, str],
-    p_arch_lookup: dict[int, str],
-) -> None:
-    """Individual pitcher-vs-batter matchup analysis with zone contours."""
-    from lib.matchup import score_matchup, score_matchup_bb, score_matchup_hr
-    from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
-    from components.scouting import build_matchup_scouting_bullets
-    from components.tables import build_matchup_table
-    from components.charts import create_pitch_density_plotly, create_hitter_zone_plotly
-    from config import PITCH_DISPLAY, PITCH_TYPE_COLORS
-
-    pid = side_info["pitcher_id"]
-    pitcher_name = side_info["pitcher_name"]
-    opp_lu = side_info["opp_lineup"]
-    side_abbr = side_info["abbr"]
-
-    if not pid or opp_lu.empty:
-        st.markdown(
-            f'<div style="color:var(--tdd-slate); font-size:0.85rem;">'
-            f'No lineup or pitcher data available</div>',
-            unsafe_allow_html=True,
-        )
-        return
-
-    name_col = "batter_name" if "batter_name" in opp_lu.columns else "player_name"
-    id_col = "batter_id" if "batter_id" in opp_lu.columns else "player_id"
-
-    # Resolve selected batter from matchup picker
-    batter_row = None
-    if matchup_choice:
-        # Extract batter name from "Pitcher vs Batter" format
-        vs_idx = matchup_choice.find(" vs ")
-        if vs_idx >= 0:
-            batter_name_sel = matchup_choice[vs_idx + 4:]
-            match = opp_lu[opp_lu[name_col] == batter_name_sel]
-            if not match.empty:
-                batter_row = match.iloc[0]
-
-    if batter_row is None and not opp_lu.empty:
-        batter_row = opp_lu.iloc[0]
-
-    if batter_row is None:
-        return
-
-    bid = int(batter_row[id_col]) if pd.notna(batter_row.get(id_col)) else None
-    batter_name = batter_row.get(name_col, "Unknown")
-
-    if not bid:
-        return
-
-    # --- Header with headshots + edge label ---
-    baselines_pt = {
-        pt: {
-            "whiff_rate": vals.get("whiff_rate", 0.25),
-            "chase_rate": vals.get("chase_rate", 0.30),
-            "barrel_rate": vals.get("barrel_rate", 0.06),
-        }
-        for pt, vals in LEAGUE_AVG_BY_PITCH_TYPE.items()
-    }
-
-    k_result = score_matchup(pid, bid, arsenal_df, vuln_df, baselines_pt)
-    bb_result = score_matchup_bb(pid, bid, arsenal_df, vuln_df, baselines_pt)
-    hr_result = score_matchup_hr(pid, bid, arsenal_df, vuln_df, baselines_pt)
-
-    k_lift = k_result.get("matchup_k_logit_lift", 0.0)
-    bb_lift = bb_result.get("matchup_bb_logit_lift", 0.0)
-    hr_lift = hr_result.get("matchup_hr_logit_lift", 0.0)
-    k_lift = 0.0 if np.isnan(k_lift) else k_lift
-    bb_lift = 0.0 if np.isnan(bb_lift) else bb_lift
-    hr_lift = 0.0 if np.isnan(hr_lift) else hr_lift
-    net_edge = k_lift - bb_lift * 0.5 - hr_lift * 0.5
-
-    if net_edge > 0.05:
-        edge_label, edge_color = "Pitcher Advantage", SAGE
-    elif net_edge < -0.05:
-        edge_label, edge_color = "Hitter Advantage", EMBER
-    else:
-        edge_label, edge_color = "Neutral Matchup", SLATE
-
-    p_hs = headshot_html(pid, size=40)
-    b_hs = headshot_html(bid, size=40)
-    p_arch = side_info["pitcher_arch"] or ""
-    h_arch = h_arch_lookup.get(bid, "")
-
-    st.markdown(
-        f'<div style="display:flex; align-items:center; gap:0.8rem; '
-        f'margin:0.5rem 0 1rem;">'
-        f'{p_hs}'
-        f'<div>'
-        f'<span style="color:var(--tdd-cream); font-size:1rem; font-weight:700;">{pitcher_name}</span>'
-        f'{f" <span style=&quot;color:var(--tdd-slate); font-size:0.75rem;&quot;>{p_arch}</span>" if p_arch else ""}'
-        f'</div>'
-        f'<span style="color:{edge_color}; font-size:0.85rem; font-weight:600; '
-        f'background:rgba(255,255,255,0.05); padding:0.2rem 0.6rem; '
-        f'border-radius:4px;">{edge_label}</span>'
-        f'{b_hs}'
-        f'<div>'
-        f'<span style="color:var(--tdd-cream); font-size:1rem; font-weight:700;">{batter_name}</span>'
-        f'{f" <span style=&quot;color:var(--tdd-slate); font-size:0.75rem;&quot;>{h_arch}</span>" if h_arch else ""}'
-        f'</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    # --- Zone contours for primary pitches (≥10% usage) ---
-    p_loc = ploc_df[ploc_df["pitcher_id"] == pid] if not ploc_df.empty else pd.DataFrame()
-    h_zone = hzone_df[hzone_df["batter_id"] == bid] if not hzone_df.empty else pd.DataFrame()
-    p_arsenal = arsenal_df[arsenal_df["pitcher_id"] == pid] if not arsenal_df.empty else pd.DataFrame()
-
-    # Also try raw pitch locations for smoother KDE
-    from services.data_loader import load_pitcher_pitch_locations
-    _raw_locs = load_pitcher_pitch_locations()
-    _p_raw = _raw_locs[_raw_locs["pitcher_id"] == pid] if not _raw_locs.empty else pd.DataFrame()
-    _pitch_loc_data = _p_raw if not _p_raw.empty else p_loc
-
-    # Determine handedness for filtering
-    _pitch_hand = None
-    if not p_arsenal.empty and "pitch_hand" in p_arsenal.columns:
-        _hand_rows = p_arsenal[~p_arsenal["pitch_hand"].isna()]
-        if not _hand_rows.empty:
-            _pitch_hand = _hand_rows.iloc[0]["pitch_hand"]
-
-    # Batter stand from the lineup data
-    _batter_stand = batter_row.get("batter_stand") if pd.notna(batter_row.get("batter_stand")) else None
-
-    if not _pitch_loc_data.empty and not p_arsenal.empty:
-        total_pitches = p_arsenal["pitches"].sum()
-        p_arsenal_sorted = p_arsenal.copy()
-        p_arsenal_sorted["usage"] = p_arsenal_sorted["pitches"] / total_pitches
-        p_arsenal_sorted = p_arsenal_sorted.sort_values("usage", ascending=False)
-
-        primary_pts = p_arsenal_sorted[p_arsenal_sorted["usage"] >= 0.10]["pitch_type"].tolist()
-        secondary_pts = p_arsenal_sorted[p_arsenal_sorted["usage"] < 0.10]
-
-        if primary_pts:
-            # Per pitch type: pitcher density (left) vs hitter xwOBA (right)
-            for rank, pt in enumerate(primary_pts, 1):
-                pt_name = PITCH_DISPLAY.get(pt, pt)
-                _pt_row = p_arsenal_sorted[p_arsenal_sorted["pitch_type"] == pt]
-                _pt_usage = f" ({_pt_row.iloc[0]['usage']:.0%})" if not _pt_row.empty else ""
-                st.markdown(
-                    f'<div class="tdd-meta" style="margin:0.8rem 0 0.2rem;">'
-                    f'#{rank} {pt_name}{_pt_usage}</div>',
-                    unsafe_allow_html=True,
-                )
-                matchup_cols = st.columns(2, gap="medium")
-                with matchup_cols[0]:
-                    fig_density = create_pitch_density_plotly(
-                        _pitch_loc_data, pitch_types=[pt],
-                        pitcher_name=pitcher_name,
-                        batter_stand=_batter_stand,
-                        pitch_hand=_pitch_hand,
-                    )
-                    st.plotly_chart(
-                        fig_density, use_container_width=True,
-                        config={"displayModeBar": False, "scrollZoom": False},
-                        key=f"mu_density_{gpk}_{bid}_{pt}",
-                    )
-                with matchup_cols[1]:
-                    if not h_zone.empty:
-                        fig_xwoba = create_hitter_zone_plotly(
-                            h_zone, metric="xwoba",
-                            batter_name=batter_name,
-                            batter_stand=_batter_stand,
-                            pitch_types=[pt] if "pitch_type" in h_zone.columns else None,
-                        )
-                        st.plotly_chart(
-                            fig_xwoba, use_container_width=True,
-                            config={"displayModeBar": False, "scrollZoom": False},
-                            key=f"mu_xwoba_{gpk}_{bid}_{pt}",
-                        )
-                    else:
-                        st.markdown(
-                            f'<div class="tdd-meta">No zone data for {batter_name}</div>',
-                            unsafe_allow_html=True,
-                        )
-
-        # Secondary pitches
-        if not secondary_pts.empty:
-            sec_parts = [
-                f"{PITCH_DISPLAY.get(row['pitch_type'], row['pitch_type'])} ({row['usage']:.0%})"
-                for _, row in secondary_pts.iterrows()
-            ]
-            st.markdown(
-                f'<div class="tdd-context" style="margin:0.3rem 0 0.8rem;">'
-                f'Also throws: {", ".join(sec_parts)} | limited usage, not shown above'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-    # --- Pitch-type breakdown table ---
-    h_vuln = vuln_df[vuln_df["batter_id"] == bid] if not vuln_df.empty else pd.DataFrame()
-    h_str = str_df[str_df["batter_id"] == bid] if not str_df.empty else pd.DataFrame()
-
-    if not p_arsenal.empty and not h_vuln.empty:
-        st.markdown(
-            f'<div style="color:var(--tdd-cream); font-size:0.9rem; font-weight:500; '
-            f'margin:0.5rem 0 0.3rem;">Pitch-Type Breakdown</div>',
-            unsafe_allow_html=True,
-        )
-        table_html = build_matchup_table(p_arsenal, h_vuln, h_str)
-        st.markdown(table_html, unsafe_allow_html=True)
-
-    # --- Scouting bullets (primary pitches only) ---
-    if not p_arsenal.empty and not h_vuln.empty:
-        _primary_arsenal = p_arsenal.copy()
-        _total = _primary_arsenal["pitches"].sum()
-        if _total > 0:
-            _primary_arsenal = _primary_arsenal[_primary_arsenal["pitches"] / _total >= 0.10]
-        bullets = build_matchup_scouting_bullets(
-            _primary_arsenal, h_vuln, h_str,
-            pitcher_name=pitcher_name, hitter_name=batter_name,
-        )
-        if bullets:
-            bullet_html = "".join(
-                f'<div style="color:{color}; font-size:0.82rem; '
-                f'margin:0.15rem 0; padding-left:0.8rem; '
-                f'border-left:2px solid {color};">{text}</div>'
-                for color, text in bullets
-            )
-            st.markdown(
-                f'<div style="margin:0.5rem 0 0.8rem;">{bullet_html}</div>',
-                unsafe_allow_html=True,
-            )
-
-    # --- View in Matchup Explorer link ---
-    st.markdown(
-        f'<div style="margin:0.5rem 0;">'
-        f'<a href="?page=matchup_explorer&pitcher_id={pid}&hitter_id={bid}" '
-        f'target="_self" style="color:var(--tdd-gold); font-size:0.85rem; '
-        f'text-decoration:none; font-weight:500;">'
-        f'View full matchup in Matchup Explorer →</a></div>',
-        unsafe_allow_html=True,
-    )
-
-
-def _heatmap_color(
-    val: float,
-    vmin: float = 0.15,
-    vmax: float = 0.35,
-    stat: str = "k_pct",
-) -> str:
-    """Interpolate cell background color for the matchup heatmap.
-
-    For K%: sage (low/hitter advantage) -> ember (high/pitcher advantage).
-    For BB% and HR%: reversed | high values favor the hitter.
-    """
-    t = max(0.0, min(1.0, (val - vmin) / (vmax - vmin))) if vmax != vmin else 0.5
-    if stat in ("bb_pct", "hr_pct"):
-        t = 1.0 - t  # flip so high BB%/HR% = hitter advantage (sage)
-    # Interpolate sage -> ember
-    r = int(107 + t * (212 - 107))
-    g = int(163 + t * (86 - 163))
-    b = int(142 + t * (42 - 142))
-    return f"rgb({r},{g},{b})"
-
-
-def _render_matchup_heatmap(
-    matchup_matrix_df: pd.DataFrame,
-    stat_col: str,
-    stat_label: str,
-    pitcher_arch: str | None,
-    lineup_archetypes: set[str],
-) -> str:
-    """Build an HTML heatmap table for the archetype matchup matrix.
-
-    Parameters
-    ----------
-    matchup_matrix_df : pd.DataFrame
-        Full matrix with pitcher_archetype_name, hitter_archetype_name,
-        k_pct, bb_pct, hr_pct.
-    stat_col : str
-        Column to display (k_pct, bb_pct, hr_pct).
-    stat_label : str
-        Display label (K%, BB%, HR%).
-    pitcher_arch : str | None
-        Current pitcher's archetype name | its row gets highlighted.
-    lineup_archetypes : set[str]
-        Hitter archetypes present in the opposing lineup | their columns
-        get highlighted.
-    """
-    # Color ranges per stat
-    ranges = {
-        "k_pct": (0.15, 0.35),
-        "bb_pct": (0.05, 0.15),
-        "hr_pct": (0.01, 0.06),
-    }
-    vmin, vmax = ranges.get(stat_col, (0.15, 0.35))
-
-    # Pivot to matrix: rows = pitcher archetypes, columns = hitter archetypes
-    pivot = matchup_matrix_df.pivot_table(
-        index="pitcher_archetype_name",
-        columns="hitter_archetype_name",
-        values=stat_col,
-        aggfunc="first",
-    )
-
-    pitcher_archs = sorted(pivot.index.tolist())
-    hitter_archs = sorted(pivot.columns.tolist())
-
-    gold_bg = "rgba(200,169,110,0.12)"
-
-    # --- CSS ---
-    css = f"""
-    <style>
-    .arch-heatmap {{
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.8rem;
-        margin: 0.3rem 0 0.5rem;
-    }}
-    .arch-heatmap th, .arch-heatmap td {{
-        padding: 6px 8px;
-        text-align: center;
-        border: 1px solid var(--tdd-dark-border);
-        color: var(--tdd-cream);
-    }}
-    .arch-heatmap th {{
-        background: var(--tdd-dark-card);
-        font-weight: 600;
-        font-size: 0.75rem;
-        white-space: nowrap;
-    }}
-    .arch-heatmap th.corner {{
-        background: var(--tdd-dark);
-    }}
-    .arch-heatmap th.col-hl {{
-        color: var(--tdd-gold);
-        border-bottom: 2px solid var(--tdd-gold);
-    }}
-    .arch-heatmap td.row-label {{
-        text-align: left;
-        font-weight: 500;
-        background: var(--tdd-dark-card);
-        white-space: nowrap;
-        font-size: 0.75rem;
-    }}
-    .arch-heatmap tr.row-hl td.row-label {{
-        color: var(--tdd-gold);
-        border-left: 2px solid var(--tdd-gold);
-    }}
-    .arch-heatmap td.cell {{
-        font-weight: 500;
-        font-size: 0.8rem;
-        font-variant-numeric: tabular-nums;
-    }}
-    </style>
-    """
-
-    # --- Header row ---
-    header = f'<tr><th class="corner">{stat_label}</th>'
-    for h_arch in hitter_archs:
-        cls = "col-hl" if h_arch in lineup_archetypes else ""
-        header += f'<th class="{cls}">{h_arch}</th>'
-    header += "</tr>"
-
-    # --- Body rows ---
-    body_rows: list[str] = []
-    for p_arch in pitcher_archs:
-        is_p_row = p_arch == pitcher_arch
-        tr_cls = ' class="row-hl"' if is_p_row else ""
-        label_extra = f" background:{gold_bg};" if is_p_row else ""
-
-        row = (
-            f"<tr{tr_cls}>"
-            f'<td class="row-label" style="{label_extra}">{p_arch}</td>'
-        )
-        for h_arch in hitter_archs:
-            val = (
-                pivot.loc[p_arch, h_arch]
-                if (p_arch in pivot.index and h_arch in pivot.columns)
-                else None
-            )
-
-            if val is not None and pd.notna(val):
-                bg = _heatmap_color(val, vmin, vmax, stat_col)
-                cell_text = f"{val:.1%}"
-            else:
-                bg = DARK_CARD
-                cell_text = "\u2014"
-
-            # Build inline style
-            parts: list[str] = []
-            if h_arch in lineup_archetypes:
-                parts.append(
-                    f"background:linear-gradient("
-                    f"rgba(200,169,110,0.10),"
-                    f"rgba(200,169,110,0.10)),"
-                    f"{bg}"
-                )
-                parts.append(f"border-left:2px solid var(--tdd-gold)")
-                parts.append(f"border-right:2px solid var(--tdd-gold)")
-            else:
-                parts.append(f"background:{bg}")
-
-            if is_p_row:
-                parts.append(f"border-top:2px solid var(--tdd-gold)")
-                parts.append(f"border-bottom:2px solid var(--tdd-gold)")
-
-            style = "; ".join(parts)
-            row += f'<td class="cell" style="{style}">{cell_text}</td>'
-        row += "</tr>"
-        body_rows.append(row)
-
-    return (
-        f"{css}"
-        f'<table class="arch-heatmap">'
-        f"<thead>{header}</thead>"
-        f'<tbody>{"".join(body_rows)}</tbody>'
-        f"</table>"
-    )
 
 
 def _parse_temp_bucket(temp_str: object) -> str:

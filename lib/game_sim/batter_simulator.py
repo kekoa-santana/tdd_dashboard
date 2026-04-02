@@ -54,6 +54,30 @@ LEAGUE_K_RATE = 0.226
 LEAGUE_BB_RATE = 0.082
 LEAGUE_HR_RATE = 0.031
 
+# ---------------------------------------------------------------------------
+# League-average TTO logit lifts (from batter's perspective).
+# Mirrors _LEAGUE_TTO_LOGIT_LIFTS in game_k_model.py.
+# TTO1: pitcher is sharper (higher K/BB, lower HR)
+# TTO2/3: pitcher fatigues (lower K/BB, higher HR)
+# Lift = logit(tto_rate) - logit(overall_rate)
+# ---------------------------------------------------------------------------
+_TTO_K_LIFTS = np.array([
+    logit(0.23782) - logit(0.22557),   # TTO1: +0.066
+    logit(0.20952) - logit(0.22557),   # TTO2: -0.085
+    logit(0.19421) - logit(0.22557),   # TTO3: -0.171
+])
+_TTO_BB_LIFTS = np.array([
+    logit(0.08483) - logit(0.08115),   # TTO1: +0.047
+    logit(0.07479) - logit(0.08115),   # TTO2: -0.082
+    logit(0.07470) - logit(0.08115),   # TTO3: -0.083
+])
+_TTO_HR_LIFTS = np.array([
+    logit(0.02979) - logit(0.03162),   # TTO1: -0.062
+    logit(0.03385) - logit(0.03162),   # TTO2: +0.072
+    logit(0.03658) - logit(0.03162),   # TTO3: +0.160
+])
+_BF_PER_TTO = 9
+
 
 def _safe_logit(p: float | np.ndarray) -> float | np.ndarray:
     return logit(np.clip(p, _CLIP_LO, _CLIP_HI))
@@ -147,10 +171,18 @@ def simulate_batter_game(
     umpire_bb_lift: float = 0.0,
     park_hr_lift: float = 0.0,
     weather_k_lift: float = 0.0,
+    tto_k_lifts: np.ndarray | None = None,
+    tto_bb_lifts: np.ndarray | None = None,
+    tto_hr_lifts: np.ndarray | None = None,
     n_sims: int = 10_000,
     random_seed: int = 42,
 ) -> BatterSimulationResult:
     """Run vectorized Monte Carlo batter game simulation.
+
+    Applies times-through-order (TTO) adjustments to starter PAs:
+    the pitcher is sharper the first time through (higher K, lower HR)
+    and fatigues on subsequent passes (lower K, higher HR). TTO lifts
+    default to league-average constants when not provided.
 
     Parameters
     ----------
@@ -188,6 +220,15 @@ def simulate_batter_game(
         Batter BABIP adjustment for BIP outcomes.
     umpire_k_lift, umpire_bb_lift, park_hr_lift, weather_k_lift : float
         Context adjustments.
+    tto_k_lifts : np.ndarray or None
+        Shape (3,) logit lifts for K by TTO block (1st, 2nd, 3rd pass).
+        None uses league-average TTO constants.
+    tto_bb_lifts : np.ndarray or None
+        Shape (3,) logit lifts for BB by TTO block.
+        None uses league-average TTO constants.
+    tto_hr_lifts : np.ndarray or None
+        Shape (3,) logit lifts for HR by TTO block.
+        None uses league-average TTO constants.
     n_sims : int
         Number of simulations.
     random_seed : int
@@ -211,6 +252,11 @@ def simulate_batter_game(
     batter_k = _resample(batter_k_rate_samples)
     batter_bb = _resample(batter_bb_rate_samples)
     batter_hr = _resample(batter_hr_rate_samples)
+
+    # Resolve TTO lifts: use caller-provided or league-average defaults
+    eff_tto_k = tto_k_lifts if tto_k_lifts is not None else _TTO_K_LIFTS
+    eff_tto_bb = tto_bb_lifts if tto_bb_lifts is not None else _TTO_BB_LIFTS
+    eff_tto_hr = tto_hr_lifts if tto_hr_lifts is not None else _TTO_HR_LIFTS
 
     # --- 1. Draw total PAs and starter BF ---
     total_pa = draw_total_pa(batting_order, rng, n_sims)
@@ -263,28 +309,35 @@ def simulate_batter_game(
         global_pos = batting_order + 9 * pa_num
         vs_starter = active & (global_pos <= starter_bf)
 
+        # Determine TTO block for this PA (scalar since global_pos is scalar)
+        # global_pos 1-9: TTO1, 10-18: TTO2, 19+: TTO3
+        tto_block = min((global_pos - 1) // _BF_PER_TTO, 2)
+        tto_k = eff_tto_k[tto_block]
+        tto_bb = eff_tto_bb[tto_block]
+        tto_hr = eff_tto_hr[tto_block]
+
         # Build rates: use batter posteriors as base,
-        # add pitcher quality lift + matchup lift
+        # add pitcher quality lift + matchup lift + TTO lift
         k_logit_base = _safe_logit(batter_k[active])
         bb_logit_base = _safe_logit(batter_bb[active])
         hr_logit_base = _safe_logit(batter_hr[active])
 
-        # Pitcher quality + matchup lifts
+        # Pitcher quality + matchup + TTO lifts (TTO only for starter PAs)
         vs_starter_active = vs_starter[active]
 
         k_pitcher_lift = np.where(
             vs_starter_active,
-            starter_k_lift + matchup_k_lift,
+            starter_k_lift + matchup_k_lift + tto_k,
             bullpen_k_lift,
         )
         bb_pitcher_lift = np.where(
             vs_starter_active,
-            starter_bb_lift + matchup_bb_lift,
+            starter_bb_lift + matchup_bb_lift + tto_bb,
             bullpen_bb_lift,
         )
         hr_pitcher_lift = np.where(
             vs_starter_active,
-            starter_hr_lift + matchup_hr_lift,
+            starter_hr_lift + matchup_hr_lift + tto_hr,
             bullpen_hr_lift,
         )
 
