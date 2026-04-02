@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from datetime import timedelta
 
 import numpy as np
@@ -14,6 +15,55 @@ from utils.archetype_names import get_pitch_archetype_name
 # TTL for cached parquet data — ensures dashboard picks up fresh precompute
 # output within 5 minutes without manual cache clearing / restart.
 _DATA_TTL = timedelta(minutes=5)
+
+
+class LazyNpzDict:
+    """Dict-like wrapper that loads NPZ arrays on demand.
+
+    Avoids materializing all posterior sample arrays into memory at once.
+    The underlying ``NpzFile`` decompresses individual arrays only when
+    accessed, so peak memory is proportional to the number of players
+    actually viewed rather than the full file.
+    """
+
+    def __init__(self, path: Path):
+        self._path = path
+        self._npz: np.lib.npyio.NpzFile | None = None
+        self._keys: list[str] | None = None
+
+    def _open(self) -> None:
+        if self._npz is None:
+            self._npz = np.load(self._path)
+            self._keys = list(self._npz.files)
+
+    def __contains__(self, key: object) -> bool:
+        self._open()
+        return str(key) in self._keys  # type: ignore[arg-type]
+
+    def __getitem__(self, key: str) -> np.ndarray:
+        self._open()
+        return self._npz[str(key)]  # type: ignore[index]
+
+    def get(self, key: str, default: np.ndarray | None = None) -> np.ndarray | None:
+        if str(key) in self:
+            return self[key]
+        return default
+
+    def keys(self) -> list[str]:
+        self._open()
+        return self._keys  # type: ignore[return-value]
+
+    def __len__(self) -> int:
+        self._open()
+        return len(self._keys)  # type: ignore[arg-type]
+
+    def __bool__(self) -> bool:
+        self._open()
+        return len(self._keys) > 0  # type: ignore[arg-type]
+
+    def __iter__(self):
+        self._open()
+        return iter(self._keys)  # type: ignore[arg-type]
 
 
 @st.cache_data(ttl=timedelta(hours=1))
@@ -31,31 +81,28 @@ def load_projections(player_type: str) -> pd.DataFrame:
     return pd.read_parquet(path)
 
 
-@st.cache_data(ttl=_DATA_TTL)
-def load_k_samples() -> dict[str, np.ndarray]:
+@st.cache_resource(ttl=_DATA_TTL)
+def load_k_samples() -> LazyNpzDict | dict:
     path = DASHBOARD_DIR / "pitcher_k_samples.npz"
     if not path.exists():
         return {}
-    data = np.load(path)
-    return {k: data[k] for k in data.files}
+    return LazyNpzDict(path)
 
 
-@st.cache_data(ttl=_DATA_TTL)
-def load_bb_samples() -> dict[str, np.ndarray]:
+@st.cache_resource(ttl=_DATA_TTL)
+def load_bb_samples() -> LazyNpzDict | dict:
     path = DASHBOARD_DIR / "pitcher_bb_samples.npz"
     if not path.exists():
         return {}
-    data = np.load(path)
-    return {k: data[k] for k in data.files}
+    return LazyNpzDict(path)
 
 
-@st.cache_data(ttl=_DATA_TTL)
-def load_hr_samples() -> dict[str, np.ndarray]:
+@st.cache_resource(ttl=_DATA_TTL)
+def load_hr_samples() -> LazyNpzDict | dict:
     path = DASHBOARD_DIR / "pitcher_hr_samples.npz"
     if not path.exists():
         return {}
-    data = np.load(path)
-    return {k: data[k] for k in data.files}
+    return LazyNpzDict(path)
 
 
 @st.cache_data(ttl=_DATA_TTL)
@@ -774,31 +821,28 @@ def season_selector(
 # Game Simulator Data (Layer 3 v2)
 # -----------------------------------------------------------------------
 
-@st.cache_data(ttl=_DATA_TTL)
-def load_hitter_k_samples() -> dict[str, np.ndarray]:
+@st.cache_resource(ttl=_DATA_TTL)
+def load_hitter_k_samples() -> LazyNpzDict | dict:
     path = DASHBOARD_DIR / "hitter_k_samples.npz"
     if not path.exists():
         return {}
-    data = np.load(path)
-    return {k: data[k] for k in data.files}
+    return LazyNpzDict(path)
 
 
-@st.cache_data(ttl=_DATA_TTL)
-def load_hitter_bb_samples() -> dict[str, np.ndarray]:
+@st.cache_resource(ttl=_DATA_TTL)
+def load_hitter_bb_samples() -> LazyNpzDict | dict:
     path = DASHBOARD_DIR / "hitter_bb_samples.npz"
     if not path.exists():
         return {}
-    data = np.load(path)
-    return {k: data[k] for k in data.files}
+    return LazyNpzDict(path)
 
 
-@st.cache_data(ttl=_DATA_TTL)
-def load_hitter_hr_samples() -> dict[str, np.ndarray]:
+@st.cache_resource(ttl=_DATA_TTL)
+def load_hitter_hr_samples() -> LazyNpzDict | dict:
     path = DASHBOARD_DIR / "hitter_hr_samples.npz"
     if not path.exists():
         return {}
-    data = np.load(path)
-    return {k: data[k] for k in data.files}
+    return LazyNpzDict(path)
 
 
 @st.cache_data(ttl=_DATA_TTL)
