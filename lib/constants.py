@@ -3,8 +3,6 @@ Pitch-type mappings, event definitions, zone boundaries, and league-average
 priors for the Bayesian projection system.
 
 All constants derived from the actual mlb_fantasy.production schema.
-
-Synced from: player_profiles/src/utils/constants.py
 """
 from __future__ import annotations
 
@@ -246,11 +244,47 @@ LEAGUE_AVG_OVERALL: dict[str, float] = {
     "bb_rate": 0.083,
     "barrel_rate": 0.068,
     "xwoba": 0.315,
+    "woba": 0.315,
     "whiff_rate": 0.25,
     "chase_rate": 0.30,
     "csw_pct": 0.29,
     "hard_hit_rate": 0.33,
+    # Batted ball type rates (2022-2024 pooled, LA-based)
+    "gb_rate": 0.446,   # ground ball: LA < 10°
+    "fb_rate": 0.321,   # fly ball: LA > 25°
+    "hr_per_fb": 0.098, # HR per fly ball
 }
+
+# ---------------------------------------------------------------------------
+# Clip bounds for logit transforms (avoid infinities)
+# ---------------------------------------------------------------------------
+CLIP_LO: float = 1e-6
+CLIP_HI: float = 1 - 1e-6
+
+# ---------------------------------------------------------------------------
+# Game-sim league baselines (used for logit centering)
+# ---------------------------------------------------------------------------
+SIM_LEAGUE_K_RATE: float = 0.226
+SIM_LEAGUE_BB_RATE: float = 0.082
+SIM_LEAGUE_HR_RATE: float = 0.031
+
+# ---------------------------------------------------------------------------
+# BABIP constants
+# ---------------------------------------------------------------------------
+LEAGUE_BABIP_PITCHER: float = 0.292
+LEAGUE_BABIP_BATTER: float = 0.300
+
+# ---------------------------------------------------------------------------
+# HBP rate
+# ---------------------------------------------------------------------------
+LEAGUE_HBP_RATE: float = 0.011
+
+# ---------------------------------------------------------------------------
+# Bullpen baseline rates (game sim defaults)
+# ---------------------------------------------------------------------------
+BULLPEN_K_RATE: float = 0.253
+BULLPEN_BB_RATE: float = 0.084
+BULLPEN_HR_RATE: float = 0.024
 
 # ---------------------------------------------------------------------------
 # Branding — The Data Diamond color palette

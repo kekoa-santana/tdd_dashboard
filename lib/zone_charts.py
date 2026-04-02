@@ -1,12 +1,12 @@
 """
 Pitch location and zone visualization charts.
 
-Three public chart functions for the dashboard:
+Three public chart functions:
 - plot_pitcher_location_heatmap: where a pitcher throws each pitch type
 - plot_hitter_zone_grid: batter whiff vulnerability or damage by zone
 - plot_matchup_overlay: pitcher location density over hitter vulnerability
 
-Synced from: player_profiles/src/viz/zone_charts.py
+Canonical source. Dashboard copy at: tdd-dashboard/lib/zone_charts.py
 """
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ import matplotlib.colors as mcolors
 import numpy as np
 import pandas as pd
 
-from lib.constants import ZONE_BOUNDARIES, ZONE_GRID
-from lib.theme import GOLD, EMBER, SAGE, SLATE, CREAM, DARK, add_watermark
+from lib.utils.constants import ZONE_BOUNDARIES, ZONE_GRID
+from lib.viz.theme import GOLD, EMBER, SAGE, SLATE, CREAM, DARK, add_watermark
 
 # Grid geometry
 _N = ZONE_GRID["n_rows"]  # 5
@@ -170,6 +170,23 @@ def plot_pitcher_location_heatmap(
             shading="flat", zorder=2,
         )
 
+        # Annotate cells with pitch count
+        for r in range(_N):
+            for c in range(_N):
+                cell_row = pt_df[
+                    (pt_df["grid_row"] == r) & (pt_df["grid_col"] == c)
+                ]
+                if not cell_row.empty:
+                    cnt = int(cell_row["pitches"].iloc[0])
+                    if cnt >= 5:
+                        cx = (_X_EDGES[c] + _X_EDGES[c + 1]) / 2
+                        cz = (_Z_EDGES[r] + _Z_EDGES[r + 1]) / 2
+                        ax.text(
+                            cx, cz, str(cnt), color=CREAM,
+                            ha="center", va="center", fontsize=6,
+                            alpha=0.7, zorder=6,
+                        )
+
         _draw_zone_frame(ax)
         stand_label = f" vs {'LHH' if batter_stand == 'L' else 'RHH'}" if batter_stand else ""
         ax.set_title(f"{pt}{stand_label}", color=CREAM, fontsize=9, fontweight="bold")
@@ -182,6 +199,7 @@ def plot_pitcher_location_heatmap(
     title = f"{pitcher_name} — Pitch Location" if pitcher_name else "Pitch Location"
     fig.suptitle(title, color=GOLD, fontsize=11, fontweight="bold", y=1.02)
     fig.tight_layout()
+    add_watermark(fig)
     return fig
 
 
@@ -199,7 +217,6 @@ def plot_hitter_zone_grid(
     zone_df : pd.DataFrame
         Filtered to one batter. Columns: batter_stand, grid_row, grid_col,
         pitches, swings, whiffs, bip, xwoba_sum, xwoba_count, hard_hits, barrels.
-        Optionally includes pitch_type column for filtering.
     metric : str
         'whiff_rate' or 'xwoba'.
     batter_name : str
@@ -208,7 +225,6 @@ def plot_hitter_zone_grid(
         Filter to 'L' or 'R'. None = all combined.
     pitch_types : list[str] | None
         Filter to specific pitch types. Requires pitch_type column in zone_df.
-        If None or empty, aggregates across all pitch types (default behavior).
 
     Returns
     -------
@@ -228,6 +244,7 @@ def plot_hitter_zone_grid(
             ax.text(0.5, 0.5, "No data for selected pitch types", color=SLATE,
                     ha="center", va="center", transform=ax.transAxes, fontsize=9)
             _draw_zone_frame(ax)
+            add_watermark(fig)
             fig.tight_layout()
             return fig
 
@@ -254,7 +271,7 @@ def plot_hitter_zone_grid(
     if metric == "whiff_rate":
         agg["value"] = np.where(agg["swings"] >= 10, agg["whiffs"] / agg["swings"], np.nan)
         label = "Whiff%"
-        # Diverging: SAGE (low whiff) → neutral → EMBER (high whiff)
+        # Diverging: SAGE (low whiff) -> neutral -> EMBER (high whiff)
         cmap = mcolors.LinearSegmentedColormap.from_list(
             "whiff_div", [SAGE, "#2a2a2a", EMBER], N=256
         )
@@ -270,7 +287,7 @@ def plot_hitter_zone_grid(
             np.nan,
         )
         label = "xwOBA"
-        # Diverging: EMBER (low = pitcher wins) → neutral → SAGE (high = hitter wins)
+        # Diverging: EMBER (low = pitcher wins) -> neutral -> SAGE (high = hitter wins)
         cmap = mcolors.LinearSegmentedColormap.from_list(
             "xwoba_div", [EMBER, "#2a2a2a", SAGE], N=256
         )
@@ -292,14 +309,17 @@ def plot_hitter_zone_grid(
         cmap=cmap, norm=norm, shading="flat", zorder=2,
     )
 
-    # Dim overlay for cells with insufficient data
-    from matplotlib.patches import Rectangle as Rect
+    # Alpha overlay for small samples
     for r in range(_N):
         for c in range(_N):
             n_samp = sample_grid[r, c] if not np.isnan(sample_grid[r, c]) else 0
             val = grid[r, c]
+            cx = (_X_EDGES[c] + _X_EDGES[c + 1]) / 2
+            cz = (_Z_EDGES[r] + _Z_EDGES[r + 1]) / 2
 
             if np.isnan(val) or n_samp < min_sample:
+                # Dim overlay for insufficient data
+                from matplotlib.patches import Rectangle as Rect
                 rect = Rect(
                     (_X_EDGES[c], _Z_EDGES[r]),
                     _X_EDGES[c + 1] - _X_EDGES[c],
@@ -307,6 +327,11 @@ def plot_hitter_zone_grid(
                     facecolor=DARK, alpha=0.7, zorder=3,
                 )
                 ax.add_patch(rect)
+                ax.text(cx, cz, "--", color=SLATE, ha="center", va="center",
+                        fontsize=7, alpha=0.5, zorder=6)
+            else:
+                ax.text(cx, cz, fmt(val), color=CREAM, ha="center", va="center",
+                        fontsize=7, fontweight="bold", zorder=6)
 
     _draw_zone_frame(ax)
 
@@ -316,6 +341,7 @@ def plot_hitter_zone_grid(
     title = f"{batter_name}{stand_label} — {label}" if batter_name else label
     ax.set_title(title, color=GOLD, fontsize=10, fontweight="bold", pad=8)
 
+    add_watermark(fig)
     fig.tight_layout()
     return fig
 
@@ -327,18 +353,8 @@ def plot_matchup_overlay(
     pitcher_name: str = "",
     hitter_name: str = "",
     batter_stand: str | None = None,
-    pitch_display_name: str | None = None,
 ) -> plt.Figure:
-    """Two-layer matchup zone chart.
-
-    Layer 1 (KDE): Pitcher location density as a smooth gold heatmap with
-    transparency — bright where the pitcher concentrates, fading to
-    transparent where he doesn't.
-
-    Layer 2 (dashed grid): Hitter vulnerability on the 5×5 grid. Dashed
-    borders colored sage (pitcher advantage — hitter whiffs) or ember
-    (hitter advantage — hitter handles it). Danger zones (low density +
-    hitter strong) get a thicker ember dash.
+    """Overlay pitcher location density on hitter whiff vulnerability.
 
     Parameters
     ----------
@@ -354,23 +370,16 @@ def plot_matchup_overlay(
         For chart title.
     batter_stand : str | None
         Filter to 'L' or 'R'. None = all combined.
-    pitch_display_name : str | None
-        Full display name (e.g. "4-Seam Fastball"). Falls back to pitch_type.
 
     Returns
     -------
     plt.Figure
     """
-    from matplotlib.patches import Rectangle as Rect
-    from scipy.stats import gaussian_kde
-
-    pt_label = pitch_display_name or pitch_type
-
-    fig, ax = plt.subplots(figsize=(3.2, 3.5))
+    fig, ax = plt.subplots(figsize=(4, 4))
     fig.patch.set_facecolor(DARK)
     ax.set_facecolor(DARK)
 
-    # --- Hitter whiff vulnerability (grid-based) ---
+    # --- Hitter whiff vulnerability background ---
     h_df = hitter_zone_df.copy()
     if batter_stand:
         h_df = h_df[h_df["batter_stand"] == batter_stand]
@@ -378,106 +387,67 @@ def plot_matchup_overlay(
     h_agg["whiff_rate"] = np.where(
         h_agg["swings"] >= 10, h_agg["whiffs"] / h_agg["swings"], np.nan
     )
-    whiff_grid = _build_grid(h_agg, "whiff_rate")
 
-    # --- Layer 1: Pitcher density KDE (gold, transparent → opaque) ---
+    whiff_grid = _build_grid(h_agg, "whiff_rate")
+    cmap_bg = mcolors.LinearSegmentedColormap.from_list(
+        "whiff_bg", [SAGE, "#1a1a1a", EMBER], N=256
+    )
+    norm = mcolors.TwoSlopeNorm(vcenter=0.25, vmin=0.10, vmax=0.45)
+
+    ax.pcolormesh(
+        _X_EDGES, _Z_EDGES, whiff_grid,
+        cmap=cmap_bg, norm=norm, shading="flat", zorder=1, alpha=0.5,
+    )
+
+    # --- Pitcher location density overlay ---
     p_df = pitcher_loc_df.copy()
     p_df = p_df[p_df["pitch_type"] == pitch_type]
     if batter_stand:
         p_df = p_df[p_df["batter_stand"] == batter_stand]
-    p_agg = p_df.groupby(["grid_row", "grid_col"])["pitches"].sum().reset_index()
 
-    # Reconstruct point cloud from grid counts for KDE
-    points_x: list[float] = []
-    points_z: list[float] = []
-    for _, row in p_agg.iterrows():
-        r, c = int(row["grid_row"]), int(row["grid_col"])
-        if 0 <= r < _N and 0 <= c < _N:
+    p_agg = p_df.groupby(["grid_row", "grid_col"])["pitches"].sum().reset_index()
+    total_pitches = p_agg["pitches"].sum()
+
+    if total_pitches > 0:
+        max_pitches = p_agg["pitches"].max()
+        for _, row in p_agg.iterrows():
+            r, c = int(row["grid_row"]), int(row["grid_col"])
+            cnt = int(row["pitches"])
+            if cnt < 3:
+                continue
             cx = (_X_EDGES[c] + _X_EDGES[c + 1]) / 2
             cz = (_Z_EDGES[r] + _Z_EDGES[r + 1]) / 2
-            cnt = int(row["pitches"])
-            points_x.extend([cx] * cnt)
-            points_z.extend([cz] * cnt)
-
-    # Evaluate KDE on fine grid
-    n_fine = 80
-    xi = np.linspace(_X_MIN, _X_MAX, n_fine)
-    zi = np.linspace(_Z_MIN, _Z_MAX, n_fine)
-    Xi, Zi = np.meshgrid(xi, zi)
-
-    if len(points_x) >= 5:
-        kde = gaussian_kde(np.vstack([points_x, points_z]), bw_method=0.3)
-        density_fine = kde(np.vstack([Xi.ravel(), Zi.ravel()])).reshape(Xi.shape)
-        density_fine /= density_fine.max()  # normalize to [0, 1]
-    else:
-        density_fine = np.zeros_like(Xi)
-
-    # Gold KDE with transparency: alpha scales with density
-    gold_rgb = mcolors.to_rgb(GOLD)
-    rgba = np.zeros((*Xi.shape, 4))
-    rgba[:, :, 0] = gold_rgb[0]
-    rgba[:, :, 1] = gold_rgb[1]
-    rgba[:, :, 2] = gold_rgb[2]
-    rgba[:, :, 3] = np.clip(density_fine * 0.85, 0, 0.85)
-
-    ax.imshow(
-        rgba, extent=[_X_MIN, _X_MAX, _Z_MIN, _Z_MAX],
-        origin="lower", aspect="equal", zorder=2,
-        interpolation="bilinear",
-    )
-
-    # --- Layer 2: Hitter vulnerability grid (dashed borders) ---
-    # Compute grid-level density for danger zone detection
-    density_grid = _build_grid(p_agg, "pitches") if not p_agg.empty else np.zeros((_N, _N))
-    density_grid = np.where(np.isnan(density_grid), 0.0, density_grid)
-    total_pitches = density_grid.sum()
-    if total_pitches > 0:
-        density_frac = density_grid / total_pitches
-    else:
-        density_frac = np.zeros((_N, _N))
-    density_vals = density_frac[density_frac > 0]
-    density_q25 = np.percentile(density_vals, 25) if len(density_vals) > 0 else 0.0
-
-    for r in range(_N):
-        for c in range(_N):
-            whiff = whiff_grid[r, c]
-            if np.isnan(whiff):
-                continue
-
-            dens = density_frac[r, c]
-            is_danger = dens <= density_q25 and whiff < 0.20
-
-            # Color: sage = pitcher advantage (high whiff), ember = hitter advantage
-            if whiff >= 0.30:
-                color = SAGE
-            elif whiff <= 0.18:
-                color = EMBER
-            else:
-                color = SLATE
-
-            lw = 2.0 if is_danger else 1.2
-            ls = (0, (4, 3)) if not is_danger else (0, (3, 2))
-
-            border = Rect(
-                (_X_EDGES[c], _Z_EDGES[r]),
-                _X_EDGES[c + 1] - _X_EDGES[c],
-                _Z_EDGES[r + 1] - _Z_EDGES[r],
-                facecolor="none",
-                edgecolor=color,
-                linewidth=lw,
-                linestyle=ls,
-                alpha=0.9 if is_danger else 0.6,
-                zorder=5,
+            # Size proportional to density, min 30, max 300
+            size = 30 + 270 * (cnt / max_pitches)
+            ax.scatter(
+                cx, cz, s=size, c=GOLD, alpha=0.7,
+                edgecolors=CREAM, linewidth=0.5, zorder=4,
             )
-            ax.add_patch(border)
+            ax.text(
+                cx, cz, str(cnt), color=DARK, ha="center", va="center",
+                fontsize=6, fontweight="bold", zorder=5,
+            )
 
     _draw_zone_frame(ax)
 
+    # Whiff rate annotations (lighter, behind scatter)
+    for r in range(_N):
+        for c in range(_N):
+            val = whiff_grid[r, c]
+            if not np.isnan(val):
+                cx = (_X_EDGES[c] + _X_EDGES[c + 1]) / 2
+                cz = _Z_EDGES[r] + 0.05  # slightly below center
+                ax.text(
+                    cx, cz, f"{val:.0%}", color=SLATE,
+                    ha="center", va="bottom", fontsize=5, alpha=0.5, zorder=3,
+                )
+
     stand_label = f" vs {'LHH' if batter_stand == 'L' else 'RHH'}" if batter_stand else ""
-    title = f"{pitcher_name} {pt_label}{stand_label}"
+    title = f"{pitcher_name} {pitch_type}{stand_label}"
     subtitle = f"vs {hitter_name}" if hitter_name else ""
     ax.set_title(f"{title}\n{subtitle}" if subtitle else title,
                  color=GOLD, fontsize=9, fontweight="bold", pad=8)
 
-    fig.tight_layout(pad=1.2)
+    add_watermark(fig)
+    fig.tight_layout()
     return fig

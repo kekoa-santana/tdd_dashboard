@@ -46,11 +46,19 @@ def page_matchup_explorer() -> None:
     """Head-to-head pitcher vs hitter matchup breakdown."""
     from lib.matchup import (
         score_matchup,
+        score_matchup_advantage,
         score_matchup_bb,
         score_matchup_by_archetype,
         score_matchup_hr,
     )
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
+    from services.data_loader import (
+        load_batter_platoon_splits,
+        load_batter_glicko,
+        load_pitcher_glicko,
+        load_pitcher_gb_pct,
+        load_matchup_baselines,
+    )
 
     st.markdown('<div class="tdd-section-hdr">Matchup Explorer</div>',
                 unsafe_allow_html=True)
@@ -184,10 +192,9 @@ def page_matchup_explorer() -> None:
     else:
         matchup_mode = "Pitch-Type"
 
-    # Score the matchup
+    # Score the matchup (archetype or pitch-type)
     using_archetype = matchup_mode == "Archetype"
     if using_archetype:
-        # Convert baselines_arch DataFrame to dict format
         baselines_arch_dict: dict[int, dict[str, float]] = {}
         for _, brow in baselines_arch_df.iterrows():
             arch_id = int(brow["pitch_archetype"])
@@ -213,53 +220,87 @@ def page_matchup_explorer() -> None:
         if not str_filtered.empty else pd.DataFrame()
     )
 
-    # BB/HR lifts (pitch-type model — same framing as Today’s Games matchup tab)
-    bb_hdr = score_matchup_bb(pitcher_id, batter_id, arsenal_df, vuln_filtered, baselines_pt)
-    hr_hdr = score_matchup_hr(pitcher_id, batter_id, arsenal_df, vuln_filtered, baselines_pt)
-    bb_lift_h = float(bb_hdr.get("matchup_bb_logit_lift", 0.0) or 0.0)
-    hr_lift_h = float(hr_hdr.get("matchup_hr_logit_lift", 0.0) or 0.0)
-    bb_lift_h = 0.0 if np.isnan(bb_lift_h) else bb_lift_h
-    hr_lift_h = 0.0 if np.isnan(hr_lift_h) else hr_lift_h
+    # --- Unified matchup advantage ---
+    # Load auxiliary data for enriched scoring
+    platoon_df = load_batter_platoon_splits()
+    pitcher_glicko_df = load_pitcher_glicko()
+    batter_glicko_df = load_batter_glicko()
+    pitcher_gb_df = load_pitcher_gb_pct()
+    matchup_baselines = load_matchup_baselines()
 
-    # --- Compute contact-quality adjustment ---
-    # Usage-weighted xwOBA and hard-hit delta vs league baselines
-    p_ars = arsenal_df[
-        (arsenal_df["pitcher_id"] == pitcher_id) & (arsenal_df["pitches"] >= 20)
-    ].copy()
-    h_str_filt = str_filtered[str_filtered["batter_id"] == batter_id] if not str_filtered.empty else pd.DataFrame()
-    damage_score = 0.0
-    total_usage = p_ars["usage_pct"].sum() if not p_ars.empty else 0.0
-    if total_usage > 0 and not h_str_filt.empty:
-        for _, prow in p_ars.iterrows():
-            pt = prow["pitch_type"]
-            usage_w = prow["usage_pct"] / total_usage
-            lg = LEAGUE_AVG_BY_PITCH_TYPE.get(pt, {})
-            lg_xwoba = lg.get("xwoba_contact", 0.320)
-            lg_hh = lg.get("hard_hit_rate", 0.33)
-            s_row = h_str_filt[h_str_filt["pitch_type"] == pt]
-            if s_row.empty:
-                continue
-            h_xwoba = s_row["xwoba_contact"].iloc[0] if "xwoba_contact" in s_row.columns else np.nan
-            h_hh = s_row["hard_hit_rate"].iloc[0] if "hard_hit_rate" in s_row.columns else np.nan
-            if pd.notna(h_xwoba):
-                damage_score += usage_w * (h_xwoba - lg_xwoba)
-            if pd.notna(h_hh):
-                damage_score += usage_w * (h_hh - lg_hh) * 0.5
+    # Build batter platoon splits dict
+    batter_platoon_dict = None
+    if not platoon_df.empty:
+        bp = platoon_df[platoon_df["batter_id"] == batter_id]
+        if not bp.empty:
+            batter_platoon_dict = {}
+            for _, row in bp.iterrows():
+                batter_platoon_dict[row["pitch_hand"]] = {
+                    "k_rate": float(row["k_rate"]),
+                    "bb_rate": float(row["bb_rate"]),
+                    "pa": int(row["pa"]),
+                }
+            batter_platoon_dict["overall_k_rate"] = float(bp["overall_k_rate"].iloc[0])
+            batter_platoon_dict["overall_bb_rate"] = float(bp["overall_bb_rate"].iloc[0])
 
-    # --- Matchup header ---
-    # Blend whiff lift (pitcher-favorable when positive) with damage score
-    # (hitter-favorable when positive). Convert damage to same scale as logit lift.
-    lift = matchup["matchup_k_logit_lift"]
-    blended_edge = lift - damage_score * 6.0  # scale damage to logit-lift magnitude
-    if blended_edge > 0.15:
-        edge_label = "Pitcher Advantage"
-        edge_color = SAGE
-    elif blended_edge < -0.15:
-        edge_label = "Hitter Advantage"
-        edge_color = EMBER
-    else:
-        edge_label = "Neutral Matchup"
-        edge_color = SLATE
+    # Look up Glicko ratings
+    p_glicko_mu = None
+    if not pitcher_glicko_df.empty:
+        pg = pitcher_glicko_df[pitcher_glicko_df["pitcher_id"] == pitcher_id]
+        if not pg.empty:
+            p_glicko_mu = float(pg["mu"].iloc[0])
+    b_glicko_mu = None
+    if not batter_glicko_df.empty:
+        bg = batter_glicko_df[batter_glicko_df["batter_id"] == batter_id]
+        if not bg.empty:
+            b_glicko_mu = float(bg["mu"].iloc[0])
+
+    # Look up pitcher GB% and batter GB/FB rates
+    pitcher_gb_val = None
+    if not pitcher_gb_df.empty:
+        pgb = pitcher_gb_df[pitcher_gb_df["pitcher_id"] == pitcher_id]
+        if not pgb.empty:
+            pitcher_gb_val = float(pgb["gb_pct"].iloc[0])
+    batter_gb_val = None
+    batter_fb_val = None
+    if not hitter_proj.empty:
+        hp = hitter_proj[hitter_proj["batter_id"] == batter_id]
+        if not hp.empty:
+            batter_gb_val = float(hp["gb_rate"].iloc[0]) if "gb_rate" in hp.columns else None
+            batter_fb_val = float(hp["fb_rate"].iloc[0]) if "fb_rate" in hp.columns else None
+
+    # Build matchup scales dict
+    scales_dict = None
+    if matchup_baselines:
+        scales_dict = {
+            "trajectory_scale": matchup_baselines.get("trajectory_scale", 5.0),
+            "glicko_scale": matchup_baselines.get("glicko_scale", 0.001),
+        }
+
+    advantage_result = score_matchup_advantage(
+        pitcher_id, batter_id, arsenal_df, vuln_filtered, baselines_pt,
+        hitter_str=str_filtered if not str_filtered.empty else None,
+        pitcher_hand=pitcher_hand,
+        batter_platoon_splits=batter_platoon_dict,
+        pitcher_gb_pct=pitcher_gb_val,
+        batter_gb_rate=batter_gb_val,
+        batter_fb_rate=batter_fb_val,
+        pitcher_glicko_mu=p_glicko_mu,
+        batter_glicko_mu=b_glicko_mu,
+        league_platoon=matchup_baselines if matchup_baselines else None,
+        matchup_scales=scales_dict,
+    )
+
+    # Extract results for display
+    lift = advantage_result["breakdown"]["k_lift"]
+    bb_lift_h = advantage_result["breakdown"]["bb_lift"]
+    hr_lift_h = advantage_result["breakdown"]["hr_lift"]
+    edge_label = {
+        "pitcher": "Pitcher Advantage",
+        "hitter": "Hitter Advantage",
+        "neutral": "Neutral Matchup",
+    }[advantage_result["advantage"]]
+    edge_color = {"pitcher": SAGE, "hitter": EMBER, "neutral": SLATE}[advantage_result["advantage"]]
 
     pitcher_label = "LHP" if pitcher_hand == "L" else "RHP"
     hitter_label = "LHH" if hitter_hand == "L" else "RHH"
@@ -275,8 +316,9 @@ def page_matchup_explorer() -> None:
     p_headshot = headshot_html(pitcher_id, size=50)
     h_headshot = headshot_html(batter_id, size=50)
     _edge_expl = (
-        "Badge blends matchup whiff lift with contact quality (xwOBA / hard-hit vs league). "
-        "K/BB/HR logit lifts use the pitch-type model (same family as the schedule matchup tab)."
+        f"Unified matchup advantage: {advantage_result['reason']}. "
+        f"Signals: K/BB/HR pitch-type lifts, platoon, primary pitch, contact quality, "
+        f"trajectory, skill rating. Confidence: {advantage_result['confidence']}."
     )
     _k_logit_tip = (
         f"K lift (logit scale): {lift:+.3f} — technical scale from the pitch-type matchup model; "

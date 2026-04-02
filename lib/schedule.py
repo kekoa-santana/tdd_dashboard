@@ -3,8 +3,6 @@ Schedule and lineup data for in-season dashboard.
 
 Fetches today's games, probable pitchers, and lineups from the MLB Stats API.
 Falls back gracefully when data isn't available.
-
-Synced from: player_profiles/src/data/schedule.py
 """
 from __future__ import annotations
 
@@ -18,39 +16,6 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 MLB_API_BASE = "https://statsapi.mlb.com/api/v1"
-
-
-def fetch_standings(season: int | None = None) -> dict[str, tuple[int, int]]:
-    """Fetch current W-L records from the MLB Stats API.
-
-    Returns a dict mapping team abbreviation to (wins, losses).
-    """
-    import urllib.request
-
-    if season is None:
-        season = date.today().year
-    url = (
-        f"{MLB_API_BASE}/standings"
-        f"?leagueId=103,104&season={season}&standingsTypes=regularSeason"
-        f"&hydrate=team"
-    )
-    try:
-        with urllib.request.urlopen(url, timeout=15) as resp:
-            data = json.loads(resp.read().decode())
-    except Exception as e:
-        logger.warning("Failed to fetch standings: %s", e)
-        return {}
-
-    records: dict[str, tuple[int, int]] = {}
-    for division in data.get("records", []):
-        for team in division.get("teamRecords", []):
-            abbr = team.get("team", {}).get("abbreviation", "")
-            if abbr:
-                records[abbr] = (
-                    int(team.get("wins", 0)),
-                    int(team.get("losses", 0)),
-                )
-    return records
 
 
 def fetch_todays_schedule(
@@ -71,8 +36,7 @@ def fetch_todays_schedule(
         home_team_id, home_team_name, home_abbr,
         away_pitcher_id, away_pitcher_name,
         home_pitcher_id, home_pitcher_name,
-        venue_id, venue_name, hp_umpire_name,
-        weather_temp, weather_wind, weather_condition.
+        hp_umpire_name, venue_id.
     """
     import urllib.request
 
@@ -82,7 +46,7 @@ def fetch_todays_schedule(
     url = (
         f"{MLB_API_BASE}/schedule"
         f"?date={game_date}&sportId=1"
-        f"&hydrate=probablePitcher,team,venue,weather,officials"
+        f"&hydrate=probablePitcher,team,officials"
     )
 
     try:
@@ -125,17 +89,11 @@ def fetch_todays_schedule(
             away_pp = away.get("probablePitcher", {})
             home_pp = home.get("probablePitcher", {})
 
-            # Venue
-            venue = game.get("venue", {})
-
-            # Weather
-            weather = game.get("weather", {})
-
-            # HP umpire
-            hp_ump = ""
+            # Home plate umpire (available once crew is assigned, usually day-of)
+            hp_umpire_name = ""
             for official in game.get("officials", []):
                 if official.get("officialType") == "Home Plate":
-                    hp_ump = official.get("official", {}).get("fullName", "")
+                    hp_umpire_name = official.get("official", {}).get("fullName", "")
                     break
 
             rows.append({
@@ -153,12 +111,8 @@ def fetch_todays_schedule(
                 "away_pitcher_name": away_pp.get("fullName", ""),
                 "home_pitcher_id": home_pp.get("id"),
                 "home_pitcher_name": home_pp.get("fullName", ""),
-                "venue_id": venue.get("id"),
-                "venue_name": venue.get("name", ""),
-                "hp_umpire_name": hp_ump,
-                "weather_temp": weather.get("temp", ""),
-                "weather_wind": weather.get("wind", ""),
-                "weather_condition": weather.get("condition", ""),
+                "hp_umpire_name": hp_umpire_name,
+                "venue_id": game.get("venue", {}).get("id"),
             })
 
     df = pd.DataFrame(rows)
@@ -248,167 +202,3 @@ def fetch_all_lineups(
         return pd.DataFrame()
 
     return pd.concat(frames, ignore_index=True)
-
-
-def fetch_live_boxscores(
-    schedule_df: pd.DataFrame,
-) -> pd.DataFrame:
-    """Fetch live player stats for all in-progress or final games.
-
-    Returns
-    -------
-    pd.DataFrame
-        Columns: game_pk, player_id, player_name, player_type,
-        team_abbr, game_status, K, H, HR, BB, TB (batters),
-        K, IP, H, BB, HR, Outs (pitchers).
-    """
-    import urllib.request
-
-    if schedule_df.empty:
-        return pd.DataFrame()
-
-    # Only fetch for games that are in progress or final
-    active_statuses = {
-        "In Progress", "Final", "Game Over", "Mid Inning",
-        "End Inning", "Top", "Bottom", "Middle",
-    }
-    active = schedule_df[
-        schedule_df["status"].str.contains(
-            "|".join(active_statuses), case=False, na=False,
-        )
-    ] if "status" in schedule_df.columns else schedule_df
-
-    if active.empty:
-        return pd.DataFrame()
-
-    rows: list[dict[str, Any]] = []
-    for gpk in active["game_pk"].unique():
-        url = f"{MLB_API_BASE}/game/{int(gpk)}/boxscore"
-        try:
-            with urllib.request.urlopen(url, timeout=15) as resp:
-                data = json.loads(resp.read().decode())
-        except Exception as e:
-            logger.warning("Failed to fetch boxscore for game %d: %s", gpk, e)
-            continue
-
-        # Determine game status from parent schedule row
-        game_row = active[active["game_pk"] == gpk].iloc[0]
-        game_status = game_row.get("status", "")
-
-        for side in ("away", "home"):
-            team_data = data.get("teams", {}).get(side, {})
-            team_abbr = team_data.get("team", {}).get("abbreviation", "")
-            players = team_data.get("players", {})
-
-            for pid_key, pdata in players.items():
-                person = pdata.get("person", {})
-                pid = person.get("id")
-                name = person.get("fullName", "")
-                stats = pdata.get("stats", {})
-
-                batting = stats.get("batting", {})
-                pitching = stats.get("pitching", {})
-
-                if batting and batting.get("atBats", 0) + batting.get("baseOnBalls", 0) > 0:
-                    rows.append({
-                        "game_pk": gpk,
-                        "player_id": pid,
-                        "player_name": name,
-                        "player_type": "batter",
-                        "team_abbr": team_abbr,
-                        "game_status": game_status,
-                        "actual_K": batting.get("strikeOuts", 0),
-                        "actual_H": batting.get("hits", 0),
-                        "actual_HR": batting.get("homeRuns", 0),
-                        "actual_BB": batting.get("baseOnBalls", 0),
-                        "actual_TB": batting.get("totalBases", 0),
-                    })
-
-                if pitching and pitching.get("inningsPitched"):
-                    ip_str = pitching.get("inningsPitched", "0")
-                    try:
-                        ip_val = float(ip_str)
-                    except (ValueError, TypeError):
-                        ip_val = 0.0
-                    outs = int(ip_val) * 3 + round((ip_val % 1) * 10)
-                    rows.append({
-                        "game_pk": gpk,
-                        "player_id": pid,
-                        "player_name": name,
-                        "player_type": "pitcher",
-                        "team_abbr": team_abbr,
-                        "game_status": game_status,
-                        "actual_K": pitching.get("strikeOuts", 0),
-                        "actual_H": pitching.get("hits", 0),
-                        "actual_HR": pitching.get("homeRuns", 0),
-                        "actual_BB": pitching.get("baseOnBalls", 0),
-                        "actual_TB": 0,
-                        "actual_IP": ip_val,
-                        "actual_Outs": outs,
-                    })
-
-    if not rows:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(rows)
-    logger.info(
-        "Fetched live boxscores: %d player lines across %d games",
-        len(df), df["game_pk"].nunique(),
-    )
-    return df
-
-
-def fetch_recent_transactions(
-    game_date: str | None = None,
-) -> pd.DataFrame:
-    """Fetch today's transactions from the MLB Stats API.
-
-    Parameters
-    ----------
-    game_date : str | None
-        Date as 'YYYY-MM-DD'. Defaults to today.
-
-    Returns
-    -------
-    pd.DataFrame
-        Columns: transaction_id, player_id, player_name, type_code,
-        type_desc, description, date, to_team_name, from_team_name.
-    """
-    import urllib.request
-
-    if game_date is None:
-        game_date = date.today().isoformat()
-
-    url = (
-        f"{MLB_API_BASE}/transactions"
-        f"?startDate={game_date}&endDate={game_date}"
-    )
-
-    try:
-        with urllib.request.urlopen(url, timeout=15) as resp:
-            data = json.loads(resp.read().decode())
-    except Exception as e:
-        logger.warning("Failed to fetch transactions: %s", e)
-        return pd.DataFrame()
-
-    rows = []
-    for txn in data.get("transactions", []):
-        person = txn.get("person") or {}
-        to_team = txn.get("toTeam") or {}
-        from_team = txn.get("fromTeam") or {}
-        rows.append({
-            "transaction_id": txn.get("id"),
-            "player_id": person.get("id"),
-            "player_name": person.get("fullName", ""),
-            "type_code": txn.get("typeCode", ""),
-            "type_desc": txn.get("typeDesc", ""),
-            "description": txn.get("description", ""),
-            "date": txn.get("date", ""),
-            "to_team_name": to_team.get("name", ""),
-            "from_team_name": from_team.get("name", ""),
-        })
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        logger.info("Fetched %d transactions for %s", len(df), game_date)
-    return df

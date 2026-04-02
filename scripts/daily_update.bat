@@ -37,6 +37,7 @@ if %ERRORLEVEL% EQU 0 (
     echo [%date% %time%] Skipping ETL step >> "%LOG_FILE%" 2>&1
 ) else (
     echo [%date% %time%] Running ETL for %YESTERDAY%... >> "%LOG_FILE%" 2>&1
+    cd /d "%ETL_DIR%"
     "%ETL_PYTHON%" "%ETL_DIR%\full_pipeline.py" --start-date %YESTERDAY% --end-date %YESTERDAY% >> "%LOG_FILE%" 2>&1
     if %ERRORLEVEL% NEQ 0 (
         echo [%date% %time%] ETL FAILED with exit code %ERRORLEVEL% >> "%LOG_FILE%" 2>&1
@@ -46,21 +47,10 @@ if %ERRORLEVEL% EQU 0 (
     )
 )
 
-REM ── Step 1b: Precompute daily groups — skip for --schedule-only ──
-echo %* | findstr /i "schedule-only" >nul
-if %ERRORLEVEL% EQU 0 (
-    echo [%date% %time%] Skipping precompute (schedule-only mode) >> "%LOG_FILE%" 2>&1
-) else (
-    echo [%date% %time%] Running daily precompute... >> "%LOG_FILE%" 2>&1
-    cd /d "%PROFILES_DIR%"
-    "%PROFILES_PYTHON%" scripts\precompute_dashboard_data.py --include team,rankings,game_data,traditional,glicko,profiles,game_sim,health >> "%LOG_FILE%" 2>&1
-    if %ERRORLEVEL% NEQ 0 (
-        echo [%date% %time%] Precompute FAILED with exit code %ERRORLEVEL% >> "%LOG_FILE%" 2>&1
-        echo [%date% %time%] Continuing with dashboard update using existing data... >> "%LOG_FILE%" 2>&1
-    ) else (
-        echo [%date% %time%] Precompute completed successfully >> "%LOG_FILE%" 2>&1
-    )
-)
+REM ── Step 1b: Precompute — SKIPPED during season (preseason data is static) ──
+REM   Rankings and team profiles update weekly via --weekly flag on update_in_season.py.
+REM   To re-run preseason precompute manually:
+REM     cd /d "%PROFILES_DIR%" && "%PROFILES_PYTHON%" scripts\precompute_dashboard_data.py --include team,rankings,game_data,traditional,glicko,profiles,game_sim,health
 
 REM ── Step 2: Dashboard update (projections + bookkeeping) ──
 set DASH_ARGS=%*

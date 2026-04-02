@@ -98,6 +98,47 @@ def load_hitter_strength(career: bool = False) -> pd.DataFrame:
     return pd.read_parquet(path)
 
 
+@st.cache_data(ttl=_DATA_TTL)
+def load_batter_platoon_splits() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "batter_platoon_splits.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_pitcher_glicko() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "pitcher_glicko.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_batter_glicko() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "batter_glicko.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_pitcher_gb_pct() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "pitcher_gb_pct.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_matchup_baselines() -> dict:
+    path = DASHBOARD_DIR / "matchup_baselines.json"
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def load_counting(player_type: str) -> pd.DataFrame:
     # Prefer sim-based counting stats (correlated joint distributions)
     sim_path = DASHBOARD_DIR / f"{player_type}_counting_sim.parquet"
