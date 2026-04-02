@@ -17,6 +17,70 @@ logger = logging.getLogger(__name__)
 
 MLB_API_BASE = "https://statsapi.mlb.com/api/v1"
 
+# Abbreviation lookup: MLB team ID -> standard abbreviation
+_TEAM_ABBR: dict[int, str] = {}
+
+
+def _ensure_team_abbr() -> None:
+    """Populate ``_TEAM_ABBR`` from the MLB API (once)."""
+    import urllib.request
+
+    if _TEAM_ABBR:
+        return
+    url = f"{MLB_API_BASE}/teams?sportId=1"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+        for t in data.get("teams", []):
+            _TEAM_ABBR[t["id"]] = t.get("abbreviation", t.get("teamName", ""))
+    except Exception as e:
+        logger.warning("Failed to fetch team abbreviations: %s", e)
+
+
+def fetch_standings(season: int | None = None) -> dict[str, tuple[int, int]]:
+    """Fetch current W-L records from the MLB Stats API.
+
+    Parameters
+    ----------
+    season : int | None
+        Season year. Defaults to the current year.
+
+    Returns
+    -------
+    dict[str, tuple[int, int]]
+        ``{team_abbr: (wins, losses)}`` for every MLB team.
+    """
+    import urllib.request
+
+    if season is None:
+        season = date.today().year
+
+    url = (
+        f"{MLB_API_BASE}/standings"
+        f"?leagueId=103,104&season={season}"
+        f"&standingsTypes=regularSeason"
+    )
+
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:
+        logger.error("Failed to fetch standings: %s", e)
+        return {}
+
+    _ensure_team_abbr()
+
+    standings: dict[str, tuple[int, int]] = {}
+    for record in data.get("records", []):
+        for entry in record.get("teamRecords", []):
+            team_id = entry.get("team", {}).get("id")
+            wins = entry.get("wins", 0)
+            losses = entry.get("losses", 0)
+            abbr = _TEAM_ABBR.get(team_id, entry.get("team", {}).get("name", ""))
+            standings[abbr] = (wins, losses)
+
+    return standings
+
 
 def fetch_todays_schedule(
     game_date: str | None = None,
