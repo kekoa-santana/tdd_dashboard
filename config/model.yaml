@@ -1,0 +1,19 @@
+# Model-related knobs consumed by lib/ (synced with player_profiles where applicable).
+# Full training config lives in player_profiles; the dashboard only needs this subset.
+
+matchup_advantage:
+  # Composite weights (all signals normalized to logit scale before weighting)
+  # Sign convention: positive weight means positive signal value → pitcher advantage
+  weights:
+    k_lift: 1.0
+    bb_lift: -0.4
+    hr_lift: -0.5
+    platoon_lift: 0.3
+    primary_pitch_edge: 0.2
+    damage_score: -0.15
+    trajectory_edge: -0.1
+    glicko_edge: 0.1
+  tiers:
+    strong: 0.30
+    moderate: 0.12
+  platoon_reliability_pa: 200

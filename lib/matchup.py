@@ -1070,7 +1070,8 @@ def score_matchup_for_stat(
 # Unified matchup advantage
 # ---------------------------------------------------------------------------
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# Repo root is parent of lib/ (not grandparent — parents[2] pointed outside tdd-dashboard).
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load_matchup_config() -> dict[str, Any]:
@@ -1097,9 +1098,14 @@ _MATCHUP_CFG_DEFAULTS: dict[str, Any] = {
     "platoon_reliability_pa": 200,
 }
 
+_MATCHUP_MERGED: dict[str, Any] | None = None
+
 
 def _get_matchup_config() -> dict[str, Any]:
-    """Merge YAML config with defaults."""
+    """Merge YAML config with defaults (singleton; YAML read at most once)."""
+    global _MATCHUP_MERGED
+    if _MATCHUP_MERGED is not None:
+        return _MATCHUP_MERGED
     cfg = {**_MATCHUP_CFG_DEFAULTS}
     try:
         loaded = _load_matchup_config()
@@ -1111,6 +1117,7 @@ def _get_matchup_config() -> dict[str, Any]:
             cfg["platoon_reliability_pa"] = loaded["platoon_reliability_pa"]
     except Exception:
         logger.warning("Could not load matchup_advantage config; using defaults")
+    _MATCHUP_MERGED = cfg
     return cfg
 
 

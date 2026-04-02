@@ -276,6 +276,11 @@ _CSS = """
 
 def _diamonds_html(rating: float, fill_color: str = "var(--tdd-gold)") -> str:
     """Build filled/empty diamond symbols for a 0-10 rating."""
+    if pd.isna(rating):
+        return "".join(
+            '<span style="color:var(--tdd-slate); opacity:0.35">&#9671;</span>'
+            for _ in range(10)
+        )
     parts = []
     for i in range(10):
         if i < int(rating) or (i == int(rating) and rating - int(rating) >= 0.5):
@@ -299,6 +304,11 @@ def _rating_val_html(
     of gold to visually distinguish the 2-3 year projected view.
     """
     rating = precomputed_rating if precomputed_rating is not None else score_to_diamonds(score)
+    if pd.isna(rating):
+        return (
+            f'<span class="lb-diamonds">{_diamonds_html(rating)}</span>'
+            f'<span class="lb-rating-num" style="color:{SLATE}">&mdash;</span>'
+        )
     if projected:
         fill = SAGE
         num_color = SAGE

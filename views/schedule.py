@@ -948,6 +948,7 @@ def _render_game_drilldown(
             h_arch_lookup=h_arch_lookup,
             pos_lookup=pos_lookup or {},
             sides_all=sides,
+            str_df=str_df,
         )
 
 
@@ -2282,6 +2283,7 @@ def _render_sim_tab(
     h_arch_lookup: dict[int, str] | None = None,
     pos_lookup: dict[int, str] | None = None,
     sides_all: list[dict] | None = None,
+    str_df: pd.DataFrame | None = None,
 ) -> None:
     """Multi-stat game simulator | pitcher and batter posteriors."""
     from lib.game_sim.simulator import simulate_game
