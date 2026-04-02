@@ -10,7 +10,7 @@ from scipy.stats import gaussian_kde
 
 from config import (
     GOLD, EMBER, SAGE, SLATE, CREAM, DARK,
-    PITCH_DISPLAY, PITCH_TYPE_TO_FAMILY, PITCH_FAMILY_COLORS, PITCH_TYPE_COLORS,
+    PITCH_DISPLAY, PITCH_ORDER, PITCH_TYPE_TO_FAMILY, PITCH_FAMILY_COLORS, PITCH_TYPE_COLORS,
     PRIOR_SEASON, CURRENT_SEASON,
 )
 from lib.theme import add_watermark as _theme_watermark
@@ -1172,4 +1172,246 @@ def create_hitter_zone_plotly(
         margin=dict(l=40, r=40, t=40, b=60),
         height=630, showlegend=False,
     )
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Matchup: whiff comparison chart + location peak captions
+# ---------------------------------------------------------------------------
+
+
+def _plate_bucket_label(px: float, pz: float, batter_stand: str | None) -> str:
+    """Short catcher-view bucket (inside/away × height) for tooltips and captions."""
+    from lib.constants import ZONE_BOUNDARIES
+
+    sz_b = ZONE_BOUNDARIES["plate_z_bot_avg"]
+    sz_t = ZONE_BOUNDARIES["plate_z_top_avg"]
+    if pz < sz_b + 0.35:
+        z_lab = "low"
+    elif pz > sz_t - 0.35:
+        z_lab = "high"
+    else:
+        z_lab = "middle"
+    thr = 0.28
+    if batter_stand == "R":
+        if px > thr:
+            x_lab = "in"
+        elif px < -thr:
+            x_lab = "away"
+        else:
+            x_lab = "mid"
+    elif batter_stand == "L":
+        if px < -thr:
+            x_lab = "in"
+        elif px > thr:
+            x_lab = "away"
+        else:
+            x_lab = "mid"
+    else:
+        x_lab = "3B side" if px < -thr else "1B side" if px > thr else "center"
+    return f"{x_lab}, {z_lab}"
+
+
+def matchup_pitcher_peak_caption(
+    location_df: pd.DataFrame,
+    pitch_type: str,
+    batter_stand: str | None,
+) -> str | None:
+    """Densest pitch-location bucket for one pitch type (raw coords or grid)."""
+    from collections import Counter
+
+    from lib.constants import ZONE_GRID
+
+    if location_df.empty or "pitch_type" not in location_df.columns:
+        return None
+    df = location_df[location_df["pitch_type"] == pitch_type].copy()
+    if batter_stand and "batter_stand" in df.columns:
+        df = df[df["batter_stand"] == batter_stand]
+    if df.empty:
+        return None
+
+    _nc = ZONE_GRID["n_cols"]
+    _nr = ZONE_GRID["n_rows"]
+    _xe = np.linspace(ZONE_GRID["x_min"], ZONE_GRID["x_max"], _nc + 1)
+    _ze = np.linspace(ZONE_GRID["z_min"], ZONE_GRID["z_max"], _nr + 1)
+
+    has_raw = "plate_x" in df.columns and "plate_z" in df.columns
+    if has_raw:
+        px = df["plate_x"].dropna().values
+        pz = df["plate_z"].dropna().values
+        if len(px) < 8:
+            return None
+        ci = np.clip(np.searchsorted(_xe, px, side="right") - 1, 0, _nc - 1)
+        ri = np.clip(np.searchsorted(_ze, pz, side="right") - 1, 0, _nr - 1)
+        (r, c), _ = Counter(zip(ri, ci)).most_common(1)[0]
+        r, c = int(r), int(c)
+    else:
+        need = {"grid_row", "grid_col", "pitches"}
+        if not need.issubset(df.columns):
+            return None
+        sub = df.groupby(["grid_row", "grid_col"], as_index=False)["pitches"].sum()
+        if sub.empty or sub["pitches"].max() < 1:
+            return None
+        idx = int(sub["pitches"].idxmax())
+        r, c = int(sub.loc[idx, "grid_row"]), int(sub.loc[idx, "grid_col"])
+        if not (0 <= r < _nr and 0 <= c < _nc):
+            return None
+
+    cx = (_xe[c] + _xe[c + 1]) / 2.0
+    cz = (_ze[r] + _ze[r + 1]) / 2.0
+    return f"Pitcher peak: {_plate_bucket_label(cx, cz, batter_stand)}"
+
+
+def matchup_hitter_zone_peak_caption(
+    zone_df: pd.DataFrame,
+    pitch_type: str | None,
+    batter_stand: str | None,
+    metric: str = "xwoba",
+) -> str | None:
+    """Highest-xwOBA zone bucket (min contact sample)."""
+    from lib.constants import ZONE_GRID
+
+    if zone_df.empty or metric != "xwoba":
+        return None
+    df = zone_df.copy()
+    if batter_stand and "batter_stand" in df.columns:
+        df = df[df["batter_stand"] == batter_stand]
+    if pitch_type and "pitch_type" in df.columns:
+        df = df[df["pitch_type"] == pitch_type]
+    if df.empty:
+        return None
+
+    agg_cols = ["pitches", "xwoba_sum", "xwoba_count"]
+    if not all(c in df.columns for c in ("xwoba_sum", "xwoba_count")):
+        return None
+    agg = df.groupby(["grid_row", "grid_col"], as_index=False)[agg_cols].sum()
+    best_val = -1.0
+    best_r: int | None = None
+    best_c: int | None = None
+    for _, row in agg.iterrows():
+        xc = float(row.get("xwoba_count", 0) or 0)
+        if xc < 8:
+            continue
+        val = float(row["xwoba_sum"]) / xc
+        if val > best_val:
+            best_val = val
+            best_r = int(row["grid_row"])
+            best_c = int(row["grid_col"])
+
+    if best_r is None or best_c is None:
+        return None
+
+    _nc = ZONE_GRID["n_cols"]
+    _nr = ZONE_GRID["n_rows"]
+    if not (0 <= best_r < _nr and 0 <= best_c < _nc):
+        return None
+    _xe = np.linspace(ZONE_GRID["x_min"], ZONE_GRID["x_max"], _nc + 1)
+    _ze = np.linspace(ZONE_GRID["z_min"], ZONE_GRID["z_max"], _nr + 1)
+    cx = (_xe[best_c] + _xe[best_c + 1]) / 2.0
+    cz = (_ze[best_r] + _ze[best_r + 1]) / 2.0
+    loc = _plate_bucket_label(cx, cz, batter_stand)
+    return f"Hitter peak xwOBA: {loc} (.{int(best_val * 1000):03d})"
+
+
+def create_matchup_whiff_bars_fig(
+    arsenal_df: pd.DataFrame,
+    vuln_df: pd.DataFrame,
+    _str_df: pd.DataFrame,
+    pitcher_name: str,
+    hitter_name: str,
+) -> Figure | None:
+    """Grouped horizontal bars: pitcher vs hitter whiff% by pitch (usage → alpha).
+
+    ``_str_df`` is accepted for parity with ``build_matchup_table`` call sites.
+    """
+    from lib.constants import LEAGUE_AVG_OVERALL
+    from matplotlib.patches import Patch
+
+    p_df = arsenal_df.copy()
+    p_df = p_df[p_df["pitches"] >= 20]
+    if p_df.empty:
+        return None
+
+    v_df = vuln_df.copy()
+    v_df = v_df[v_df["pitches"] >= 15]
+    if not v_df.empty:
+        v_df = v_df.sort_values("pitches", ascending=False).drop_duplicates(
+            subset=["pitch_type"], keep="first",
+        )
+    p_df["_order"] = p_df["pitch_type"].map(
+        {pt: i for i, pt in enumerate(PITCH_ORDER)},
+    ).fillna(99)
+    p_df = p_df.sort_values("_order")
+
+    labels: list[str] = []
+    p_pct: list[float] = []
+    h_pct: list[float] = []
+    usages: list[float] = []
+
+    for _, row in p_df.iterrows():
+        pt = row["pitch_type"]
+        pt_name = PITCH_DISPLAY.get(pt, pt)
+        u = float(row.get("usage_pct", 0) or 0)
+        labels.append(f"{pt_name} ({u * 100:.0f}%)")
+        usages.append(u)
+
+        pw = row.get("whiff_rate", np.nan)
+        p_pct.append(float(pw * 100) if pd.notna(pw) else float("nan"))
+
+        h_row = v_df[v_df["pitch_type"] == pt]
+        if len(h_row) > 0 and "swings" in h_row.columns:
+            sw = h_row["swings"].iloc[0]
+            wh = h_row["whiffs"].iloc[0] if "whiffs" in h_row.columns else 0
+            hr = float(wh / sw * 100) if pd.notna(sw) and sw > 0 else float("nan")
+        else:
+            hr = float("nan")
+        h_pct.append(hr)
+
+    n = len(labels)
+    y = np.arange(n, dtype=float)
+    fig = Figure(figsize=(7, max(3.0, 0.38 * n + 1.2)))
+    ax = fig.subplots()
+    fig.patch.set_facecolor(DARK)
+    ax.set_facecolor(DARK)
+
+    h_bar = 0.16
+    for i in range(n):
+        alpha = 0.38 + 0.62 * min(max(usages[i], 0.0), 1.0)
+        alpha = min(alpha, 1.0)
+        if pd.notna(p_pct[i]):
+            ax.barh(
+                y[i] - 0.19, p_pct[i], height=h_bar,
+                color=SAGE, alpha=alpha, zorder=2,
+            )
+        if pd.notna(h_pct[i]):
+            ax.barh(
+                y[i] + 0.19, h_pct[i], height=h_bar,
+                color=EMBER, alpha=alpha, zorder=2,
+            )
+
+    ax.set_yticks(y, labels)
+    ax.set_xlabel("Whiff%", color=SLATE, fontsize=10)
+    ax.set_xlim(0, 52)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    ax.tick_params(colors=SLATE, labelsize=9)
+    ax.grid(axis="x", color=SLATE, alpha=0.15, linestyle="-", linewidth=0.5)
+
+    lg_w = LEAGUE_AVG_OVERALL.get("whiff_rate", 0.25) * 100
+    ax.axvline(lg_w, color=GOLD, linestyle="--", linewidth=0.8, alpha=0.5, zorder=1)
+
+    leg = [
+        Patch(facecolor=SAGE, label="Pitcher whiff%", alpha=0.85),
+        Patch(facecolor=EMBER, label="Hitter whiff%", alpha=0.85),
+    ]
+    ax.legend(
+        handles=leg, loc="lower right", fontsize=8,
+        framealpha=0.15, labelcolor=CREAM, facecolor=DARK,
+    )
+    ax.set_title(
+        f"P vs H whiff — {pitcher_name} · {hitter_name}",
+        color=CREAM, fontsize=11, pad=8,
+    )
+    fig.tight_layout()
+    add_watermark(fig)
     return fig

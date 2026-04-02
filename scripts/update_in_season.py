@@ -1120,6 +1120,8 @@ def main() -> None:
                         help="Force saving a weekly projection snapshot.")
     parser.add_argument("--schedule-only", action="store_true",
                         help="Refresh schedule/lineups/sims only (no projection updates).")
+    parser.add_argument("--batter-sims-only", action="store_true",
+                        help="Re-run batter game sims only (skip projections and schedule fetch).")
     args = parser.parse_args()
 
     game_date = args.date or date.today().isoformat()
@@ -1151,6 +1153,27 @@ def main() -> None:
 
         logger.info("=" * 60)
         logger.info("Done! (schedule-only)")
+        return
+
+    # Batter-sims-only mode: re-run batter sims without touching projections or schedule
+    if args.batter_sims_only:
+        logger.info("Mode: batter-sims-only (re-run batter game sims)")
+        run_batter_sims(game_date)
+
+        # Update metadata timestamp
+        meta_path = DASHBOARD_DIR / "update_metadata.json"
+        if meta_path.exists():
+            with open(meta_path) as f:
+                metadata = json.load(f)
+        else:
+            metadata = {}
+        metadata["last_batter_sims_refresh"] = datetime.now().isoformat()
+        metadata["game_date"] = game_date
+        with open(meta_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        logger.info("=" * 60)
+        logger.info("Done! (batter-sims-only)")
         return
 
     # Step 0: Archive yesterday's predictions before anything overwrites them

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import matplotlib.pyplot as plt
+import html
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -23,7 +23,13 @@ from services.data_loader import (
     load_hitter_archetypes, load_pitcher_archetypes,
     load_archetype_matchup_matrix,
 )
-from components.charts import create_pitch_density_plotly, create_hitter_zone_plotly
+from components.charts import (
+    create_hitter_zone_plotly,
+    create_matchup_whiff_bars_fig,
+    create_pitch_density_plotly,
+    matchup_hitter_zone_peak_caption,
+    matchup_pitcher_peak_caption,
+)
 from utils.formatters import delta_html, fmt_pct
 from utils.helpers import get_team_lookup
 from components.metric_cards import metric_card
@@ -38,7 +44,12 @@ from components.scouting import build_matchup_scouting_bullets
 
 def page_matchup_explorer() -> None:
     """Head-to-head pitcher vs hitter matchup breakdown."""
-    from lib.matchup import score_matchup, score_matchup_by_archetype
+    from lib.matchup import (
+        score_matchup,
+        score_matchup_bb,
+        score_matchup_by_archetype,
+        score_matchup_hr,
+    )
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
 
     st.markdown('<div class="tdd-section-hdr">Matchup Explorer</div>',
@@ -194,6 +205,22 @@ def page_matchup_explorer() -> None:
             pitcher_id, batter_id, arsenal_df, vuln_filtered, baselines_pt,
         )
 
+    # Pitch-type rows for tables, scouting, charts (always pitch-type arsenal)
+    p_arsenal = arsenal_df[arsenal_df["pitcher_id"] == pitcher_id].copy()
+    h_vuln = vuln_filtered[vuln_filtered["batter_id"] == batter_id].copy()
+    h_str = (
+        str_filtered[str_filtered["batter_id"] == batter_id].copy()
+        if not str_filtered.empty else pd.DataFrame()
+    )
+
+    # BB/HR lifts (pitch-type model — same framing as Today’s Games matchup tab)
+    bb_hdr = score_matchup_bb(pitcher_id, batter_id, arsenal_df, vuln_filtered, baselines_pt)
+    hr_hdr = score_matchup_hr(pitcher_id, batter_id, arsenal_df, vuln_filtered, baselines_pt)
+    bb_lift_h = float(bb_hdr.get("matchup_bb_logit_lift", 0.0) or 0.0)
+    hr_lift_h = float(hr_hdr.get("matchup_hr_logit_lift", 0.0) or 0.0)
+    bb_lift_h = 0.0 if np.isnan(bb_lift_h) else bb_lift_h
+    hr_lift_h = 0.0 if np.isnan(hr_lift_h) else hr_lift_h
+
     # --- Compute contact-quality adjustment ---
     # Usage-weighted xwOBA and hard-hit delta vs league baselines
     p_ars = arsenal_df[
@@ -239,8 +266,24 @@ def page_matchup_explorer() -> None:
     switch_tag = " (switch)" if is_switch else ""
     hand_str = f"{pitcher_label} vs {hitter_label}{switch_tag}"
 
+    mwhiff = matchup["matchup_whiff_rate"]
+    bwhiff = matchup["baseline_whiff_rate"]
+    whiff_delta = (mwhiff - bwhiff) if pd.notna(mwhiff) and pd.notna(bwhiff) else 0.0
+    whiff_delta_pp = whiff_delta * 100.0
+    whiff_delta_html = delta_html(whiff_delta, higher_is_better=True) if whiff_delta != 0 else ""
+
     p_headshot = headshot_html(pitcher_id, size=50)
     h_headshot = headshot_html(batter_id, size=50)
+    _edge_expl = (
+        "Badge blends matchup whiff lift with contact quality (xwOBA / hard-hit vs league). "
+        "K/BB/HR logit lifts use the pitch-type model (same family as the schedule matchup tab)."
+    )
+    _k_logit_tip = (
+        f"K lift (logit scale): {lift:+.3f} — technical scale from the pitch-type matchup model; "
+        "compare to whiff delta in percentage points below."
+    )
+    _edge_expl_esc = html.escape(_edge_expl, quote=True)
+    _k_logit_tip_esc = html.escape(_k_logit_tip, quote=True)
     matchup_header_html = (
         f'<div class="brand-header">'
         f'<div style="display:flex; align-items:center; gap:12px;">'
@@ -251,20 +294,41 @@ def page_matchup_explorer() -> None:
         f'</div>'
         f'{h_headshot}'
         f'</div>'
-        f'<div style="text-align:right;">'
+        f'<div style="text-align:right; max-width:22rem;">'
         f'<div class="tdd-edge-label" style="color:{edge_color};">{edge_label}</div>'
-        f'<div class="tdd-meta">'
-        f'<span class="tdd-tip" title="Matchup-driven K% advantage above baseline (logit scale)">K Lift</span>: {lift:+.3f}</div>'
+        f'<div class="tdd-meta" style="margin-top:0.25rem;">'
+        f'<b>Whiff vs baseline:</b> {whiff_delta_pp:+.1f} pp'
+        f' <span class="tdd-tip" title="{_k_logit_tip_esc}">(K lift ⓘ)</span>'
+        f'</div>'
+        f'<div class="tdd-meta" style="font-size:0.78rem; color:var(--tdd-slate); margin-top:0.2rem;">'
+        f'Model lifts (pitch-type): K {lift:+.3f} | BB {bb_lift_h:+.3f} | HR {hr_lift_h:+.3f}'
+        f'</div>'
+        f'<div class="tdd-meta" style="font-size:0.72rem; color:var(--tdd-slate); margin-top:0.15rem;" '
+        f'title="{_edge_expl_esc}">Why this badge? (hover)</div>'
         f'</div>'
         f'</div>'
     )
     st.markdown(matchup_header_html, unsafe_allow_html=True)
 
+    # --- Key pitches (top scouting bullets, above the fold) ---
+    if not p_arsenal.empty and not h_vuln.empty:
+        _kp = build_matchup_scouting_bullets(
+            p_arsenal, h_vuln, h_str, selected_pitcher, selected_hitter,
+        )[:3]
+        if _kp:
+            kp_html = "".join(
+                f'<div style="color:{c}; font-size:0.82rem; margin:0.12rem 0; '
+                f'padding-left:0.65rem; border-left:2px solid {c};">{t}</div>'
+                for c, t in _kp
+            )
+            st.markdown(
+                f'<div style="margin:0.35rem 0 0.6rem;">'
+                f'<div style="color:var(--tdd-cream); font-size:0.85rem; font-weight:600; '
+                f'margin-bottom:0.25rem;">Key pitches</div>{kp_html}</div>',
+                unsafe_allow_html=True,
+            )
+
     # --- Summary metrics ---
-    mwhiff = matchup["matchup_whiff_rate"]
-    bwhiff = matchup["baseline_whiff_rate"]
-    whiff_delta = (mwhiff - bwhiff) if pd.notna(mwhiff) and pd.notna(bwhiff) else 0.0
-    whiff_delta_html = delta_html(whiff_delta, higher_is_better=True) if whiff_delta != 0 else ""
 
     m_cols = st.columns(4)
     with m_cols[0]:
@@ -296,12 +360,6 @@ def page_matchup_explorer() -> None:
     breakdown_label = "Archetype Matchup" if using_archetype else "Pitch-by-Pitch Matchup"
     st.markdown(f'<div class="tdd-section-hdr">{breakdown_label}</div>',
                 unsafe_allow_html=True)
-
-    p_arsenal = arsenal_df[
-        arsenal_df["pitcher_id"] == pitcher_id
-    ].copy()
-    h_vuln = vuln_filtered[vuln_filtered["batter_id"] == batter_id].copy()
-    h_str = str_filtered[str_filtered["batter_id"] == batter_id].copy() if not str_filtered.empty else pd.DataFrame()
 
     if using_archetype:
         # Build archetype breakdown table
@@ -413,6 +471,17 @@ def page_matchup_explorer() -> None:
     elif p_arsenal.empty:
         st.info("Insufficient arsenal data for detailed breakdown.")
     else:
+        _whiff_fig = create_matchup_whiff_bars_fig(
+            p_arsenal, h_vuln, h_str, selected_pitcher, selected_hitter,
+        )
+        if _whiff_fig is not None:
+            st.markdown(
+                '<div class="tdd-meta" style="margin:0.2rem 0 0.4rem;">'
+                "Whiff% by pitch — bar opacity scales with usage; dashed line = league whiff.</div>",
+                unsafe_allow_html=True,
+            )
+            st.pyplot(_whiff_fig, clear_figure=True)
+
         matchup_html = build_matchup_table(p_arsenal, h_vuln, h_str)
         if matchup_html:
             st.markdown(
@@ -497,6 +566,20 @@ def page_matchup_explorer() -> None:
                                 f'<div class="tdd-meta">No zone data for {selected_hitter}</div>',
                                 unsafe_allow_html=True,
                             )
+
+                    _cap_p = matchup_pitcher_peak_caption(
+                        _pitch_loc_data, pt, _batter_stand,
+                    )
+                    _cap_h = (
+                        matchup_hitter_zone_peak_caption(
+                            h_zone, pt, _batter_stand, metric="xwoba",
+                        )
+                        if not h_zone.empty
+                        else None
+                    )
+                    _caps = [x for x in (_cap_p, _cap_h) if x]
+                    if _caps:
+                        st.caption(" · ".join(_caps))
 
                 # Secondary pitches
                 secondary_pts = p_arsenal_sorted[p_arsenal_sorted["usage"] < 0.10]

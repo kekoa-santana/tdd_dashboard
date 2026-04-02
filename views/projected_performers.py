@@ -257,9 +257,25 @@ def page_projected_performers() -> None:
         st.info("No book lines matched to model projections.")
         return
 
-    # --- Inline toolbar ---
-    col_type, col_prop, col_conf, col_tier = st.columns([1, 1, 1, 1])
+    # --- Build game dropdown options ---
+    game_options: dict[str, int | None] = {"All Games": None}
+    if "game_pk" in props.columns:
+        game_matchups = (
+            props.drop_duplicates("game_pk")[["game_pk", "team", "opponent"]]
+            .sort_values("team")
+        )
+        for _, g in game_matchups.iterrows():
+            label = f"{g['team']} vs {g['opponent']}"
+            game_options[label] = int(g["game_pk"])
 
+    # --- Inline toolbar ---
+    col_game, col_type, col_prop, col_conf, col_tier = st.columns([1, 1, 1, 1, 1])
+
+    with col_game:
+        game_choice = st.selectbox(
+            "Game", list(game_options.keys()),
+            index=0, key="lab_game", label_visibility="collapsed",
+        )
     with col_type:
         type_choice = st.selectbox(
             "Player Type", ["All", "Pitchers", "Hitters"],
@@ -283,6 +299,11 @@ def page_projected_performers() -> None:
 
     # --- Apply filters ---
     filtered = all_picks.copy()
+
+    # Game filter
+    selected_gpk = game_options[game_choice]
+    if selected_gpk is not None and "game_pk" in filtered.columns:
+        filtered = filtered[filtered["game_pk"] == selected_gpk]
 
     # Player type filter
     if type_choice == "Pitchers":
