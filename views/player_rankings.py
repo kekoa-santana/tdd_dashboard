@@ -376,6 +376,35 @@ PITCHER_TALENT_STATS: list[tuple[str, str, str]] = [
     ("Hlth", "health_adj", "dec3"),
 ]
 
+# --- Prospect detail stats (inline on card rows) ---
+PROSPECT_BATTER_DETAIL_STATS: list[tuple[str, str, str]] = [
+    ("K%", "wtd_k_pct", "pct"),
+    ("BB%", "wtd_bb_pct", "pct"),
+    ("ISO", "wtd_iso", ".000"),
+]
+
+PROSPECT_PITCHER_DETAIL_STATS: list[tuple[str, str, str]] = [
+    ("K%", "wtd_k_pct", "pct"),
+    ("BB%", "wtd_bb_pct", "pct"),
+    ("HR/BF", "wtd_hr_bf", ".000"),
+]
+
+BATTER_FUTURE_GRADES: list[tuple[str, str]] = [
+    ("Hit", "future_hit"),
+    ("Power", "future_power"),
+    ("Speed", "future_speed"),
+    ("Fielding", "future_fielding"),
+    ("Discipline", "future_discipline"),
+]
+
+PITCHER_FUTURE_GRADES: list[tuple[str, str]] = [
+    ("Stuff", "future_stuff"),
+    ("Command", "future_command"),
+    ("Durability", "future_durability"),
+]
+
+_POS_GROUP_ORDER = ["C", "MI", "Corner", "OF"]
+
 
 def _fmt_detail(val, fmt: str) -> str:
     if pd.isna(val):
@@ -419,6 +448,7 @@ def _render_ranking_card(
     expandable: bool = False,
     archetype_lookup: dict[int, tuple[str, str]] | None = None,
     hover_stats: list[tuple[str, str, str]] | None = None,
+    future_grade_cols: list[tuple[str, str]] | None = None,
 ) -> None:
     """Render a scrollable ranking leaderboard card.
 
@@ -571,6 +601,25 @@ def _render_ranking_card(
                     + "".join(_grade_parts)
                     + '</div>'
                 )
+
+            # Future grades (prospect scouting projections)
+            if future_grade_cols:
+                _future_parts = []
+                for _lbl, _col in future_grade_cols:
+                    _fv = row.get(_col)
+                    if pd.notna(_fv):
+                        _future_parts.append(
+                            f'<span style="color:var(--tdd-slate); font-size:0.78rem;">{_lbl}: </span>'
+                            f'<span style="color:var(--tdd-sage); font-size:0.78rem; font-weight:600;">{int(_fv)}</span>'
+                        )
+                if _future_parts:
+                    detail_parts.append(
+                        f'<div style="display:flex; flex-wrap:wrap; gap:0.8rem; margin-bottom:0.5rem;">'
+                        f'<span style="color:var(--tdd-slate); font-size:0.68rem; font-weight:500; '
+                        f'margin-right:0.3rem;">Future:</span>'
+                        + "".join(_future_parts)
+                        + '</div>'
+                    )
 
             # Key stats from detail_stats
             if has_detail:
@@ -789,9 +838,9 @@ def _render_pitcher_rankings(
 
 # ── Prospect Rankings ────────────────────────────────────────────────────────
 
-def _render_prospect_rankings(df: pd.DataFrame) -> None:
-    """Render prospect rankings table with filters."""
-    col_tier, col_pos, col_level, col_search = st.columns([1, 1, 1, 2])
+def _render_prospect_rankings(df: pd.DataFrame, search: str = "") -> None:
+    """Render hitting prospect rankings as leaderboard cards with positional breakdowns."""
+    col_tier, col_pos, col_level = st.columns([1, 1, 1])
 
     with col_tier:
         tiers = ["All", "Elite", "Impact", "Solid", "Developing", "Org Filler"]
@@ -802,8 +851,6 @@ def _render_prospect_rankings(df: pd.DataFrame) -> None:
     with col_level:
         levels = [lv for lv in _LEVEL_ORDER if lv in df["max_level"].unique()] if "max_level" in df.columns else []
         level_filter = st.selectbox("Highest Level", ["All"] + levels, key="rank_pr_level")
-    with col_search:
-        search = st.text_input("Search prospect", key="rank_pr_search")
 
     filtered = df.copy()
     if tier_filter != "All" and "tdd_tier" in filtered.columns:
@@ -817,6 +864,10 @@ def _render_prospect_rankings(df: pd.DataFrame) -> None:
             filtered["name"].str.contains(search, case=False, na=False)
         ]
 
+    if filtered.empty:
+        st.info("No matching hitting prospects found.")
+        return
+
     # Summary metrics
     cols = st.columns(4)
     with cols[0]:
@@ -831,64 +882,59 @@ def _render_prospect_rankings(df: pd.DataFrame) -> None:
     with cols[3]:
         avg_score = filtered["tdd_prospect_score"].mean() if "tdd_prospect_score" in filtered.columns and len(filtered) > 0 else 0
         avg_diamonds = score_to_diamonds(avg_score)
-        st.markdown(metric_card("Avg Rating", f"{avg_diamonds:.1f} / 5"), unsafe_allow_html=True)
+        st.markdown(metric_card("Avg Rating", f"{avg_diamonds:.1f}"), unsafe_allow_html=True)
 
-    # Compute diamond rating column
-    filtered = filtered.copy()
-    if "tdd_prospect_score" in filtered.columns:
-        filtered["_diamond_rating"] = filtered["tdd_prospect_score"].apply(score_to_diamonds)
+    # Build tier lookup (reuses archetype badge display)
+    tier_lookup: dict[int, tuple[str, str]] = {}
+    for _, row in filtered.iterrows():
+        pid = int(row["player_id"])
+        tier = str(row.get("tdd_tier", ""))
+        level = str(row.get("max_level", ""))
+        age = f"Age {row['min_age']:.0f}" if pd.notna(row.get("min_age")) else ""
+        tier_lookup[pid] = (tier, f"{level} · {age}" if level and age else level or age)
 
-    display_map = {
-        "tdd_rank": "#",
-        "name": "Player",
-        "primary_position": "Pos",
-        "max_level": "Level",
-        "min_age": "Age",
-        "_diamond_rating": "Rating",
-        "tdd_tier": "Tier",
-        "comp_readiness": "Readiness",
-        "comp_rate_quality": "Rate Qual",
-        "comp_age": "Age Score",
-        "comp_trajectory": "Trajectory",
-        "comp_positional": "Pos Scarcity",
-        "wtd_k_pct": "K%",
-        "wtd_bb_pct": "BB%",
-        "wtd_iso": "ISO",
-        "youngest_age_rel": "Age vs Lvl",
-        "career_milb_pa": "MiLB PA",
-        "fg_future_value": "FG FV",
-        "fg_overall_rank": "FG Rank",
-    }
+    # Use level as "team" badge (prospects don't have MLB teams)
+    level_lookup: dict[int, str] = {}
+    for _, row in filtered.iterrows():
+        if pd.notna(row.get("max_level")):
+            level_lookup[int(row["player_id"])] = str(row["max_level"])
 
-    available = [c for c in display_map if c in filtered.columns]
-    display_df = filtered[available].copy()
-    sort_col = "tdd_rank" if "tdd_rank" in available else "_diamond_rating"
-    ascending = sort_col == "tdd_rank"
-    display_df = display_df.sort_values(sort_col, ascending=ascending)
-    display_df.columns = [display_map[c] for c in available]
+    # Overall ranking card (expandable)
+    _render_ranking_card(
+        filtered, "Overall", "tdd_rank", "name", "player_id",
+        "tdd_prospect_score", level_lookup,
+        info_col="primary_position",
+        max_height=600,
+        detail_stats=PROSPECT_BATTER_DETAIL_STATS,
+        wide=True,
+        link_type="hitter",
+        expandable=True,
+        archetype_lookup=tier_lookup,
+        future_grade_cols=BATTER_FUTURE_GRADES,
+    )
 
-    fmt: dict[str, str] = {}
-    for col, f in [
-        ("Rating", "{:.1f}"), ("Readiness", "{:.3f}"), ("Rate Qual", "{:.3f}"),
-        ("Age Score", "{:.3f}"), ("Trajectory", "{:.3f}"), ("Pos Scarcity", "{:.3f}"),
-        ("K%", "{:.1%}"), ("BB%", "{:.1%}"), ("ISO", "{:.3f}"),
-        ("Age vs Lvl", "{:+.1f}"), ("MiLB PA", "{:,.0f}"),
-        ("#", "{:.0f}"), ("Age", "{:.0f}"),
-        ("FG FV", "{:.0f}"), ("FG Rank", "{:.0f}"),
-    ]:
-        if col in display_df.columns:
-            fmt[col] = f
+    # Positional breakdowns
+    st.markdown('<div class="rank-section">By Position</div>', unsafe_allow_html=True)
+    positions = [p for p in _POS_GROUP_ORDER if p in filtered["pos_group"].unique()]
+    # Add any remaining groups not in the standard order
+    positions += [p for p in sorted(filtered["pos_group"].dropna().unique()) if p not in positions]
 
-    styler = display_df.style.format(fmt, na_rep="")
-    if "Rating" in display_df.columns:
-        styler = styler.map(_score_color, subset=["Rating"])
-    if "Tier" in display_df.columns:
-        styler = styler.map(_style_tier, subset=["Tier"])
-
-    st.dataframe(styler, width='stretch', hide_index=True, height=600)
+    for i in range(0, len(positions), 3):
+        batch = positions[i:i + 3]
+        cols_st = st.columns(3)
+        for col_st, pos in zip(cols_st, batch):
+            with col_st:
+                pos_df = filtered[filtered["pos_group"] == pos].copy()
+                _render_ranking_card(
+                    pos_df, pos, "tdd_rank", "name", "player_id",
+                    "tdd_prospect_score", level_lookup,
+                    info_col="primary_position",
+                    max_height=520,
+                    hover_stats=PROSPECT_BATTER_DETAIL_STATS + [("Age", "min_age", "dec1")],
+                )
 
     st.caption(
-        "**Rating** = Diamond Rating (0-5) from weighted composite of "
+        "**Rating** = Diamond Rating from weighted composite of "
         "Rate Quality (30%), Readiness (25%), Age-Relative (15%), "
         "Trajectory (15%), Positional Scarcity (15%). "
         "**K%/BB%/ISO** are MLB-translated MiLB stats. "
@@ -898,9 +944,9 @@ def _render_prospect_rankings(df: pd.DataFrame) -> None:
 
 # ── Pitching Prospect Rankings ───────────────────────────────────────────────
 
-def _render_pitching_prospect_rankings(df: pd.DataFrame) -> None:
-    """Render pitching prospect rankings table with filters."""
-    col_tier, col_role, col_level, col_search = st.columns([1, 1, 1, 2])
+def _render_pitching_prospect_rankings(df: pd.DataFrame, search: str = "") -> None:
+    """Render pitching prospect rankings as leaderboard cards with SP/RP breakdown."""
+    col_tier, col_role, col_level = st.columns([1, 1, 1])
 
     with col_tier:
         tiers = ["All", "Elite", "Impact", "Solid", "Developing", "Org Filler"]
@@ -911,8 +957,6 @@ def _render_pitching_prospect_rankings(df: pd.DataFrame) -> None:
     with col_level:
         levels = [lv for lv in _LEVEL_ORDER if lv in df["max_level"].unique()] if "max_level" in df.columns else []
         level_filter = st.selectbox("Highest Level", ["All"] + levels, key="rank_pp_level")
-    with col_search:
-        search = st.text_input("Search prospect", key="rank_pp_search")
 
     filtered = df.copy()
     if tier_filter != "All" and "tdd_tier" in filtered.columns:
@@ -926,6 +970,10 @@ def _render_pitching_prospect_rankings(df: pd.DataFrame) -> None:
             filtered["name"].str.contains(search, case=False, na=False)
         ]
 
+    if filtered.empty:
+        st.info("No matching pitching prospects found.")
+        return
+
     # Summary metrics
     cols = st.columns(4)
     with cols[0]:
@@ -940,69 +988,60 @@ def _render_pitching_prospect_rankings(df: pd.DataFrame) -> None:
     with cols[3]:
         avg_score = filtered["tdd_prospect_score"].mean() if "tdd_prospect_score" in filtered.columns and len(filtered) > 0 else 0
         avg_diamonds = score_to_diamonds(avg_score)
-        st.markdown(metric_card("Avg Rating", f"{avg_diamonds:.1f} / 5"), unsafe_allow_html=True)
+        st.markdown(metric_card("Avg Rating", f"{avg_diamonds:.1f}"), unsafe_allow_html=True)
 
-    # Compute diamond rating column
-    filtered = filtered.copy()
-    if "tdd_prospect_score" in filtered.columns:
-        filtered["_diamond_rating"] = filtered["tdd_prospect_score"].apply(score_to_diamonds)
+    # Build tier lookup (reuses archetype badge display)
+    tier_lookup: dict[int, tuple[str, str]] = {}
+    for _, row in filtered.iterrows():
+        pid = int(row["player_id"])
+        tier = str(row.get("tdd_tier", ""))
+        level = str(row.get("max_level", ""))
+        age = f"Age {row['min_age']:.0f}" if pd.notna(row.get("min_age")) else ""
+        tier_lookup[pid] = (tier, f"{level} · {age}" if level and age else level or age)
 
-    display_map = {
-        "tdd_rank": "#",
-        "name": "Player",
-        "pitcher_role": "Role",
-        "max_level": "Level",
-        "min_age": "Age",
-        "_diamond_rating": "Rating",
-        "tdd_tier": "Tier",
-        "comp_readiness": "Readiness",
-        "comp_rate_quality": "Rate Qual",
-        "comp_age": "Age Score",
-        "comp_trajectory": "Trajectory",
-        "comp_positional": "Pos Scarcity",
-        "wtd_k_pct": "K%",
-        "wtd_bb_pct": "BB%",
-        "wtd_hr_bf": "HR/BF",
-        "youngest_age_rel": "Age vs Lvl",
-        "career_milb_bf": "MiLB BF",
-        "sp_pct": "SP%",
-        "fg_future_value": "FG FV",
-        "fg_overall_rank": "FG Rank",
-    }
+    # Use level as "team" badge
+    level_lookup: dict[int, str] = {}
+    for _, row in filtered.iterrows():
+        if pd.notna(row.get("max_level")):
+            level_lookup[int(row["player_id"])] = str(row["max_level"])
 
-    available = [c for c in display_map if c in filtered.columns]
-    display_df = filtered[available].copy()
-    sort_col = "tdd_rank" if "tdd_rank" in available else "_diamond_rating"
-    ascending = sort_col == "tdd_rank"
-    display_df = display_df.sort_values(sort_col, ascending=ascending)
-    display_df.columns = [display_map[c] for c in available]
+    # Starting Pitchers card (expandable)
+    sp_df = filtered[filtered["pitcher_role"] == "SP"].copy() if "pitcher_role" in filtered.columns else filtered
+    if not sp_df.empty:
+        _render_ranking_card(
+            sp_df, "Starting Pitchers", "tdd_rank", "name", "player_id",
+            "tdd_prospect_score", level_lookup,
+            info_col="max_level",
+            max_height=600,
+            detail_stats=PROSPECT_PITCHER_DETAIL_STATS,
+            wide=True,
+            link_type="pitcher",
+            expandable=True,
+            archetype_lookup=tier_lookup,
+            future_grade_cols=PITCHER_FUTURE_GRADES,
+        )
 
-    fmt: dict[str, str] = {}
-    for col, f in [
-        ("Rating", "{:.1f}"), ("Readiness", "{:.3f}"), ("Rate Qual", "{:.3f}"),
-        ("Age Score", "{:.3f}"), ("Trajectory", "{:.3f}"), ("Pos Scarcity", "{:.3f}"),
-        ("K%", "{:.1%}"), ("BB%", "{:.1%}"), ("HR/BF", "{:.4f}"),
-        ("Age vs Lvl", "{:+.1f}"), ("MiLB BF", "{:,.0f}"), ("SP%", "{:.0%}"),
-        ("#", "{:.0f}"), ("Age", "{:.0f}"),
-        ("FG FV", "{:.0f}"), ("FG Rank", "{:.0f}"),
-    ]:
-        if col in display_df.columns:
-            fmt[col] = f
-
-    styler = display_df.style.format(fmt, na_rep="")
-    if "Rating" in display_df.columns:
-        styler = styler.map(_score_color, subset=["Rating"])
-    if "Tier" in display_df.columns:
-        styler = styler.map(_style_tier, subset=["Tier"])
-
-    st.dataframe(styler, width='stretch', hide_index=True, height=600)
+    # Relief Pitchers card (expandable)
+    rp_df = filtered[filtered["pitcher_role"] == "RP"].copy() if "pitcher_role" in filtered.columns else pd.DataFrame()
+    if not rp_df.empty:
+        _render_ranking_card(
+            rp_df, "Relief Pitchers", "tdd_rank", "name", "player_id",
+            "tdd_prospect_score", level_lookup,
+            info_col="max_level",
+            max_height=600,
+            detail_stats=PROSPECT_PITCHER_DETAIL_STATS,
+            wide=True,
+            link_type="pitcher",
+            expandable=True,
+            archetype_lookup=tier_lookup,
+            future_grade_cols=PITCHER_FUTURE_GRADES,
+        )
 
     st.caption(
-        "**Rating** = Diamond Rating (0-5) from weighted composite of "
+        "**Rating** = Diamond Rating from weighted composite of "
         "Rate Quality (30%), Readiness (25%), Age-Relative (15%), "
         "Trajectory (15%), Positional Scarcity (15%). "
         "**K%/BB%/HR/BF** are MLB-translated MiLB stats. "
-        "**SP%** = share of appearances as a starter. "
         "**FG FV/Rank** are FanGraphs reference values (not used in TDD scoring)."
     )
 
@@ -1220,14 +1259,14 @@ def page_player_rankings() -> None:
         if df.empty:
             st.warning("No prospect rankings data found. Run precompute first.")
             return
-        _render_prospect_rankings(df)
+        _render_prospect_rankings(df, search=search)
 
     elif category == "Pitching Prospects":
         df = load_rankings("pitching_prospect")
         if df.empty:
             st.warning("No pitching prospect rankings data found. Run precompute first.")
             return
-        _render_pitching_prospect_rankings(df)
+        _render_pitching_prospect_rankings(df, search=search)
 
     else:  # Prospect Readiness
         df = load_prospect_readiness()
