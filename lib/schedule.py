@@ -21,6 +21,38 @@ MLB_API_BASE = "https://statsapi.mlb.com/api/v1"
 _TEAM_ABBR: dict[int, str] = {}
 
 
+def _fetch_people_bat_hand(player_ids: list[int]) -> dict[int, str]:
+    """Map MLB player ID -> plate-appearance bat side (L, R, or S).
+
+    Boxscore ``person`` blobs often omit ``batSide``; the people endpoint is
+    reliable. Returns empty dict on failure.
+    """
+    import urllib.request
+
+    ids = sorted({int(i) for i in player_ids if i is not None})
+    if not ids:
+        return {}
+
+    url = f"{MLB_API_BASE}/people?personIds={','.join(str(i) for i in ids)}"
+    try:
+        with urllib.request.urlopen(url, timeout=20) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:
+        logger.warning("Failed to fetch bat handedness for %d players: %s", len(ids), e)
+        return {}
+
+    out: dict[int, str] = {}
+    for p in data.get("people", []):
+        pid = p.get("id")
+        if pid is None:
+            continue
+        bs = p.get("batSide") or {}
+        code = (bs.get("code") or "").strip().upper()
+        if code in ("L", "R", "S"):
+            out[int(pid)] = code
+    return out
+
+
 def _ensure_team_abbr() -> None:
     """Populate ``_TEAM_ABBR`` from the MLB API (once)."""
     import urllib.request
@@ -198,7 +230,7 @@ def fetch_game_lineups(
     -------
     pd.DataFrame
         Columns: game_pk, team_id, team_abbr, batting_order,
-        batter_id, batter_name.
+        batter_id, batter_name, bat_hand (L / R / S when available).
     """
     import urllib.request
 
@@ -233,7 +265,15 @@ def fetch_game_lineups(
                 "batter_name": player_info.get("fullName", "Unknown"),
             })
 
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+
+    hand_map = _fetch_people_bat_hand(df["batter_id"].dropna().astype(int).tolist())
+    df["bat_hand"] = df["batter_id"].map(
+        lambda x: hand_map.get(int(x), "") if pd.notna(x) else "",
+    )
+    return df
 
 
 def fetch_all_lineups(

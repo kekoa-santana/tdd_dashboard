@@ -156,6 +156,53 @@ def _build_projection_lookup() -> dict:
     return lookup
 
 
+def _lineup_hand_missing_html() -> str:
+    return (
+        '<span class="tdd-stat-label" style="min-width:1rem; text-align:center; '
+        'margin-left:0.15rem; color:var(--tdd-dark-border);">—</span>'
+    )
+
+
+def _lineup_hand_html(hand: object) -> str:
+    """L / R / S plate or mound handedness badge; unknown shows an em dash."""
+    if hand is None:
+        return _lineup_hand_missing_html()
+    if isinstance(hand, (float, np.floating)) and pd.isna(hand):
+        return _lineup_hand_missing_html()
+    s = str(hand).strip().upper()
+    if not s or s == "NAN":
+        return _lineup_hand_missing_html()
+    c = s[0]
+    if c not in ("L", "R", "S"):
+        return _lineup_hand_missing_html()
+    ce = html.escape(c)
+    return (
+        f'<span class="tdd-stat-label" style="min-width:1rem; text-align:center; '
+        f'margin-left:0.15rem; font-weight:700; color:var(--tdd-slate);">{ce}</span>'
+    )
+
+
+def _lineup_pitcher_hand_html(
+    p_proj: dict,
+    arsenal_df: pd.DataFrame | None,
+    pid: int | None,
+) -> str:
+    """Throws (R/L) from arsenal table, else pitcher projection parquet."""
+    hand: object = None
+    if (
+        pid
+        and arsenal_df is not None
+        and not arsenal_df.empty
+        and "pitch_hand" in arsenal_df.columns
+    ):
+        sub = arsenal_df[arsenal_df["pitcher_id"] == pid]
+        if not sub.empty:
+            hand = sub["pitch_hand"].iloc[0]
+    if hand is None or (isinstance(hand, float) and pd.isna(hand)):
+        hand = (p_proj or {}).get("pitch_hand")
+    return _lineup_hand_html(hand)
+
+
 def _render_schedule_cards(
     schedule: pd.DataFrame,
     sims: pd.DataFrame,
@@ -211,6 +258,7 @@ def _render_schedule_cards(
                 "k_rate": _r.get("projected_k_rate"),
                 "bb_rate": _r.get("projected_bb_rate"),
                 "tdd_value_score": _diamond_lookup.get(bid),
+                "bat_hand": _r.get("batter_stand"),
             }
     if not _h_count.empty and "batter_id" in _h_count.columns:
         for _, _r in _h_count.iterrows():
@@ -900,15 +948,7 @@ def _render_game_drilldown(
                 parts.append(f"{n_new} new batter(s)")
             if n_miss:
                 parts.append(f"{n_miss} removed")
-            st.warning(f"Lineup changed since last update. {', '.join(parts)}.")
-            if st.button("Re-run sims", key=f"resim_{gpk}"):
-                import subprocess
-                subprocess.Popen(
-                    [sys.executable, "scripts/update_in_season.py", "--batter-sims-only"],
-                    cwd=str(Path(__file__).resolve().parents[1]),
-                )
-                st.success("Batter sims re-triggered. Refresh in ~30 seconds.")
-                st.cache_data.clear()
+            st.info(f"Lineup changed since last sim. {', '.join(parts)}. Sims will auto-update shortly.")
 
         _render_matchup_tab_sidebyside(
             sides, h_arch_lookup, h_stat_lookup,
@@ -1182,6 +1222,7 @@ def _render_hitter_projections_tab(
                 f'min-width:1.2rem; text-align:right; font-weight:700;">{order}</span>'
                 f'{hs}'
                 f'<span style="color:var(--tdd-slate); font-size:0.72rem; min-width:1.8rem; margin-left:0.3rem;">{pos}</span>'
+                f'{_lineup_hand_html(stats.get("bat_hand"))}'
                 f'<span style="color:var(--tdd-cream); font-size:0.88rem; font-weight:600; '
                 f'flex:1; min-width:5rem;">{bname}</span>'
                 f'{arch_html}'
@@ -1198,6 +1239,7 @@ def _render_hitter_projections_tab(
                 f'<span class="tdd-badge">{p_arch}</span>'
             ) if p_arch else ""
             p_hs = f'<span class="lineup-hs" style="margin:0 0.3rem;">{headshot_html(pid, size=32)}</span>'
+            p_hand_html = _lineup_pitcher_hand_html(p_proj, arsenal_df, pid)
 
             rows_html.append(
                 f'<div class="tdd-lineup-row" style="background:rgba(200,169,110,0.06);">'
@@ -1205,6 +1247,7 @@ def _render_hitter_projections_tab(
                 f'min-width:1.2rem; text-align:right; font-weight:700;">P</span>'
                 f'{p_hs}'
                 f'<span class="tdd-stat-label" style="min-width:1.8rem;">SP</span>'
+                f'{p_hand_html}'
                 f'<span class="tdd-player-name" style="flex:1; min-width:5rem;">{pitcher_name}</span>'
                 f'{p_arch_html}'
                 f'<span class="lineup-diamonds" style="margin:0 0.3rem;">{p_diamond}</span>'
@@ -1931,12 +1974,14 @@ def _render_matchup_tab(
                 f'<span class="tdd-badge">{p_arch}</span>'
             ) if p_arch else ""
             p_hs = f'<span class="lineup-hs" style="margin:0 0.3rem;">{headshot_html(pid, size=32)}</span>'
+            p_hand_html = _lineup_pitcher_hand_html(p_proj, arsenal_df, pid)
 
             p_summary = (
                 f'<span style="color:var(--tdd-gold); font-size:var(--tdd-fs-meta); '
                 f'min-width:1.2rem; text-align:right; font-weight:700;">P</span>'
                 f'{p_hs}'
                 f'<span class="tdd-stat-label" style="min-width:1.8rem;">SP</span>'
+                f'{p_hand_html}'
                 f'<span class="tdd-player-name" style="flex:1; min-width:5rem;">{pitcher_name}</span>'
                 f'{p_arch_html}'
                 f'<span class="lineup-diamonds" style="margin:0 0.3rem;">{p_diamond}</span>'
@@ -1999,6 +2044,7 @@ def _render_matchup_tab(
                 f'font-size:var(--tdd-fs-meta); min-width:1.2rem; text-align:right; font-weight:700;">{order}</span>'
                 f'{hs}'
                 f'<span class="tdd-stat-label" style="min-width:1.8rem; margin-left:0.3rem;">{pos}</span>'
+                f'{_lineup_hand_html(stats.get("bat_hand"))}'
                 f'<span class="tdd-player-name" style="flex:1; min-width:5rem;">{bname}</span>'
                 f'{arch_html}'
                 f'<span class="lineup-diamonds" style="margin:0 0.3rem;">{diamond_html}</span>'
@@ -3202,6 +3248,23 @@ def page_schedule() -> None:
             sims = load_game_props()
             lineups = load_todays_lineups()
             lineups = backfill_missing_lineups(schedule, lineups)
+            # Overlay live game status from MLB API so cards reflect
+            # current state (In Progress / Final) between refreshes
+            try:
+                live_sched = fetch_live_schedule(today.isoformat())
+                if (
+                    not live_sched.empty
+                    and "game_pk" in live_sched.columns
+                    and "status" in live_sched.columns
+                ):
+                    live_status = live_sched.set_index("game_pk")["status"]
+                    schedule["status"] = (
+                        schedule["game_pk"]
+                        .map(live_status)
+                        .fillna(schedule["status"])
+                    )
+            except Exception:
+                pass  # keep cached status on API failure
         else:
             # Parquets are stale (e.g. past midnight), fetch live
             schedule = fetch_live_schedule(today.isoformat())

@@ -254,15 +254,79 @@ def _save_roster_state(
 # Schedule-only refresh (hourly mode)
 # ---------------------------------------------------------------------------
 
-def run_schedule_refresh(game_date: str) -> None:
+def _lineups_changed(new_lineups: "pd.DataFrame", schedule: "pd.DataFrame") -> bool:
+    """Compare freshly fetched lineups/starters against what is on disk.
+
+    Returns True if any pitcher or lineup batter changed, meaning sims
+    need to be re-run.
+    """
+    import pandas as pd
+
+    old_lu_path = DASHBOARD_DIR / "todays_lineups.parquet"
+    old_sched_path = DASHBOARD_DIR / "todays_games.parquet"
+
+    # --- Check pitcher changes via schedule ---
+    if old_sched_path.exists() and not schedule.empty:
+        old_sched = pd.read_parquet(old_sched_path)
+        pitcher_cols = [c for c in ["away_pitcher_id", "home_pitcher_id"] if c in schedule.columns and c in old_sched.columns]
+        if pitcher_cols and "game_pk" in old_sched.columns:
+            old_pitchers = old_sched.set_index("game_pk")[pitcher_cols].sort_index()
+            new_pitchers = schedule.set_index("game_pk")[pitcher_cols].sort_index()
+            # Only compare games present in both
+            common = old_pitchers.index.intersection(new_pitchers.index)
+            if len(common) > 0:
+                old_cmp = old_pitchers.loc[common].fillna(0)
+                new_cmp = new_pitchers.loc[common].fillna(0)
+                if not old_cmp.equals(new_cmp):
+                    logger.info("Pitcher change detected")
+                    return True
+            # New games added
+            if len(schedule) != len(old_sched):
+                logger.info("Game count changed (%d -> %d)", len(old_sched), len(schedule))
+                return True
+
+    # --- Check lineup batter changes ---
+    if new_lineups.empty:
+        return False
+    if not old_lu_path.exists():
+        logger.info("No previous lineups on disk")
+        return True
+
+    old_lu = pd.read_parquet(old_lu_path)
+    if old_lu.empty:
+        return True
+
+    id_col = "batter_id" if "batter_id" in new_lineups.columns else "player_id"
+    old_id_col = "batter_id" if "batter_id" in old_lu.columns else "player_id"
+    if id_col not in new_lineups.columns or old_id_col not in old_lu.columns:
+        return True
+
+    old_by_game = old_lu.groupby("game_pk")[old_id_col].apply(lambda s: frozenset(s.dropna().astype(int)))
+    new_by_game = new_lineups.groupby("game_pk")[id_col].apply(lambda s: frozenset(s.dropna().astype(int)))
+
+    for gpk in new_by_game.index:
+        if gpk not in old_by_game.index:
+            logger.info("New lineup for game %s", gpk)
+            return True
+        if new_by_game[gpk] != old_by_game[gpk]:
+            logger.info("Lineup change detected for game %s", gpk)
+            return True
+
+    return False
+
+
+def run_schedule_refresh(game_date: str) -> bool:
     """Fetch schedule/lineups and re-run sims using existing projections.
 
-    This is the lightweight hourly mode: no DB queries, no conjugate
-    updates — just MLB API calls and Monte Carlo sims with whatever
+    This is the lightweight 30-min mode: no DB queries, no conjugate
+    updates -- just MLB API calls and Monte Carlo sims with whatever
     projections and K samples are already on disk.
 
     Uses the PA-by-PA game simulator (Layer 3 v2) for multi-stat
     projections: K, BB, H, HR, IP, pitches, fantasy points.
+
+    Returns True if sims were re-run (lineup/pitcher change detected),
+    False if skipped (no changes).
     """
     import numpy as np
     import pandas as pd
@@ -280,19 +344,28 @@ def run_schedule_refresh(game_date: str) -> None:
     schedule = fetch_todays_schedule(game_date)
     if schedule.empty:
         logger.info("No games scheduled for %s", game_date)
-        return
-
-    schedule.to_parquet(DASHBOARD_DIR / "todays_games.parquet", index=False)
-    logger.info("Saved schedule: %d games", len(schedule))
+        return False
 
     # Fetch lineups
     lineups = fetch_all_lineups(schedule)
+
+    # Check for changes before committing to full sim run
+    changed = _lineups_changed(lineups, schedule)
+
+    # Always save fresh schedule and lineups
+    schedule.to_parquet(DASHBOARD_DIR / "todays_games.parquet", index=False)
+    logger.info("Saved schedule: %d games", len(schedule))
+
     if not lineups.empty:
         lineups.to_parquet(DASHBOARD_DIR / "todays_lineups.parquet", index=False)
         logger.info("Saved lineups: %d batters across %d games",
                      len(lineups), lineups["game_pk"].nunique())
     else:
         logger.info("No lineups available yet")
+
+    if not changed:
+        logger.info("No lineup or pitcher changes detected -- skipping sims")
+        return False
 
     # --- Load existing projections and posterior samples ---
     p_path = DASHBOARD_DIR / "pitcher_projections.parquet"
@@ -639,6 +712,8 @@ def run_schedule_refresh(game_date: str) -> None:
                      n_api, n_dc, n_none)
     else:
         logger.warning("No pitchers could be simulated (missing K samples?)")
+
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -1131,13 +1206,17 @@ def main() -> None:
 
     # Schedule-only mode: lightweight refresh, then exit
     if args.schedule_only:
-        logger.info("Mode: schedule-only (hourly refresh)")
+        logger.info("Mode: schedule-only (30-min refresh)")
 
-        # Check for major roster moves → precompute if needed
+        # Check for major roster moves -> precompute if needed
         check_roster_moves(game_date)
 
-        run_schedule_refresh(game_date)
-        run_batter_sims(game_date)
+        changed = run_schedule_refresh(game_date)
+
+        if changed:
+            run_batter_sims(game_date)
+        else:
+            logger.info("Skipping batter sims (no changes)")
 
         # Update metadata timestamp
         meta_path = DASHBOARD_DIR / "update_metadata.json"
@@ -1152,7 +1231,7 @@ def main() -> None:
             json.dump(metadata, f, indent=2)
 
         logger.info("=" * 60)
-        logger.info("Done! (schedule-only)")
+        logger.info("Done! (schedule-only, changes=%s)", changed)
         return
 
     # Batter-sims-only mode: re-run batter sims without touching projections or schedule

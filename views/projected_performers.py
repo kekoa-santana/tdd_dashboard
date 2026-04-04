@@ -1,27 +1,22 @@
-"""Props Lab -- model picks with inline filters."""
+"""Props Lab -- model picks organized by stat leaderboards."""
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import streamlit as st
 
 from config import GOLD, SAGE, EMBER, SLATE, CREAM
-from services.data_loader import load_projections, load_game_props, load_dk_props, load_pp_props
+from services.data_loader import (
+    load_projections, load_game_props, load_dk_props, load_pp_props,
+    fetch_live_schedule,
+)
+from components.headshot import headshot_html
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-_STAT_OPTIONS = {
-    "Hits": "H",
-    "Strikeouts": "K",
-    "H+R+RBI": "HRR",
-    "Total Bases": "TB",
-    "Walks": "BB",
-    "All": None,
-}
 
 _STAT_LABELS = {
     "K": "Strikeouts",
@@ -35,12 +30,15 @@ _STAT_LABELS = {
     "Outs": "Outs",
 }
 
+# Display order for stat leaderboards
+_STAT_ORDER = ["K", "H", "HR", "TB", "HRR", "BB", "R", "RBI", "Outs"]
+
 _CONFIDENCE_BUCKETS = {
     "All": 0.0,
     "Super High (75%+)": 0.75,
     "High (63%+)": 0.63,
     "Medium (55%+)": 0.55,
-    "Low (<55%)": -1.0,  # special: below 55%
+    "Low (<55%)": -1.0,
 }
 
 _TIER_OPTIONS = {
@@ -112,7 +110,6 @@ def _p_color(model_p: float) -> str:
 
 
 def _today_et() -> str:
-    """Return today's date in ET as ISO string."""
     utc_now = datetime.now(timezone.utc)
     et_now = utc_now - timedelta(hours=4)
     return et_now.date().isoformat()
@@ -205,6 +202,100 @@ def _build_all_picks(props: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Leaderboard renderer
+# ---------------------------------------------------------------------------
+
+def _render_stat_leaderboard(
+    stat: str,
+    picks: pd.DataFrame,
+) -> None:
+    """Render a single stat leaderboard card showing top picks."""
+    stat_label = _STAT_LABELS.get(stat, stat)
+
+    if picks.empty:
+        return
+
+    rows_html = ""
+    for i, (_, row) in enumerate(picks.iterrows(), 1):
+        name = row["player_name"]
+        pid = int(row["player_id"])
+        team = row.get("team", "")
+        opp = row.get("opponent", "")
+        ptype = row.get("player_type", "")
+        type_badge = "P" if ptype == "pitcher" else "H"
+
+        line = row["book_line"]
+        line_str = f"{line:.0f}" if line == int(line) else f"{line:.1f}"
+        model_p = row["model_p"]
+        pct = model_p * 100
+        color = _p_color(model_p)
+
+        rank_class = "lb-rank lb-rank-top" if i <= 3 else "lb-rank"
+        hs = headshot_html(pid, size=32)
+
+        # Tier badge
+        tier = row.get("tier", "standard")
+        tier_label, tier_color = _TIER_BADGE.get(tier, ("", SLATE))
+        tier_html = (
+            f'<span style="background:{tier_color}22; color:{tier_color}; '
+            f'font-size:0.6rem; font-weight:700; padding:1px 4px; '
+            f'border-radius:3px; white-space:nowrap;">{tier_label}</span>'
+        )
+
+        # Edge info (market lines only)
+        edge_html = ""
+        if pd.notna(row.get("edge")) and tier == "market":
+            edge = float(row["edge"])
+            e_color = _edge_color(edge)
+            edge_html = (
+                f'<span style="color:{e_color}; font-size:0.75rem; '
+                f'font-weight:700; min-width:2.2rem; text-align:right;">'
+                f'{edge:+.0f}%</span>'
+            )
+
+        # Matchup
+        matchup_html = ""
+        if team and opp:
+            matchup_html = (
+                f'<span class="lb-team" data-team="{team}">{team}'
+                f'<span style="color:var(--tdd-slate); font-size:0.7rem;"> v </span>'
+                f'{opp}</span>'
+            )
+
+        rows_html += (
+            f'<div class="lb-row">'
+            f'<span class="{rank_class}">{i}.</span>'
+            f'<span class="lb-headshot">{hs}</span>'
+            f'<span style="font-size:0.6rem; color:{SLATE}; '
+            f'border:1px solid var(--tdd-dark-border); border-radius:3px; '
+            f'padding:0 0.2rem; margin-right:0.2rem;">{type_badge}</span>'
+            f'<span class="lb-name" style="font-size:0.85rem;">{name}</span>'
+            f'{matchup_html}'
+            f'{tier_html}'
+            f'<span style="color:{CREAM}; font-size:0.75rem; '
+            f'white-space:nowrap; margin-left:auto;">O {line_str}</span>'
+            f'<span class="lb-val" style="color:{color}; min-width:2.5rem;">'
+            f'{pct:.0f}%</span>'
+            f'{edge_html}'
+            f'</div>'
+        )
+
+    n_picks = len(picks)
+    html = (
+        f'<div class="lb-card lb-card-full" style="padding:0 0.75rem;">'
+        f'<div class="lb-title-row">'
+        f'<span class="lb-title">{stat_label}</span>'
+        f'<span class="lb-subtitle">{n_picks} picks</span>'
+        f'</div>'
+        f'<div style="max-height:320px; overflow-y:auto;">'
+        f'{rows_html}'
+        f'</div>'
+        f'</div>'
+    )
+    st.markdown(html, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
 # Main page
 # ---------------------------------------------------------------------------
 
@@ -233,24 +324,62 @@ def page_projected_performers() -> None:
                 all_props["p_over_mid"]
             )
 
-    # Today only, scheduled games
+    # Today's props
     today = _today_et()
-    props = all_props[
-        (all_props["game_date"] == today)
-        & (
-            (all_props["game_status"].isin(["scheduled", "in_progress", ""]))
-            | all_props["game_status"].isna()
-        )
-    ].copy()
+    today_props = all_props[all_props["game_date"] == today].copy()
 
-    if props.empty:
+    if today_props.empty:
         st.info("No props for today's games.")
         return
 
+    # Fetch live game status from MLB API so toggles reflect
+    # real-time state (the props parquet status is stale).
+    try:
+        live_schedule = fetch_live_schedule(today)
+        if (
+            not live_schedule.empty
+            and "game_pk" in live_schedule.columns
+            and "status" in live_schedule.columns
+            and "game_pk" in today_props.columns
+        ):
+            live_status = live_schedule.set_index("game_pk")["status"]
+            today_props["game_status"] = (
+                today_props["game_pk"].map(live_status).fillna(today_props["game_status"])
+            )
+    except Exception:
+        pass  # fall back to parquet status on API failure
+
     name_lookup = _build_name_lookup()
-    props["player_name"] = props["player_id"].map(
+    today_props["player_name"] = today_props["player_id"].map(
         lambda pid: name_lookup.get(int(pid), str(pid))
     )
+
+    # --- Inline toolbar ---
+    col_game, col_type, col_conf, col_tier = st.columns([1, 1, 1, 1])
+    col_t1, col_t2 = st.columns([1, 1])
+
+    with col_t1:
+        include_final = st.toggle("Include final", value=False, key="lab_final")
+    with col_t2:
+        include_live = st.toggle("Include in-progress", value=True, key="lab_live")
+
+    # Filter by game status using live status values:
+    # "Scheduled", "Pre-Game", "In Progress", "Final", etc.
+    _status_lower = today_props["game_status"].str.lower().str.strip().fillna("")
+    is_scheduled = _status_lower.isin(["scheduled", "pre-game", ""])  | _status_lower.isna()
+    is_live = _status_lower == "in progress"
+    is_final = _status_lower == "final"
+
+    mask = is_scheduled
+    if include_live:
+        mask = mask | is_live
+    if include_final:
+        mask = mask | is_final
+    props = today_props[mask].copy()
+
+    if props.empty:
+        st.info("No props match the current filters.")
+        return
 
     all_picks = _build_all_picks(props)
     if all_picks.empty:
@@ -268,9 +397,6 @@ def page_projected_performers() -> None:
             label = f"{g['team']} vs {g['opponent']}"
             game_options[label] = int(g["game_pk"])
 
-    # --- Inline toolbar ---
-    col_game, col_type, col_prop, col_conf, col_tier = st.columns([1, 1, 1, 1, 1])
-
     with col_game:
         game_choice = st.selectbox(
             "Game", list(game_options.keys()),
@@ -280,11 +406,6 @@ def page_projected_performers() -> None:
         type_choice = st.selectbox(
             "Player Type", ["All", "Pitchers", "Hitters"],
             index=0, key="lab_type", label_visibility="collapsed",
-        )
-    with col_prop:
-        prop_choice = st.selectbox(
-            "Prop", list(_STAT_OPTIONS.keys()),
-            index=0, key="lab_prop", label_visibility="collapsed",
         )
     with col_conf:
         conf_choice = st.selectbox(
@@ -311,30 +432,20 @@ def page_projected_performers() -> None:
     elif type_choice == "Hitters":
         filtered = filtered[filtered["player_type"] != "pitcher"]
 
-    # Prop filter
-    stat_key = _STAT_OPTIONS[prop_choice]
-    if stat_key is not None:
-        filtered = filtered[filtered["stat"] == stat_key]
-
     # Confidence filter
     conf_threshold = _CONFIDENCE_BUCKETS[conf_choice]
     if conf_threshold == -1.0:
-        # Low: below 55%
         filtered = filtered[filtered["model_p"] < 0.55]
     elif conf_threshold > 0:
         filtered = filtered[filtered["model_p"] >= conf_threshold]
 
-    # Tier filter -- "Market" matches both DK market and PP standard
+    # Tier filter
     tier_key = _TIER_OPTIONS[tier_choice]
     if tier_key == "market":
         filtered = filtered[filtered["tier"].isin(["market", "standard"])]
     elif tier_key is not None:
         filtered = filtered[filtered["tier"] == tier_key]
 
-    # Sort by confidence
-    filtered = filtered.sort_values("model_p", ascending=False)
-
-    # --- Render ---
     if filtered.empty:
         st.markdown(
             '<div class="tdd-meta">No picks match the selected filters.</div>',
@@ -344,86 +455,26 @@ def page_projected_performers() -> None:
 
     st.markdown(
         f'<div class="tdd-meta" style="margin-bottom:0.5rem;">'
-        f'{len(filtered)} picks</div>',
+        f'{len(filtered)} picks across '
+        f'{filtered["stat"].nunique()} stats</div>',
         unsafe_allow_html=True,
     )
 
-    rows_html = ""
-    for _, row in filtered.iterrows():
-        rows_html += _pick_row(row)
-    st.markdown(
-        f'<div style="display:flex; flex-direction:column; gap:4px;">'
-        f"{rows_html}</div>",
-        unsafe_allow_html=True,
-    )
+    # --- Render leaderboards by stat in 3-column grid ---
+    # Collect stats that have data, in display order
+    active_stats = [
+        s for s in _STAT_ORDER
+        if s in filtered["stat"].values
+    ]
 
-
-# ---------------------------------------------------------------------------
-# Row renderer
-# ---------------------------------------------------------------------------
-
-def _pick_row(row: pd.Series) -> str:
-    """Render a single prop pick row."""
-    name = row["player_name"]
-    stat = row["stat"]
-    stat_label = _STAT_LABELS.get(stat, stat)
-    team = row["team"]
-    opp = row["opponent"]
-    ptype = row["player_type"]
-    type_badge = "P" if ptype == "pitcher" else "H"
-
-    line = row["book_line"]
-    line_str = f"{line:.0f}" if line == int(line) else f"{line:.1f}"
-    model_p = row["model_p"]
-    pct = model_p * 100
-    color = _p_color(model_p)
-
-    # Tier badge
-    tier = row.get("tier", "standard")
-    tier_label, tier_color = _TIER_BADGE.get(tier, ("", SLATE))
-    tier_html = (
-        f'<span style="background:{tier_color}22; color:{tier_color}; '
-        f'font-size:0.65rem; font-weight:700; padding:1px 6px; '
-        f'border-radius:3px; white-space:nowrap;">{tier_label}</span>'
-    )
-
-    # Edge info (market lines only)
-    edge_html = ""
-    if pd.notna(row.get("edge")) and tier == "market":
-        edge = float(row["edge"])
-        dk_implied = row.get("dk_implied")
-        dk_pct = f"{dk_implied * 100:.0f}%" if pd.notna(dk_implied) else ""
-        e_color = _edge_color(edge)
-        edge_html = (
-            f'<span style="color:{SLATE}; font-size:0.72rem; white-space:nowrap;">'
-            f'Mkt {dk_pct}</span>'
-            f'<span style="color:{e_color}; font-size:0.78rem; font-weight:700; '
-            f'white-space:nowrap;">{edge:+.0f}%</span>'
-        )
-
-    return (
-        f'<div style="display:flex; align-items:center; gap:0.5rem; '
-        f'padding:6px 10px; background:var(--tdd-dark-card); '
-        f'border:1px solid var(--tdd-dark-border); border-radius:6px; '
-        f'flex-wrap:wrap;">'
-        # Tier badge
-        f'{tier_html}'
-        # Type badge
-        f'<span style="font-size:0.65rem; color:{SLATE}; '
-        f'border:1px solid var(--tdd-dark-border); border-radius:3px; '
-        f'padding:0 0.25rem;">{type_badge}</span>'
-        # Name + matchup
-        f'<span style="color:{CREAM}; font-size:0.85rem; font-weight:600; '
-        f'min-width:0; flex:1;">{name}'
-        f'<span style="color:{SLATE}; font-size:0.75rem; margin-left:0.4rem;">'
-        f'{team} vs {opp}</span></span>'
-        # Stat + line
-        f'<span style="color:{CREAM}; font-size:0.8rem; white-space:nowrap;">'
-        f'{stat_label} O {line_str}</span>'
-        # Model P(over)
-        f'<span style="color:{color}; font-size:0.8rem; font-weight:600; '
-        f'white-space:nowrap;">{pct:.0f}%</span>'
-        # Edge (market only)
-        f'{edge_html}'
-        f'</div>'
-    )
+    # Render in rows of 3 with padding between columns
+    for row_start in range(0, len(active_stats), 3):
+        row_stats = active_stats[row_start:row_start + 3]
+        cols = st.columns(len(row_stats), gap="large")
+        for col, stat in zip(cols, row_stats):
+            with col:
+                stat_picks = (
+                    filtered[filtered["stat"] == stat]
+                    .sort_values("model_p", ascending=False)
+                )
+                _render_stat_leaderboard(stat, stat_picks)

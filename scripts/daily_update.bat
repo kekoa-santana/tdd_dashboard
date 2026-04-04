@@ -7,11 +7,11 @@ REM  Modes:
 REM    daily_update.bat                 — full update (ETL + projections + props + push)
 REM    daily_update.bat --skip-etl      — skip ETL, projections + props + push
 REM    daily_update.bat --schedule-only — 30-min mode: schedule + lineups + props + push
-REM                                       (no ETL, no conjugate updates)
+REM                                       (skips sims if no lineup/pitcher changes)
 REM
 REM  Task Scheduler setup:
-REM    1. Full daily:   6:00 AM  → daily_update.bat
-REM    2. Game day:     every 30 min, 10 AM–1 AM → daily_update.bat --schedule-only
+REM    1. Full daily:   7:00 AM  -> daily_update.bat
+REM    2. Game day:     every 30 min, 8 AM-4 PM -> daily_update.bat --schedule-only
 REM ──────────────────────────────────────────────────────────────
 
 set PROJECT_DIR=C:\Users\kekoa\Documents\data_analytics\tdd-dashboard
