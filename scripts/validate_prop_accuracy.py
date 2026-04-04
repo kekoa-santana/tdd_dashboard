@@ -16,7 +16,7 @@ import pandas as pd
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "dashboard"
 
 # Confidence thresholds to evaluate
-THRESHOLDS = [0.60, 0.70, 0.80]
+THRESHOLDS = [0.55, 0.58, 0.60, 0.62, 0.65, 0.68, 0.70, 0.75, 0.80]
 
 
 def load_props() -> pd.DataFrame:
@@ -161,12 +161,10 @@ def build_accuracy_table(merged: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_stat_breakdown(merged: pd.DataFrame) -> pd.DataFrame:
-    """Break down accuracy by stat type at each threshold."""
+    """Break down accuracy by player_type + stat at each threshold."""
     rows = []
     for threshold in THRESHOLDS:
-        for stat in sorted(merged.stat.unique()):
-            sub = merged[merged.stat == stat]
-
+        for (ptype, stat), sub in merged.groupby(["player_type", "stat"]):
             over_mask = sub.p_over_at_line >= threshold
             under_mask = sub.p_over_at_line <= (1 - threshold)
             either_mask = over_mask | under_mask
@@ -175,15 +173,20 @@ def build_stat_breakdown(merged: pd.DataFrame) -> pd.DataFrame:
             if len(either) == 0:
                 continue
 
+            over_n = over_mask.sum()
+            under_n = under_mask.sum()
             correct = (
                 ((either.p_over_at_line >= threshold) & (either.actual > either.line))
                 | ((either.p_over_at_line <= (1 - threshold)) & (either.actual < either.line))
             )
             rows.append({
                 "threshold": f"{threshold:.0%}+",
+                "player_type": ptype,
                 "stat": stat,
                 "n": len(either),
-                "hits": correct.sum(),
+                "over_n": over_n,
+                "under_n": under_n,
+                "hits": int(correct.sum()),
                 "acc": correct.sum() / len(either),
             })
 
@@ -229,27 +232,36 @@ def main() -> None:
     print("=" * 70)
     print("OVERALL ACCURACY BY CONFIDENCE THRESHOLD")
     print("=" * 70)
+    print(f"  {'Thresh':<8} {'Over':>14}  {'Under':>14}  {'Combined':>14}")
+    print(f"  {'------':<8} {'-' * 14}  {'-' * 14}  {'-' * 14}")
     for _, row in acc.iterrows():
-        print(f"\n  {row['threshold']} confidence:")
-        print(f"    Over  -- {row['over_hits']:>4}/{row['over_n']:<4} = {row['over_acc']:.1%}" if row["over_acc"] is not None else f"    Over  -- 0 props")
-        print(f"    Under -- {row['under_hits']:>4}/{row['under_n']:<4} = {row['under_acc']:.1%}" if row["under_acc"] is not None else f"    Under -- 0 props")
-        print(f"    Both  -- {row['combined_hits']:>4}/{row['combined_n']:<4} = {row['combined_acc']:.1%}" if row["combined_acc"] is not None else f"    Both  -- 0 props")
+        def fmt(hits, n, acc_val):
+            if n == 0:
+                return "          --  "
+            return f"{hits:>4}/{n:<4} {acc_val:>5.1%}"
+        o = fmt(row["over_hits"], row["over_n"], row["over_acc"])
+        u = fmt(row["under_hits"], row["under_n"], row["under_acc"])
+        c = fmt(row["combined_hits"], row["combined_n"], row["combined_acc"])
+        print(f"  {row['threshold']:<8} {o}  {u}  {c}")
 
-    # --- Breakdown by stat ---
+    # --- Breakdown by player_type + stat ---
     stat_df = build_stat_breakdown(merged)
     if not stat_df.empty:
         print()
         print("=" * 70)
-        print("ACCURACY BY STAT TYPE")
+        print("ACCURACY BY PLAYER TYPE + STAT")
         print("=" * 70)
-        for threshold in THRESHOLDS:
-            label = f"{threshold:.0%}+"
-            sub = stat_df[stat_df.threshold == label]
-            if sub.empty:
-                continue
-            print(f"\n  {label} confidence:")
-            for _, row in sub.iterrows():
-                print(f"    {row['stat']:<5} -- {row['hits']:>4}/{row['n']:<4} = {row['acc']:.1%}")
+
+        # Pivot: rows = player_type + stat, columns = threshold
+        for (ptype, stat), grp in stat_df.groupby(["player_type", "stat"]):
+            label = f"{ptype} {stat}"
+            parts = []
+            for _, row in grp.iterrows():
+                parts.append(f"{row['threshold']}: {row['hits']:>3}/{row['n']:<3} ({row['acc']:.1%})")
+            total_in_data = len(merged[(merged.player_type == ptype) & (merged.stat == stat)])
+            print(f"\n  {label:<12} [total: {total_in_data}]")
+            for part in parts:
+                print(f"    {part}")
 
     print()
 
