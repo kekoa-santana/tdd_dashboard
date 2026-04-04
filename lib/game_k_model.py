@@ -17,14 +17,14 @@ import numpy as np
 import pandas as pd
 from scipy.special import expit, logit
 
-from lib.models.bf_model import draw_bf_samples, get_bf_distribution
-from lib.models.matchup import score_matchup, score_matchup_for_stat
-from lib.models.rest_adjustment import (
+from lib.bf_model import draw_bf_samples, get_bf_distribution
+from lib.matchup import score_matchup, score_matchup_for_stat
+from lib.rest_adjustment import (
     apply_rest_to_bf,
     compute_rest_for_game,
     get_rest_adjustment,
 )
-from lib.utils.constants import CLIP_LO, CLIP_HI
+from lib.constants import CLIP_LO, CLIP_HI
 
 logger = logging.getLogger(__name__)
 
