@@ -69,14 +69,14 @@ REM ── Generate XML for Hourly Update ──
 echo ^<?xml version="1.0" encoding="UTF-16"?^>
 echo ^<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"^>
 echo   ^<RegistrationInfo^>
-echo     ^<Description^>TDD Dashboard — hourly schedule/lineup/sims refresh (8 AM-4 PM PST^)^</Description^>
+echo     ^<Description^>TDD Dashboard — 30-min schedule/lineup/sims refresh (8 AM-4 PM PST, skips if no changes^)^</Description^>
 echo   ^</RegistrationInfo^>
 echo   ^<Triggers^>
 echo     ^<CalendarTrigger^>
 echo       ^<StartBoundary^>2026-03-18T08:00:00^</StartBoundary^>
 echo       ^<Enabled^>true^</Enabled^>
 echo       ^<Repetition^>
-echo         ^<Interval^>PT1H^</Interval^>
+echo         ^<Interval^>PT30M^</Interval^>
 echo         ^<Duration^>PT8H^</Duration^>
 echo         ^<StopAtDurationEnd^>false^</StopAtDurationEnd^>
 echo       ^</Repetition^>
@@ -108,7 +108,7 @@ echo ^</Task^>
 schtasks /create /tn "TDD Hourly Update" /xml "%TASK_DIR%\hourly_update.xml" /f
 
 if %ERRORLEVEL% EQU 0 (
-    echo [OK] Created "TDD Hourly Update" - hourly 8 AM-4 PM PST, catches up on wake
+    echo [OK] Created "TDD Hourly Update" - every 30 min 8 AM-4 PM PST, skips if no changes, catches up on wake
 ) else (
     echo [FAIL] Could not create hourly task. Run as Administrator.
 )
