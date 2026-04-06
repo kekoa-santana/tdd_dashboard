@@ -21,6 +21,57 @@ MLB_API_BASE = "https://statsapi.mlb.com/api/v1"
 _TEAM_ABBR: dict[int, str] = {}
 
 
+def fetch_recent_transactions(game_date: str) -> pd.DataFrame:
+    """Fetch MLB transactions for a given date.
+
+    Parameters
+    ----------
+    game_date : str
+        Date as 'YYYY-MM-DD'.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: transaction_id, player_id, player_name, team_abbr,
+        type_desc, description.  Empty DataFrame on failure.
+    """
+    import urllib.request
+
+    url = (
+        f"{MLB_API_BASE}/transactions"
+        f"?date={game_date}&sportId=1"
+    )
+
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:
+        logger.error("Failed to fetch transactions for %s: %s", game_date, e)
+        return pd.DataFrame()
+
+    rows = []
+    for txn in data.get("transactions", []):
+        txn_id = txn.get("id")
+        desc = txn.get("description", "")
+        type_desc = txn.get("typeDesc", "")
+
+        player = txn.get("person", {})
+        team = txn.get("toTeam") or txn.get("fromTeam") or {}
+
+        rows.append({
+            "transaction_id": txn_id,
+            "player_id": player.get("id"),
+            "player_name": player.get("fullName", ""),
+            "team_abbr": team.get("abbreviation", ""),
+            "type_desc": type_desc,
+            "description": desc,
+        })
+
+    df = pd.DataFrame(rows)
+    logger.info("Fetched %d transactions for %s", len(df), game_date)
+    return df
+
+
 def _fetch_people_bat_hand(player_ids: list[int]) -> dict[int, str]:
     """Map MLB player ID -> plate-appearance bat side (L, R, or S).
 
