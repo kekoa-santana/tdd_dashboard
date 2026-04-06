@@ -845,6 +845,59 @@ def load_hitter_hr_samples() -> LazyNpzDict | dict:
     return LazyNpzDict(path)
 
 
+class GameSimSampleStore:
+    """Lazy loader for precomputed game sim sample arrays.
+
+    The NPZ file stores keys like ``{game_pk}_{player_id}_{stat}``
+    (e.g. ``745123_543210_k``).  This wrapper provides a dict-like
+    ``get(game_pk, player_id)`` that returns
+    ``{"k": array, "bb": array, ...}`` or ``None``.
+    """
+
+    def __init__(self, path: Path, stat_names: list[str]):
+        self._path = path
+        self._stat_names = stat_names
+        self._npz: np.lib.npyio.NpzFile | None = None
+        self._keys: set[str] | None = None
+
+    def _open(self) -> None:
+        if self._npz is None:
+            self._npz = np.load(self._path)
+            self._keys = set(self._npz.files)
+
+    def get(self, game_pk: int, player_id: int) -> dict[str, np.ndarray] | None:
+        self._open()
+        prefix = f"{game_pk}_{player_id}"
+        first_key = f"{prefix}_{self._stat_names[0]}"
+        if first_key not in self._keys:  # type: ignore[operator]
+            return None
+        return {
+            stat: self._npz[f"{prefix}_{stat}"]  # type: ignore[index]
+            for stat in self._stat_names
+            if f"{prefix}_{stat}" in self._keys  # type: ignore[operator]
+        }
+
+    def __bool__(self) -> bool:
+        self._open()
+        return len(self._keys) > 0  # type: ignore[arg-type]
+
+
+@st.cache_resource(ttl=_DATA_TTL)
+def load_pitcher_game_sim_samples() -> GameSimSampleStore | None:
+    path = DASHBOARD_DIR / "pitcher_game_sim_samples.npz"
+    if not path.exists():
+        return None
+    return GameSimSampleStore(path, ["k", "bb", "h", "hr", "outs"])
+
+
+@st.cache_resource(ttl=_DATA_TTL)
+def load_batter_game_sim_samples() -> GameSimSampleStore | None:
+    path = DASHBOARD_DIR / "batter_game_sim_samples.npz"
+    if not path.exists():
+        return None
+    return GameSimSampleStore(path, ["k", "bb", "h", "hr"])
+
+
 @st.cache_data(ttl=_DATA_TTL)
 def load_exit_model():
     """Load the trained pitcher exit model.

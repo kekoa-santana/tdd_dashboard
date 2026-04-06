@@ -356,10 +356,68 @@ def run_schedule_refresh(game_date: str) -> bool:
     schedule.to_parquet(DASHBOARD_DIR / "todays_games.parquet", index=False)
     logger.info("Saved schedule: %d games", len(schedule))
 
+    # Tag API lineups with source
+    if not lineups.empty:
+        lineups["lineup_source"] = "api"
+
+    # --- Backfill roster batters for games missing API lineups ---
+    roster_path = DASHBOARD_DIR / "roster.parquet"
+    roster_df = pd.read_parquet(roster_path) if roster_path.exists() else pd.DataFrame()
+    if not roster_df.empty and not schedule.empty:
+        api_game_teams: set[tuple[int, str]] = set()
+        if not lineups.empty:
+            for _, _lr in lineups.iterrows():
+                api_game_teams.add((int(_lr["game_pk"]), str(_lr["team_abbr"])))
+
+        roster_rows: list[pd.DataFrame] = []
+        _pitcher_pos = {"SP", "RP", "P"}
+        for _, _g in schedule.iterrows():
+            _gpk = int(_g["game_pk"])
+            for _side in ["away", "home"]:
+                _team_abbr = _g.get(f"{_side}_abbr", "")
+                _team_id = _g.get(f"{_side}_team_id")
+                if (_gpk, _team_abbr) in api_game_teams:
+                    continue
+                # Active position players who have played recently
+                _team_roster = roster_df[
+                    (roster_df["team_abbr"] == _team_abbr)
+                    & (roster_df["roster_status"] == "active")
+                    & (~roster_df["primary_position"].isin(_pitcher_pos))
+                ].copy()
+                if _team_roster.empty:
+                    continue
+                # Sort by recency, take top 14
+                if "last_game_date" in _team_roster.columns:
+                    _team_roster = _team_roster.sort_values(
+                        "last_game_date", ascending=False, na_position="last",
+                    )
+                _team_roster = _team_roster.head(14)
+                _r_lu = pd.DataFrame({
+                    "batter_id": _team_roster["player_id"].values,
+                    "batter_name": _team_roster["player_name"].values,
+                    "batting_order": range(1, len(_team_roster) + 1),
+                    "game_pk": _gpk,
+                    "team_id": _team_id,
+                    "team_abbr": _team_abbr,
+                    "lineup_source": "roster",
+                })
+                roster_rows.append(_r_lu)
+
+        if roster_rows:
+            roster_combined = pd.concat(roster_rows, ignore_index=True)
+            lineups = (
+                pd.concat([lineups, roster_combined], ignore_index=True)
+                if not lineups.empty else roster_combined
+            )
+            logger.info("Backfilled roster batters: %d players across %d team-games",
+                        len(roster_combined), len(roster_rows))
+
     if not lineups.empty:
         lineups.to_parquet(DASHBOARD_DIR / "todays_lineups.parquet", index=False)
-        logger.info("Saved lineups: %d batters across %d games",
-                     len(lineups), lineups["game_pk"].nunique())
+        n_api = (lineups["lineup_source"] == "api").sum()
+        n_roster = (lineups["lineup_source"] == "roster").sum()
+        logger.info("Saved lineups: %d batters (%d API, %d roster) across %d games",
+                     len(lineups), n_api, n_roster, lineups["game_pk"].nunique())
     else:
         logger.info("No lineups available yet")
 
@@ -483,6 +541,7 @@ def run_schedule_refresh(game_date: str) -> bool:
     # --- Simulate each starter ---
     logger.info("Simulating game props for today's starters...")
     results = []
+    sim_sample_arrays: dict[str, np.ndarray] = {}
     for _, game in schedule.iterrows():
         gpk = game["game_pk"]
 
@@ -656,6 +715,14 @@ def run_schedule_refresh(game_date: str) -> bool:
             has_lineup = lineup_source != "none"
             avg_matchup = float(np.mean(lineup_matchup_lifts["k"])) if has_lineup else 0.0
 
+            # Stash raw sample arrays for dashboard (avoids re-sim at render)
+            _sim_key = f"{gpk}_{pid}"
+            sim_sample_arrays[f"{_sim_key}_k"] = result.k_samples.astype(np.float32)
+            sim_sample_arrays[f"{_sim_key}_bb"] = result.bb_samples.astype(np.float32)
+            sim_sample_arrays[f"{_sim_key}_h"] = result.h_samples.astype(np.float32)
+            sim_sample_arrays[f"{_sim_key}_hr"] = result.hr_samples.astype(np.float32)
+            sim_sample_arrays[f"{_sim_key}_outs"] = result.outs_samples.astype(np.float32)
+
             results.append({
                 "game_pk": gpk,
                 "side": side,
@@ -704,6 +771,15 @@ def run_schedule_refresh(game_date: str) -> bool:
         sim_df = pd.DataFrame(results)
         sim_df.to_parquet(DASHBOARD_DIR / "todays_sims.parquet", index=False)
         logger.info("Saved game simulations for %d pitcher appearances", len(sim_df))
+
+        # Save raw sample arrays so the dashboard can render distributions
+        # without re-running Monte Carlo at render time.
+        if sim_sample_arrays:
+            np.savez_compressed(
+                DASHBOARD_DIR / "pitcher_game_sim_samples.npz",
+                **sim_sample_arrays,
+            )
+            logger.info("Saved pitcher game sim sample arrays (%d keys)", len(sim_sample_arrays))
 
         n_api = (sim_df["lineup_source"] == "api").sum()
         n_dc = (sim_df["lineup_source"] == "depth_chart").sum()
@@ -895,11 +971,20 @@ def run_batter_sims(game_date: str) -> None:
     pitcher_ctx: dict[int, dict] = {}
     for _, ps in pitcher_sims.iterrows():
         pid = int(ps["pitcher_id"])
+        # Derive BF from available columns
+        _exp_bf = float(ps.get("expected_bf", 0))
+        if _exp_bf < 1:
+            _exp_bf = (
+                float(ps.get("expected_outs", 16))
+                + float(ps.get("expected_h", 5))
+                + float(ps.get("expected_bb", 2))
+                + float(ps.get("expected_hr", 0.5))
+            )
         pitcher_ctx[pid] = {
             "k_rate": float(ps.get("projected_k_rate", 0.22)),
-            "bb_rate": float(ps["expected_bb"]) / max(float(ps["expected_bf"]), 1),
-            "hr_rate": float(ps["expected_hr"]) / max(float(ps["expected_bf"]), 1),
-            "bf_mu": float(ps.get("bf_mu", 24)),
+            "bb_rate": float(ps.get("expected_bb", 2)) / max(_exp_bf, 1),
+            "hr_rate": float(ps.get("expected_hr", 0.5)) / max(_exp_bf, 1),
+            "bf_mu": float(ps.get("bf_mu", _exp_bf)),
             "bf_sigma": float(ps.get("bf_sigma", 3)),
             "team_abbr": ps.get("team_abbr", ""),
             "opp_abbr": ps.get("opp_abbr", ""),
@@ -909,6 +994,7 @@ def run_batter_sims(game_date: str) -> None:
 
     logger.info("Running batter sims for %d lineup batters...", len(lineups))
     results = []
+    batter_sample_arrays: dict[str, np.ndarray] = {}
     skipped = 0
 
     for _, brow in lineups.iterrows():
@@ -981,6 +1067,13 @@ def run_batter_sims(game_date: str) -> None:
             random_seed=42 + gpk + bid,
         )
 
+        # Stash raw sample arrays for dashboard render
+        _bsim_key = f"{gpk}_{bid}"
+        batter_sample_arrays[f"{_bsim_key}_k"] = sim_result.k_samples.astype(np.float32)
+        batter_sample_arrays[f"{_bsim_key}_bb"] = sim_result.bb_samples.astype(np.float32)
+        batter_sample_arrays[f"{_bsim_key}_h"] = sim_result.h_samples.astype(np.float32)
+        batter_sample_arrays[f"{_bsim_key}_hr"] = sim_result.hr_samples.astype(np.float32)
+
         summary = sim_result.summary()
 
         # Prop lines
@@ -1007,6 +1100,10 @@ def run_batter_sims(game_date: str) -> None:
             "opp_abbr": pctx["opp_abbr"] if pctx["opp_abbr"] != brow.get("team_abbr") else pctx["team_abbr"],
             "batting_order": batting_order,
             "opp_starter_id": opp_pid,
+            "lineup_source": brow.get("lineup_source", "api"),
+            "matchup_k_lift": k_lift,
+            "matchup_bb_lift": bb_lift,
+            "matchup_hr_lift": hr_lift,
             "expected_k": summary["k"]["mean"],
             "std_k": summary["k"]["std"],
             "expected_bb": summary["bb"]["mean"],
@@ -1023,6 +1120,13 @@ def run_batter_sims(game_date: str) -> None:
         df.to_parquet(DASHBOARD_DIR / "todays_batter_sims.parquet", index=False)
         logger.info("Saved batter sims: %d batters (%d skipped, no samples)",
                      len(df), skipped)
+
+        if batter_sample_arrays:
+            np.savez_compressed(
+                DASHBOARD_DIR / "batter_game_sim_samples.npz",
+                **batter_sample_arrays,
+            )
+            logger.info("Saved batter game sim sample arrays (%d keys)", len(batter_sample_arrays))
     else:
         logger.warning("No batter sims produced (%d skipped)", skipped)
 

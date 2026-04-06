@@ -23,17 +23,13 @@ from services.data_loader import (
     load_hitter_strength,
     load_projections, load_counting, load_game_info, load_player_teams,
     load_hitter_archetypes, load_pitcher_archetypes,
-    load_k_samples, load_bb_samples, load_hr_samples, load_bf_priors,
-    load_hitter_k_samples, load_hitter_bb_samples, load_hitter_hr_samples,
-    load_exit_model, load_pitcher_pitch_count_features,
-    load_batter_pitch_count_features, load_tto_profiles,
-    load_pitcher_exit_tendencies,
-    load_pitcher_location_grid, load_hitter_zone_grid,
+    load_bf_priors,
     load_roster, load_game_props,
     fetch_live_schedule, fetch_live_lineups, fetch_live_boxscores,
     backfill_missing_lineups,
     load_batter_platoon_splits, load_batter_glicko, load_pitcher_glicko,
     load_pitcher_gb_pct, load_matchup_baselines,
+    load_pitcher_game_sim_samples, load_batter_game_sim_samples,
 )
 from utils.helpers import format_ip, get_team_lookup
 from components.charts import _STAT_CHART_CONFIG
@@ -385,41 +381,36 @@ def _render_schedule_cards(
     proj_lookup = _lookups["proj_lookup"]
     _standings = _lookups["standings"]
 
-    # Game simulator + matchup scoring data (individually cached)
-    _k_samples_dict = load_k_samples()
-    _bb_samples_dict = load_bb_samples()
-    _hr_samples_dict = load_hr_samples()
-    _bf_priors = load_bf_priors()
-    _arsenal_df = load_pitcher_arsenal()
-    _vuln_df = load_hitter_vulnerability(career=True)
-    _str_df = load_hitter_strength(career=True)
-    _ploc_df = load_pitcher_location_grid()
-    _hzone_df = load_hitter_zone_grid(career=True)
+    # Drilldown data is loaded lazily -- only when a game toggle is active.
+    # This avoids ~20 cached-but-expensive data loads on every page render.
+    _drilldown_data: dict | None = None
 
-    _hitter_k_samples = load_hitter_k_samples()
-    _hitter_bb_samples = load_hitter_bb_samples()
-    _hitter_hr_samples = load_hitter_hr_samples()
-
-    _exit_model = load_exit_model()
-    _pitcher_pc = load_pitcher_pitch_count_features()
-    _batter_pc = load_batter_pitch_count_features()
-    _tto_profiles = load_tto_profiles()
-    _exit_tendencies = load_pitcher_exit_tendencies()
-
-    _batter_sims_df = load_todays_batter_sims()
-
-    # Game props with cached name resolution + lineup backfill
-    _game_props = load_game_props()
-    if not _game_props.empty:
-        _name_lookup = dict(_lookups["name_lookup"])
-        if not lineups.empty and "batter_name" in lineups.columns:
-            for _, _r in lineups.iterrows():
-                pid = int(_r.get("batter_id", 0))
-                if pid and pid not in _name_lookup:
-                    _name_lookup[pid] = _r["batter_name"]
-        _game_props["player_name"] = _game_props["player_id"].map(
-            lambda pid: _name_lookup.get(int(pid), str(pid))
-        )
+    def _get_drilldown_data() -> dict:
+        nonlocal _drilldown_data
+        if _drilldown_data is not None:
+            return _drilldown_data
+        _game_props = load_game_props()
+        if not _game_props.empty:
+            _name_lookup = dict(_lookups["name_lookup"])
+            if not lineups.empty and "batter_name" in lineups.columns:
+                for _, _r in lineups.iterrows():
+                    pid = int(_r.get("batter_id", 0))
+                    if pid and pid not in _name_lookup:
+                        _name_lookup[pid] = _r["batter_name"]
+            _game_props["player_name"] = _game_props["player_id"].map(
+                lambda pid: _name_lookup.get(int(pid), str(pid))
+            )
+        _drilldown_data = {
+            "bf_priors": load_bf_priors(),
+            "arsenal_df": load_pitcher_arsenal(),
+            "vuln_df": load_hitter_vulnerability(career=True),
+            "str_df": load_hitter_strength(career=True),
+            "batter_sims_df": load_todays_batter_sims(),
+            "pitcher_sim_samples": load_pitcher_game_sim_samples(),
+            "batter_sim_samples": load_batter_game_sim_samples(),
+            "game_props": _game_props,
+        }
+        return _drilldown_data
 
     if schedule.empty:
         st.info("No games scheduled for this date.")
@@ -448,6 +439,13 @@ def _render_schedule_cards(
         unsafe_allow_html=True,
     )
 
+    # Pre-group pitcher sims by game_pk (one pass instead of N per-game filters)
+    _pitcher_sims_by_gpk: dict[int, pd.DataFrame] = {}
+    if not sims.empty and "game_pk" in sims.columns and "player_type" in sims.columns:
+        _p_sims = sims[sims["player_type"] == "pitcher"]
+        for _gpk_val, _grp in _p_sims.groupby("game_pk"):
+            _pitcher_sims_by_gpk[int(_gpk_val)] = _grp
+
     for _, game in schedule.iterrows():
         gpk = game["game_pk"]
         away_abbr = game.get("away_abbr", "?")
@@ -458,8 +456,7 @@ def _render_schedule_cards(
         game_dt = game.get("game_date", "")
         status = game.get("status", "")
 
-        # game_props has per-stat rows; pivot to get expected_k / expected_ip per side
-        game_sims = sims[(sims["game_pk"] == gpk) & (sims["player_type"] == "pitcher")] if not sims.empty else pd.DataFrame()
+        game_sims = _pitcher_sims_by_gpk.get(int(gpk), pd.DataFrame())
 
         def _extract_pitcher_sim(side_label: str) -> dict | None:
             side_rows = game_sims[game_sims["side"] == side_label] if not game_sims.empty else pd.DataFrame()
@@ -589,28 +586,19 @@ def _render_schedule_cards(
 
         st.markdown(card_html, unsafe_allow_html=True)
 
-        with st.expander("View Matchups & Projections"):
+        if st.toggle("Matchups & Projections", key=f"expand_{gpk}", value=False):
+            _dd = _get_drilldown_data()
             _render_game_drilldown(
                 game, lineups, _h_arch_lookup, _p_arch_lookup, _h_stat_lookup,
-                _k_samples_dict, _bf_priors, _arsenal_df, _vuln_df,
+                _dd["bf_priors"], _dd["arsenal_df"], _dd["vuln_df"],
                 proj_lookup, gpk,
-                bb_samples_dict=_bb_samples_dict,
-                hr_samples_dict=_hr_samples_dict,
-                exit_model=_exit_model,
-                pitcher_pc=_pitcher_pc,
-                batter_pc=_batter_pc,
-                tto_profiles=_tto_profiles,
-                exit_tendencies=_exit_tendencies,
                 pos_lookup=_pos_lookup,
-                hitter_k_samples=_hitter_k_samples,
-                hitter_bb_samples=_hitter_bb_samples,
-                hitter_hr_samples=_hitter_hr_samples,
-                str_df=_str_df,
-                ploc_df=_ploc_df,
-                hzone_df=_hzone_df,
-                game_props=_game_props,
+                str_df=_dd["str_df"],
+                game_props=_dd["game_props"],
                 live_stats=live_stats,
-                batter_sims_df=_batter_sims_df,
+                batter_sims_df=_dd["batter_sims_df"],
+                pitcher_sim_samples=_dd["pitcher_sim_samples"],
+                batter_sim_samples=_dd["batter_sim_samples"],
             )
 
     if not sims.empty and not sims_stale:
@@ -869,29 +857,18 @@ def _render_game_drilldown(
     h_arch_lookup: dict[int, str],
     p_arch_lookup: dict[int, str],
     h_stat_lookup: dict[int, dict],
-    k_samples_dict: dict[str, np.ndarray],
     bf_priors: pd.DataFrame,
     arsenal_df: pd.DataFrame,
     vuln_df: pd.DataFrame,
     proj_lookup: dict[int, dict],
     gpk: int,
-    bb_samples_dict: dict[str, np.ndarray] | None = None,
-    hr_samples_dict: dict[str, np.ndarray] | None = None,
-    exit_model: object | None = None,
-    pitcher_pc: pd.DataFrame | None = None,
-    batter_pc: pd.DataFrame | None = None,
-    tto_profiles: pd.DataFrame | None = None,
-    exit_tendencies: pd.DataFrame | None = None,
     pos_lookup: dict[int, str] | None = None,
-    hitter_k_samples: dict[str, np.ndarray] | None = None,
-    hitter_bb_samples: dict[str, np.ndarray] | None = None,
-    hitter_hr_samples: dict[str, np.ndarray] | None = None,
     str_df: pd.DataFrame | None = None,
-    ploc_df: pd.DataFrame | None = None,
-    hzone_df: pd.DataFrame | None = None,
     game_props: pd.DataFrame | None = None,
     live_stats: pd.DataFrame | None = None,
     batter_sims_df: pd.DataFrame | None = None,
+    pitcher_sim_samples: object | None = None,
+    batter_sim_samples: object | None = None,
 ) -> None:
     """Rich game drill-down: lineup matchups, matchup analysis, and game simulator."""
     away_abbr = game.get("away_abbr", "?")
@@ -956,29 +933,15 @@ def _render_game_drilldown(
                 parts.append(f"{n_miss} removed")
             st.info(f"Lineup changed since last sim. {', '.join(parts)}. Sims will auto-update shortly.")
 
-        _pitcher_sim_data = {
-            "k_samples_dict": k_samples_dict,
-            "bb_samples_dict": bb_samples_dict or {},
-            "hr_samples_dict": hr_samples_dict or {},
-            "game_context": game_context,
-            "exit_model": exit_model,
-            "pitcher_pc": pitcher_pc if pitcher_pc is not None else pd.DataFrame(),
-            "batter_pc": batter_pc if batter_pc is not None else pd.DataFrame(),
-            "tto_profiles": tto_profiles if tto_profiles is not None else pd.DataFrame(),
-            "exit_tendencies": exit_tendencies if exit_tendencies is not None else pd.DataFrame(),
-        }
-
         _render_matchup_tab_sidebyside(
             sides, h_arch_lookup, h_stat_lookup,
             arsenal_df, vuln_df, gpk,
             pos_lookup=pos_lookup or {},
             str_df=str_df if str_df is not None else pd.DataFrame(),
-            hitter_k_samples=hitter_k_samples or {},
-            hitter_bb_samples=hitter_bb_samples or {},
-            hitter_hr_samples=hitter_hr_samples or {},
             bf_priors=bf_priors if bf_priors is not None else pd.DataFrame(),
             batter_sims_df=_batter_sims,
-            pitcher_sim_data=_pitcher_sim_data,
+            pitcher_sim_samples=pitcher_sim_samples,
+            batter_sim_samples=batter_sim_samples,
         )
 
     elif section == "Props Lab":
@@ -988,278 +951,6 @@ def _render_game_drilldown(
             lineups_df=game_lu,
             live_stats_df=live_stats,
         )
-
-
-def _render_hitter_projections_tab(
-    sides: list[dict],
-    h_arch_lookup: dict[int, str],
-    h_stat_lookup: dict[int, dict],
-    gpk: int,
-    hitter_k_samples: dict[str, np.ndarray] | None = None,
-    hitter_bb_samples: dict[str, np.ndarray] | None = None,
-    hitter_hr_samples: dict[str, np.ndarray] | None = None,
-    bf_priors: pd.DataFrame | None = None,
-    arsenal_df: pd.DataFrame | None = None,
-    vuln_df: pd.DataFrame | None = None,
-    pos_lookup: dict[int, str] | None = None,
-    sides_all: list[dict] | None = None,
-) -> None:
-    """Hitter projection cards | MLB-style lineup with game-level sim projections."""
-    from lib.game_sim.batter_simulator import simulate_batter_game
-    from lib.matchup import score_matchup, score_matchup_advantage, score_matchup_bb, score_matchup_hr
-    from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
-
-    if pos_lookup is None:
-        pos_lookup = {}
-    if hitter_k_samples is None:
-        hitter_k_samples = {}
-    if hitter_bb_samples is None:
-        hitter_bb_samples = {}
-    if hitter_hr_samples is None:
-        hitter_hr_samples = {}
-    if bf_priors is None:
-        bf_priors = pd.DataFrame()
-    if arsenal_df is None:
-        arsenal_df = pd.DataFrame()
-    if vuln_df is None:
-        vuln_df = pd.DataFrame()
-
-    _matchup_aux_h = _load_matchup_aux()
-    _hitter_proj_h = load_projections("hitter")
-
-    # Use sides_all for opposing pitcher lookup when sides is a single-element list
-    _all_sides = sides_all if sides_all is not None else sides
-
-    # Build baselines for matchup scoring
-    baselines_pt = {
-        pt: {
-            "whiff_rate": vals.get("whiff_rate", 0.25),
-            "chase_rate": vals.get("chase_rate", 0.30),
-            "barrel_rate": vals.get("barrel_rate", 0.06),
-        }
-        for pt, vals in LEAGUE_AVG_BY_PITCH_TYPE.items()
-    }
-
-    # Bullpen league-average fallback rates
-    bullpen_k = 0.23
-    bullpen_bb = 0.09
-    bullpen_hr = 0.03
-
-    for side_info in sides:
-        side_abbr = side_info["abbr"]
-        own_lu = side_info["own_lineup"]
-        pitcher_name = side_info["pitcher_name"]
-        pid = side_info["pitcher_id"]
-        p_arch = side_info["pitcher_arch"]
-        p_proj = side_info["pitcher_proj"]
-
-        # Find opposing pitcher from the full sides list
-        opp_side = next(
-            (s for s in _all_sides if s["side"] != side_info["side"]),
-            None,
-        )
-        opp_pid = opp_side["pitcher_id"] if opp_side else None
-        opp_proj = opp_side["pitcher_proj"] if opp_side else {}
-        opp_pitcher_name = opp_side["pitcher_name"] if opp_side else "TBD"
-
-        # Opposing pitcher rates
-        opp_k_rate = float(opp_proj.get("projected_k_rate", 0.22)) if opp_proj else 0.22
-        opp_bb_rate = float(opp_proj.get("projected_bb_rate", 0.08)) if opp_proj else 0.08
-        opp_hr_rate = float(opp_proj.get("projected_hr_per_bf", 0.03)) if opp_proj else 0.03
-
-        # Opposing pitcher BF priors
-        opp_bf_mu = 22.0
-        opp_bf_sigma = 4.5
-        if opp_pid and not bf_priors.empty:
-            bp_row = bf_priors[bf_priors["pitcher_id"] == opp_pid]
-            if not bp_row.empty:
-                bp_last = bp_row.sort_values("season").iloc[-1]
-                opp_bf_mu = float(bp_last["mu_bf"])
-                opp_bf_sigma = float(bp_last["sigma_bf"])
-
-        # Header | include opposing pitcher context
-        opp_ctx = ""
-        if opp_pid:
-            opp_ctx = (
-                f' <span style="color:var(--tdd-slate); font-size:0.8rem; font-weight:400;">'
-                f'vs {opp_pitcher_name}</span>'
-            )
-        st.markdown(
-            f'<div class="tdd-section-hdr">'
-            f'<span class="tdd-team-abbr" data-team="{side_abbr}">{side_abbr}</span>'
-            f' Lineup{opp_ctx}</div>',
-            unsafe_allow_html=True,
-        )
-
-        if own_lu.empty:
-            st.markdown(
-                f'<div style="color:var(--tdd-slate); font-size:0.85rem; '
-                f'padding:0.5rem 0;">No probable lineup yet</div>',
-                unsafe_allow_html=True,
-            )
-            continue
-
-        name_col = "batter_name" if "batter_name" in own_lu.columns else "player_name"
-        id_col = "batter_id" if "batter_id" in own_lu.columns else "player_id"
-
-        rows_html: list[str] = []
-        for _, brow in own_lu.head(9).iterrows():
-            bid = int(brow[id_col]) if pd.notna(brow.get(id_col)) else None
-            bname = brow.get(name_col, "Unknown")
-            order = int(brow["batting_order"])
-
-            pos = pos_lookup.get(bid, "--") if bid else "--"
-            stats = h_stat_lookup.get(bid, {}) if bid else {}
-            arch = h_arch_lookup.get(bid, "Prospect") if bid else ""
-
-            composite = stats.get("tdd_value_score")
-            diamond_html = ""
-            if pd.notna(composite):
-                diamond_html = diamond_rating_html(0, size="sm", precomputed=composite)
-
-            arch_html = (
-                f'<span class="tdd-badge">{arch}</span>'
-            ) if arch else ""
-
-            # --- Game-level batter simulation ---
-            stat_html = ""
-            bid_key = str(bid) if bid else None
-            has_batter_samples = (
-                bid_key is not None
-                and bid_key in hitter_k_samples
-                and bid_key in hitter_bb_samples
-                and bid_key in hitter_hr_samples
-                and opp_pid is not None
-            )
-
-            if has_batter_samples:
-                try:
-                    # Matchup lifts
-                    matchup_k_lift = 0.0
-                    matchup_bb_lift = 0.0
-                    matchup_hr_lift = 0.0
-                    if (
-                        opp_pid and bid
-                        and not arsenal_df.empty and not vuln_df.empty
-                    ):
-                        _op_ars = arsenal_df[arsenal_df["pitcher_id"] == opp_pid]
-                        _op_hand = _op_ars["pitch_hand"].iloc[0] if not _op_ars.empty and "pitch_hand" in _op_ars.columns else None
-                        _akw = _build_advantage_kwargs(
-                            _matchup_aux_h, opp_pid, bid,
-                            pitcher_hand=_op_hand, hitter_proj=_hitter_proj_h,
-                        )
-                        _ar = score_matchup_advantage(
-                            opp_pid, bid, arsenal_df, vuln_df, baselines_pt, **_akw,
-                        )
-                        matchup_k_lift = _ar["breakdown"]["k_lift"]
-                        matchup_bb_lift = _ar["breakdown"]["bb_lift"]
-                        matchup_hr_lift = _ar["breakdown"]["hr_lift"]
-
-                    sim_result = simulate_batter_game(
-                        batter_k_rate_samples=hitter_k_samples[bid_key],
-                        batter_bb_rate_samples=hitter_bb_samples[bid_key],
-                        batter_hr_rate_samples=hitter_hr_samples[bid_key],
-                        batting_order=order,
-                        starter_k_rate=opp_k_rate,
-                        starter_bb_rate=opp_bb_rate,
-                        starter_hr_rate=opp_hr_rate,
-                        starter_bf_mu=opp_bf_mu,
-                        starter_bf_sigma=opp_bf_sigma,
-                        matchup_k_lift=matchup_k_lift,
-                        matchup_bb_lift=matchup_bb_lift,
-                        matchup_hr_lift=matchup_hr_lift,
-                        bullpen_k_rate=bullpen_k,
-                        bullpen_bb_rate=bullpen_bb,
-                        bullpen_hr_rate=bullpen_hr,
-                        n_sims=5_000,
-                        random_seed=gpk + (bid or 0),
-                    )
-                    summary = sim_result.summary()
-                    e_k = summary["k"]["mean"]
-                    e_bb = summary["bb"]["mean"]
-                    e_h = summary["h"]["mean"]
-                    e_hr = summary["hr"]["mean"]
-
-                    stat_html = (
-                        f'<span style="color:var(--tdd-slate); font-size:0.7rem;">'
-                        f'K {e_k:.2f} · BB {e_bb:.2f} · '
-                        f'H {e_h:.2f} · HR {e_hr:.2f}'
-                        f'</span>'
-                    )
-                except Exception:
-                    # Fall back to season projections on any error
-                    has_batter_samples = False
-
-            if not has_batter_samples:
-                # Fallback: season counting projections
-                proj_k = stats.get("total_k")
-                proj_bb = stats.get("total_bb")
-                proj_hr = stats.get("total_hr")
-                stat_parts: list[str] = []
-                if pd.notna(proj_k):
-                    stat_parts.append(f'K {proj_k:.0f}')
-                if pd.notna(proj_bb):
-                    stat_parts.append(f'BB {proj_bb:.0f}')
-                if pd.notna(proj_hr):
-                    stat_parts.append(f'HR {proj_hr:.0f}')
-                if stat_parts:
-                    stat_html = (
-                        f'<span style="color:var(--tdd-slate); font-size:0.7rem;">'
-                        f'{" · ".join(stat_parts)}</span>'
-                    )
-
-            hs = ""
-            if bid:
-                hs = f'<span class="lineup-hs" style="margin:0 0.3rem;">{headshot_html(bid, size=32)}</span>'
-
-            _order_color = "var(--tdd-gold)" if order <= 3 else "var(--tdd-slate)"
-            rows_html.append(
-                f'<div style="display:flex; align-items:center; gap:0.3rem; '
-                f'padding:0.3rem 0.6rem; border-bottom:1px solid var(--tdd-dark-border-faint);">'
-                f'<span style="color:{_order_color}; font-size:0.8rem; '
-                f'min-width:1.2rem; text-align:right; font-weight:700;">{order}</span>'
-                f'{hs}'
-                f'<span style="color:var(--tdd-slate); font-size:0.72rem; min-width:1.8rem; margin-left:0.3rem;">{pos}</span>'
-                f'{_lineup_hand_html(stats.get("bat_hand"))}'
-                f'<span style="color:var(--tdd-cream); font-size:0.88rem; font-weight:600; '
-                f'flex:1; min-width:5rem;">{bname}</span>'
-                f'{arch_html}'
-                f'<span class="lineup-diamonds" style="margin:0 0.3rem;">{diamond_html}</span>'
-                f'{stat_html}'
-                f'</div>'
-            )
-
-        # Pitcher at bottom (MLB style)
-        if pid:
-            p_composite = p_proj.get("tdd_value_score")
-            p_diamond = diamond_rating_html(0, size="sm", precomputed=p_composite) if pd.notna(p_composite) else ""
-            p_arch_html = (
-                f'<span class="tdd-badge">{p_arch}</span>'
-            ) if p_arch else ""
-            p_hs = f'<span class="lineup-hs" style="margin:0 0.3rem;">{headshot_html(pid, size=32)}</span>'
-            p_hand_html = _lineup_pitcher_hand_html(p_proj, arsenal_df, pid)
-
-            rows_html.append(
-                f'<div class="tdd-lineup-row" style="background:rgba(200,169,110,0.06);">'
-                f'<span style="color:var(--tdd-gold); font-size:var(--tdd-fs-meta); '
-                f'min-width:1.2rem; text-align:right; font-weight:700;">P</span>'
-                f'{p_hs}'
-                f'<span class="tdd-stat-label" style="min-width:1.8rem;">SP</span>'
-                f'{p_hand_html}'
-                f'<span class="tdd-player-name" style="flex:1; min-width:5rem;">{pitcher_name}</span>'
-                f'{p_arch_html}'
-                f'<span class="lineup-diamonds" style="margin:0 0.3rem;">{p_diamond}</span>'
-                f'</div>'
-            )
-
-        if rows_html:
-            st.markdown(
-                f'<div style="background:transparent; border:none; '
-                f'border-bottom:1px solid var(--tdd-dark-border); margin-bottom:1rem; overflow:hidden;">'
-                + "".join(rows_html)
-                + '</div>',
-                unsafe_allow_html=True,
-            )
 
 
 _PITCHER_STAT_META = {
@@ -1405,12 +1096,10 @@ def _render_matchup_tab_sidebyside(
     gpk: int,
     pos_lookup: dict[int, str] | None = None,
     str_df: pd.DataFrame | None = None,
-    hitter_k_samples: dict[str, np.ndarray] | None = None,
-    hitter_bb_samples: dict[str, np.ndarray] | None = None,
-    hitter_hr_samples: dict[str, np.ndarray] | None = None,
     bf_priors: pd.DataFrame | None = None,
     batter_sims_df: pd.DataFrame | None = None,
-    pitcher_sim_data: dict | None = None,
+    pitcher_sim_samples: object | None = None,
+    batter_sim_samples: object | None = None,
 ) -> None:
     """Lineup matchups for both sides rendered in side-by-side columns."""
     col_away, col_home = st.columns(2)
@@ -1423,12 +1112,10 @@ def _render_matchup_tab_sidebyside(
                 pos_lookup=pos_lookup or {},
                 opp_side=opp_side,
                 str_df=str_df if str_df is not None else pd.DataFrame(),
-                hitter_k_samples=hitter_k_samples or {},
-                hitter_bb_samples=hitter_bb_samples or {},
-                hitter_hr_samples=hitter_hr_samples or {},
                 bf_priors=bf_priors if bf_priors is not None else pd.DataFrame(),
                 batter_sims_df=batter_sims_df if batter_sims_df is not None else pd.DataFrame(),
-                pitcher_sim_data=pitcher_sim_data,
+                pitcher_sim_samples=pitcher_sim_samples,
+                batter_sim_samples=batter_sim_samples,
             )
 
 
@@ -1763,6 +1450,27 @@ def _matchup_advantage_html(
     return html_out, k_lift, bb_lift, hr_lift
 
 
+def _matchup_lift_badge_html(k_lift: float, bb_lift: float, hr_lift: float) -> str:
+    """Compact matchup badge from precomputed lift values."""
+    # Positive k_lift = pitcher advantage (more K), negative = hitter advantage
+    net = k_lift - 0.5 * bb_lift - 0.5 * hr_lift
+    if net > 0.03:
+        color_var, label = "--tdd-ember", "Pitcher"
+    elif net < -0.03:
+        color_var, label = "--tdd-sage", "Hitter"
+    else:
+        return (
+            f'<span style="color:var(--tdd-slate); font-size:0.68rem; '
+            f'margin-left:0.3rem;">Even</span>'
+        )
+    return (
+        f'<span style="color:var({color_var}); font-size:0.68rem; '
+        f'font-weight:600; margin-left:0.3rem;">{label} '
+        f'<span style="font-weight:400; font-size:0.62rem;">'
+        f'K {k_lift:+.2f}</span></span>'
+    )
+
+
 def _find_pitcher_reason(
     k_lift: float,
     bb_lift: float,
@@ -1990,12 +1698,10 @@ def _render_matchup_tab(
     pos_lookup: dict[int, str] | None = None,
     opp_side: dict | None = None,
     str_df: pd.DataFrame | None = None,
-    hitter_k_samples: dict[str, np.ndarray] | None = None,
-    hitter_bb_samples: dict[str, np.ndarray] | None = None,
-    hitter_hr_samples: dict[str, np.ndarray] | None = None,
     bf_priors: pd.DataFrame | None = None,
     batter_sims_df: pd.DataFrame | None = None,
-    pitcher_sim_data: dict | None = None,
+    pitcher_sim_samples: object | None = None,
+    batter_sim_samples: object | None = None,
 ) -> None:
     """Team roster with inline matchup scouting on expand.
 
@@ -2005,42 +1711,18 @@ def _render_matchup_tab(
       - Own lineup with batter matchup badges vs opposing SP
       - Expanding a batter shows matchup scouting bullets + grades + game projections
       - Avg K matchup summary for own SP vs opposing lineup
+
+    All sim results and matchup lifts come from precomputed data -- no live
+    Monte Carlo or matchup scoring runs at render time.
     """
-    from scipy.special import expit, logit as sp_logit
-    from lib.matchup import score_matchup, score_matchup_advantage, score_matchup_bb, score_matchup_hr
-    from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
     from components.scouting import build_matchup_scouting_bullets
 
     if pos_lookup is None:
         pos_lookup = {}
-    if hitter_k_samples is None:
-        hitter_k_samples = {}
-    if hitter_bb_samples is None:
-        hitter_bb_samples = {}
-    if hitter_hr_samples is None:
-        hitter_hr_samples = {}
     if bf_priors is None:
         bf_priors = pd.DataFrame()
     if batter_sims_df is None:
         batter_sims_df = pd.DataFrame()
-
-    baselines_pt = {
-        pt: {
-            "whiff_rate": vals.get("whiff_rate", 0.25),
-            "chase_rate": vals.get("chase_rate", 0.30),
-            "barrel_rate": vals.get("barrel_rate", 0.06),
-        }
-        for pt, vals in LEAGUE_AVG_BY_PITCH_TYPE.items()
-    }
-
-    # Load auxiliary matchup data once for all batters
-    _matchup_aux = _load_matchup_aux()
-    _hitter_proj_df = load_projections("hitter")
-
-    def _safe_rate(r: object, default: float) -> float:
-        if pd.notna(r) and 0 < float(r) < 1:
-            return float(r)
-        return default
 
     for side_info in sides:
         pitcher_name = side_info["pitcher_name"]
@@ -2051,32 +1733,13 @@ def _render_matchup_tab(
         opp_abbr = side_info["opp_abbr"]
         side_abbr = side_info["abbr"]
 
-        p_k = _safe_rate(p_proj.get("projected_k_rate"), 0.22)
-        p_bb = _safe_rate(p_proj.get("projected_bb_rate"), 0.08)
-        p_hr = _safe_rate(p_proj.get("projected_hr_per_bf"), 0.03)
-
         # Team-centric view: own roster, batter matchups vs opposing SP
         if opp_side is not None:
             display_lu = side_info["own_lineup"]
             matchup_pid = opp_side["pitcher_id"]
-            _opp_proj = opp_side.get("pitcher_proj") or {}
         else:
             display_lu = opp_lu
             matchup_pid = pid
-            _opp_proj = p_proj
-
-        # Opposing pitcher rates + BF priors for batter sim
-        _opp_k_rate = _safe_rate(_opp_proj.get("projected_k_rate"), 0.22)
-        _opp_bb_rate = _safe_rate(_opp_proj.get("projected_bb_rate"), 0.08)
-        _opp_hr_rate = _safe_rate(_opp_proj.get("projected_hr_per_bf"), 0.03)
-        _opp_bf_mu = 22.0
-        _opp_bf_sigma = 4.5
-        if matchup_pid and not bf_priors.empty:
-            _bp_row = bf_priors[bf_priors["pitcher_id"] == matchup_pid]
-            if not _bp_row.empty:
-                _bp_last = _bp_row.sort_values("season").iloc[-1]
-                _opp_bf_mu = float(_bp_last["mu_bf"])
-                _opp_bf_sigma = float(_bp_last["sigma_bf"])
 
         # Section header
         st.markdown(
@@ -2089,25 +1752,29 @@ def _render_matchup_tab(
         if display_lu.empty:
             st.markdown(
                 f'<div style="color:var(--tdd-slate); font-size:0.85rem; padding:0.5rem 0;">'
-                f'No probable lineup yet</div>',
+                f'No lineup data available</div>',
                 unsafe_allow_html=True,
             )
             continue
+
+        # Detect roster-sourced lineup (no confirmed lineup set)
+        _is_roster_lineup = (
+            "lineup_source" in display_lu.columns
+            and (display_lu["lineup_source"] == "roster").any()
+        )
+        if _is_roster_lineup:
+            st.markdown(
+                f'<div style="color:var(--tdd-slate); font-size:0.82rem; '
+                f'padding:0.3rem 0; margin-bottom:0.3rem; font-style:italic;">'
+                f'No probable lineup set -- showing active roster</div>',
+                unsafe_allow_html=True,
+            )
 
         name_col = "batter_name" if "batter_name" in display_lu.columns else "player_name"
         id_col = "batter_id" if "batter_id" in display_lu.columns else "player_id"
 
         total_k_lift = total_bb_lift = 0.0
         n_scored = 0
-
-        # Sim imports + data (lazy, only used when samples exist)
-        _psd = pitcher_sim_data or {}
-        _k_samples_dict = _psd.get("k_samples_dict", {})
-        _bb_samples_dict = _psd.get("bb_samples_dict", {})
-        _hr_samples_dict = _psd.get("hr_samples_dict", {})
-        _game_ctx = _psd.get("game_context") or {}
-        _ump_k_lift = _game_ctx.get("ump_k_lift", 0.0)
-        _wx_k_lift = _game_ctx.get("wx_k_lift", 0.0)
 
         # Pitcher card at top
         if pid:
@@ -2134,105 +1801,21 @@ def _render_matchup_tab(
                 if _p_detail_parts:
                     st.markdown(" ".join(_p_detail_parts), unsafe_allow_html=True)
 
-                # Pitcher game sim
-                pid_str = str(pid)
-                if pid_str in _k_samples_dict:
-                    from lib.game_sim.simulator import simulate_game
-                    from lib.game_sim.exit_model import ExitModel
-                    from lib.game_sim.tto_model import build_all_tto_lifts
-                    from lib.game_sim.pitch_count_model import build_pitch_count_features
+                # Pitcher game sim — prefer precomputed samples
+                _p_samples: dict[str, np.ndarray] | None = None
+                if pitcher_sim_samples is not None:
+                    _p_samples = pitcher_sim_samples.get(gpk, pid)
 
-                    _exit_model = _psd.get("exit_model")
-                    if _exit_model is None:
-                        _exit_model = ExitModel()
-                    _pitcher_pc = _psd.get("pitcher_pc", pd.DataFrame())
-                    _batter_pc_df = _psd.get("batter_pc", pd.DataFrame())
-                    _tto_df = _psd.get("tto_profiles", pd.DataFrame())
-                    _exit_tend = _psd.get("exit_tendencies", pd.DataFrame())
-
-                    k_samp = _k_samples_dict[pid_str]
-                    _rng = np.random.default_rng(99)
-                    def _fb(rate, n=2000):
-                        r = np.clip(rate, 0.01, 0.99)
-                        return _rng.beta(r * 200, (1 - r) * 200, size=n).astype(np.float32)
-                    proj_bb = float(p_proj.get("projected_bb_rate", 0.08) or 0.08)
-                    proj_hr = float(p_proj.get("projected_hr_per_bf", 0.03) or 0.03)
-                    _bb_s = _bb_samples_dict.get(pid_str)
-                    bb_samp = _bb_s if _bb_s is not None else _fb(proj_bb)
-                    _hr_s = _hr_samples_dict.get(pid_str)
-                    hr_samp = _hr_s if _hr_s is not None else _fb(proj_hr)
-
-                    # Build per-batter matchup lifts vs opposing lineup
-                    _k_lifts, _bb_lifts, _hr_lifts = [], [], []
-                    _lineup_bids: list[int] = []
-                    if not opp_lu.empty and not arsenal_df.empty and not vuln_df.empty:
-                        _opp_id = "batter_id" if "batter_id" in opp_lu.columns else "player_id"
-                        for _, _ob in opp_lu.head(9).iterrows():
-                            _obid = int(_ob[_opp_id]) if pd.notna(_ob.get(_opp_id)) else None
-                            if _obid:
-                                _lineup_bids.append(_obid)
-                                _akw = _build_advantage_kwargs(
-                                    _matchup_aux, pid, _obid,
-                                    pitcher_hand=_p_hand_letter or None, str_df=str_df, hitter_proj=_hitter_proj_df,
-                                )
-                                _ar = score_matchup_advantage(pid, _obid, arsenal_df, vuln_df, baselines_pt, **_akw)
-                                kl = _ar["breakdown"]["k_lift"]
-                                bl = _ar["breakdown"]["bb_lift"]
-                                hl = _ar["breakdown"]["hr_lift"]
-                                _k_lifts.append(0.0 if np.isnan(kl) else kl)
-                                _bb_lifts.append(0.0 if np.isnan(bl) else bl)
-                                _hr_lifts.append(0.0 if np.isnan(hl) else hl)
-                            else:
-                                _lineup_bids.append(0)
-                                _k_lifts.append(0.0)
-                                _bb_lifts.append(0.0)
-                                _hr_lifts.append(0.0)
-                    while len(_k_lifts) < 9:
-                        _k_lifts.append(0.0)
-                        _bb_lifts.append(0.0)
-                        _hr_lifts.append(0.0)
-                        _lineup_bids.append(0)
-
-                    _tto_lifts = build_all_tto_lifts(
-                        _tto_df if not _tto_df.empty else None, pid, PRIOR_SEASON,
-                    )
-                    _pp_adj = 0.0
-                    _bp_adjs = np.zeros(9)
-                    if not _pitcher_pc.empty and not _batter_pc_df.empty and _lineup_bids:
-                        _pp_adj, _bp_adjs = build_pitch_count_features(
-                            _pitcher_pc, _batter_pc_df, pid, _lineup_bids[:9], PRIOR_SEASON,
-                        )
-                    _avg_pitches = 88.0
-                    if not _exit_tend.empty:
-                        _et_row = _exit_tend[(_exit_tend["pitcher_id"] == pid) & (_exit_tend["season"] == PRIOR_SEASON)]
-                        if not _et_row.empty:
-                            _avg_pitches = float(_et_row.iloc[0]["avg_pitches"])
-
-                    _p_result = simulate_game(
-                        pitcher_k_rate_samples=k_samp,
-                        pitcher_bb_rate_samples=bb_samp,
-                        pitcher_hr_rate_samples=hr_samp,
-                        lineup_matchup_lifts={"k": np.array(_k_lifts[:9]), "bb": np.array(_bb_lifts[:9]), "hr": np.array(_hr_lifts[:9])},
-                        tto_lifts=_tto_lifts,
-                        pitcher_ppa_adj=_pp_adj,
-                        batter_ppa_adjs=_bp_adjs,
-                        exit_model=_exit_model,
-                        pitcher_avg_pitches=_avg_pitches,
-                        umpire_k_lift=_ump_k_lift,
-                        weather_k_lift=_wx_k_lift,
-                        n_sims=5_000,
-                        random_seed=42 + gpk + (0 if side_info["side"] == "away" else 1),
-                    )
+                if _p_samples is not None and "k" in _p_samples:
                     _render_player_sim(
-                        {"k": _p_result.k_samples, "bb": _p_result.bb_samples,
-                         "h": _p_result.h_samples, "hr": _p_result.hr_samples,
-                         "outs": _p_result.outs_samples},
+                        _p_samples,
                         _PITCHER_STAT_META,
                         ["K", "BB", "H", "HR", "Outs"],
                         f"p{pid}_{gpk}",
                     )
 
-        for _, brow in display_lu.head(9).iterrows():
+        _display_limit = len(display_lu) if _is_roster_lineup else 9
+        for _, brow in display_lu.head(_display_limit).iterrows():
             bid = int(brow[id_col]) if pd.notna(brow.get(id_col)) else None
             bname = brow.get(name_col, "Unknown")
             order = int(brow["batting_order"])
@@ -2245,23 +1828,22 @@ def _render_matchup_tab(
             if _bh and str(_bh).strip().upper()[0] in ("L", "R", "S"):
                 hand_letter = str(_bh).strip().upper()[0]
 
-            # Matchup advantage
+            # Matchup advantage — from precomputed batter sims
             k_lift = bb_lift = hr_lift = 0.0
-            _adv_result = None
-            if matchup_pid and bid and not arsenal_df.empty and not vuln_df.empty:
-                _mp_ars = arsenal_df[arsenal_df["pitcher_id"] == matchup_pid]
-                _mp_hand = _mp_ars["pitch_hand"].iloc[0] if not _mp_ars.empty and "pitch_hand" in _mp_ars.columns else None
-                _adv_kw = _build_advantage_kwargs(
-                    _matchup_aux, matchup_pid, bid,
-                    pitcher_hand=_mp_hand, str_df=str_df, hitter_proj=_hitter_proj_df,
-                )
-                _adv_result = score_matchup_advantage(
-                    matchup_pid, bid, arsenal_df, vuln_df, baselines_pt, **_adv_kw,
-                )
-                _, k_lift, bb_lift, hr_lift = _matchup_advantage_html(_adv_result)
-                total_k_lift += k_lift
-                total_bb_lift += bb_lift
-                n_scored += 1
+            _bsim_row = None
+            if bid and not batter_sims_df.empty:
+                _bs = batter_sims_df[
+                    (batter_sims_df["game_pk"] == gpk)
+                    & (batter_sims_df["batter_id"] == bid)
+                ]
+                if not _bs.empty:
+                    _bsim_row = _bs.iloc[0]
+                    k_lift = float(_bsim_row.get("matchup_k_lift", 0.0))
+                    bb_lift = float(_bsim_row.get("matchup_bb_lift", 0.0))
+                    hr_lift = float(_bsim_row.get("matchup_hr_lift", 0.0))
+                    total_k_lift += k_lift
+                    total_bb_lift += bb_lift
+                    n_scored += 1
 
             # Expander label
             arch_tag = f" | {arch}" if arch else ""
@@ -2278,9 +1860,8 @@ def _render_matchup_tab(
                     _top_parts.append(headshot_html(bid, size=32))
                 if pd.notna(composite):
                     _top_parts.append(diamond_rating_html(0, size="sm", precomputed=composite))
-                if _adv_result:
-                    adv_html, _, _, _ = _matchup_advantage_html(_adv_result)
-                    _top_parts.append(adv_html)
+                if abs(k_lift) > 0.01 or abs(bb_lift) > 0.01:
+                    _top_parts.append(_matchup_lift_badge_html(k_lift, bb_lift, hr_lift))
                 if _top_parts:
                     detail_parts.append(
                         f'<div style="display:flex; align-items:center; gap:0.5rem;">'
@@ -2317,71 +1898,20 @@ def _render_matchup_tab(
                 if detail_parts:
                     st.markdown("".join(detail_parts), unsafe_allow_html=True)
 
-                # Batter game sim
-                bid_key = str(bid) if bid else ""
-                if (
-                    bid
-                    and bid_key in hitter_k_samples
-                    and bid_key in hitter_bb_samples
-                    and bid_key in hitter_hr_samples
-                    and matchup_pid
-                ):
-                    from lib.game_sim.batter_simulator import simulate_batter_game
+                # Batter game sim — prefer precomputed samples
+                _b_precomp: dict[str, np.ndarray] | None = None
+                if bid and batter_sim_samples is not None:
+                    _b_precomp = batter_sim_samples.get(gpk, bid)
 
-                    mk_lift = k_lift if not np.isnan(k_lift) else 0.0
-                    mb_lift = bb_lift if not np.isnan(bb_lift) else 0.0
-                    mh_lift = hr_lift if not np.isnan(hr_lift) else 0.0
-
-                    b_result = simulate_batter_game(
-                        batter_k_rate_samples=hitter_k_samples[bid_key],
-                        batter_bb_rate_samples=hitter_bb_samples[bid_key],
-                        batter_hr_rate_samples=hitter_hr_samples[bid_key],
-                        batting_order=order,
-                        starter_k_rate=_opp_k_rate,
-                        starter_bb_rate=_opp_bb_rate,
-                        starter_hr_rate=_opp_hr_rate,
-                        starter_bf_mu=_opp_bf_mu,
-                        starter_bf_sigma=_opp_bf_sigma,
-                        matchup_k_lift=mk_lift,
-                        matchup_bb_lift=mb_lift,
-                        matchup_hr_lift=mh_lift,
-                        bullpen_k_rate=0.23,
-                        bullpen_bb_rate=0.09,
-                        bullpen_hr_rate=0.03,
-                        n_sims=2_000,
-                        random_seed=gpk + bid,
-                    )
+                if _b_precomp is not None and "k" in _b_precomp:
                     _render_player_sim(
-                        {"k": b_result.k_samples, "bb": b_result.bb_samples,
-                         "h": b_result.h_samples, "hr": b_result.hr_samples},
+                        _b_precomp,
                         _BATTER_STAT_META,
                         ["H", "HR", "K", "BB"],
                         f"b{bid}_{gpk}",
                     )
 
-        # Avg K matchup for this side's pitcher vs opposing lineup
-        if opp_side is not None and pid and not opp_lu.empty:
-            opp_id_col = "batter_id" if "batter_id" in opp_lu.columns else "player_id"
-            _pid_ars = arsenal_df[arsenal_df["pitcher_id"] == pid]
-            _pid_hand = _pid_ars["pitch_hand"].iloc[0] if not _pid_ars.empty and "pitch_hand" in _pid_ars.columns else None
-            total_k_lift = total_bb_lift = 0.0
-            n_scored = 0
-            for _, ob in opp_lu.head(9).iterrows():
-                ob_id = int(ob[opp_id_col]) if pd.notna(ob.get(opp_id_col)) else None
-                if ob_id and not arsenal_df.empty and not vuln_df.empty:
-                    _akw = _build_advantage_kwargs(
-                        _matchup_aux, pid, ob_id,
-                        pitcher_hand=_pid_hand, hitter_proj=_hitter_proj_df,
-                    )
-                    _ar = score_matchup_advantage(
-                        pid, ob_id, arsenal_df, vuln_df, baselines_pt, **_akw,
-                    )
-                    kl = _ar["breakdown"]["k_lift"]
-                    bl = _ar["breakdown"]["bb_lift"]
-                    total_k_lift += 0.0 if np.isnan(kl) else kl
-                    total_bb_lift += 0.0 if np.isnan(bl) else bl
-                    n_scored += 1
-
+        # Avg K matchup — from precomputed pitcher sims
         if n_scored > 0:
             avg_k = total_k_lift / n_scored
             avg_bb = total_bb_lift / n_scored
@@ -2520,634 +2050,6 @@ def _resolve_game_context(game: pd.Series) -> dict:
         "weather_display": weather_display,
         "venue_name": game.get("venue_name", ""),
     }
-
-
-def _render_sim_tab(
-    sides: list[dict],
-    h_stat_lookup: dict[int, dict],
-    k_samples_dict: dict[str, np.ndarray],
-    bf_priors: pd.DataFrame,
-    arsenal_df: pd.DataFrame,
-    vuln_df: pd.DataFrame,
-    gpk: int,
-    game_context: dict | None = None,
-    bb_samples_dict: dict[str, np.ndarray] | None = None,
-    hr_samples_dict: dict[str, np.ndarray] | None = None,
-    exit_model: object | None = None,
-    pitcher_pc: pd.DataFrame | None = None,
-    batter_pc: pd.DataFrame | None = None,
-    tto_profiles: pd.DataFrame | None = None,
-    exit_tendencies: pd.DataFrame | None = None,
-    hitter_k_samples: dict[str, np.ndarray] | None = None,
-    hitter_bb_samples: dict[str, np.ndarray] | None = None,
-    hitter_hr_samples: dict[str, np.ndarray] | None = None,
-    h_arch_lookup: dict[int, str] | None = None,
-    pos_lookup: dict[int, str] | None = None,
-    sides_all: list[dict] | None = None,
-    str_df: pd.DataFrame | None = None,
-) -> None:
-    """Multi-stat game simulator | pitcher and batter posteriors."""
-    from lib.game_sim.simulator import simulate_game
-    from lib.game_sim.batter_simulator import simulate_batter_game
-    from lib.game_sim.exit_model import ExitModel
-    from lib.game_sim.tto_model import build_all_tto_lifts
-    from lib.game_sim.pitch_count_model import build_pitch_count_features
-    from lib.matchup import score_matchup, score_matchup_advantage, score_matchup_bb, score_matchup_hr
-    from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
-
-    hitter_k_samples = hitter_k_samples or {}
-    hitter_bb_samples = hitter_bb_samples or {}
-
-    _matchup_aux = _load_matchup_aux()
-    _hitter_proj_df = load_projections("hitter")
-    hitter_hr_samples = hitter_hr_samples or {}
-    h_arch_lookup = h_arch_lookup or {}
-    pos_lookup = pos_lookup or {}
-    _all_sides = sides_all if sides_all is not None else sides
-
-    if not k_samples_dict:
-        st.info("K% posterior samples are not yet available.")
-        return
-
-    bb_samples_dict = bb_samples_dict or {}
-    hr_samples_dict = hr_samples_dict or {}
-    ctx = game_context or {}
-    pitcher_pc = pitcher_pc if pitcher_pc is not None else pd.DataFrame()
-    batter_pc = batter_pc if batter_pc is not None else pd.DataFrame()
-    tto_profiles_df = tto_profiles if tto_profiles is not None else pd.DataFrame()
-    exit_tend_df = exit_tendencies if exit_tendencies is not None else pd.DataFrame()
-
-    # Ensure we have an ExitModel instance
-    if exit_model is None:
-        exit_model = ExitModel()
-
-    # Game context bar
-    context_parts = []
-    venue = ctx.get("venue_name")
-    if venue:
-        context_parts.append(f'<span style="color:var(--tdd-cream);">{venue}</span>')
-    ump_name = ctx.get("ump_name")
-    if ump_name:
-        ump_detail = ctx.get("ump_detail", "")
-        ump_lift = ctx.get("ump_k_lift", 0.0)
-        ump_color = POSITIVE if ump_lift > 0.02 else NEGATIVE if ump_lift < -0.02 else SLATE
-        detail_html = f' <span style="color:{ump_color};">({ump_detail})</span>' if ump_detail else ""
-        context_parts.append(f'HP: {ump_name}{detail_html}')
-    wx_display = ctx.get("weather_display")
-    if wx_display:
-        wx_detail = ctx.get("wx_detail", "")
-        wx_html = f' <span style="color:var(--tdd-slate);">({wx_detail})</span>' if wx_detail else ""
-        context_parts.append(f'{wx_display}{wx_html}')
-
-    if context_parts:
-        st.markdown(
-            f'<div style="background:transparent; border:none; '
-            f'border-bottom:1px solid var(--tdd-dark-border); padding:0.6rem 0; margin-bottom:1rem; '
-            f'font-size:0.85rem; color:var(--tdd-slate);">'
-            f'{" &nbsp;|&nbsp; ".join(context_parts)}'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-    baselines_pt = {
-        pt: {
-            "whiff_rate": vals.get("whiff_rate", 0.25),
-            "chase_rate": vals.get("chase_rate", 0.30),
-            "barrel_rate": vals.get("barrel_rate", 0.06),
-        }
-        for pt, vals in LEAGUE_AVG_BY_PITCH_TYPE.items()
-    }
-
-    ump_k_lift = ctx.get("ump_k_lift", 0.0)
-    wx_k_lift = ctx.get("wx_k_lift", 0.0)
-
-    # Stat display config
-    _STAT_META = {
-        "k":    {"label": "K",    "word": "strikeouts", "lines": (3.5, 10.5), "hi": 6, "vhi": 8},
-        "bb":   {"label": "BB",   "word": "walks",      "lines": (1.5, 5.5),  "hi": 3, "vhi": 4},
-        "h":    {"label": "H",    "word": "hits",       "lines": (3.5, 9.5),  "hi": 6, "vhi": 8},
-        "hr":   {"label": "HR",   "word": "home runs",  "lines": (0.5, 2.5),  "hi": 1, "vhi": 2},
-        "outs": {"label": "Outs", "word": "outs",       "lines": (11.5, 21.5), "hi": 17, "vhi": 20},
-    }
-
-    # Helper: fallback rate samples
-    _rng = np.random.default_rng(99)
-
-    def _fallback(rate: float, n: int = 4000) -> np.ndarray:
-        r = np.clip(rate, 0.01, 0.99)
-        return _rng.beta(r * 200, (1 - r) * 200, size=n).astype(np.float32)
-
-    def _pitcher_avg_pitches(pid: int) -> float:
-        if exit_tend_df.empty:
-            return 88.0
-        row = exit_tend_df[
-            (exit_tend_df["pitcher_id"] == pid)
-            & (exit_tend_df["season"] == PRIOR_SEASON)
-        ]
-        return float(row.iloc[0]["avg_pitches"]) if not row.empty else 88.0
-
-    rendered = False
-    for side_info in sides:
-        pid = side_info["pitcher_id"]
-        if not pid or str(pid) not in k_samples_dict:
-            continue
-
-        rendered = True
-        pitcher_name = side_info["pitcher_name"]
-        side_abbr = side_info["abbr"]
-        opp_abbr = side_info["opp_abbr"]
-        opp_lu = side_info["opp_lineup"]
-        p_proj = side_info["pitcher_proj"]
-
-        pid_str = str(pid)
-        k_samp = k_samples_dict[pid_str]
-        proj_bb = float(p_proj.get("projected_bb_rate", 0.08) or 0.08)
-        proj_hr = float(p_proj.get("projected_hr_per_bf", 0.03) or 0.03)
-        _bb = bb_samples_dict.get(pid_str)
-        bb_samp = _bb if _bb is not None else _fallback(proj_bb)
-        _hr = hr_samples_dict.get(pid_str)
-        hr_samp = _hr if _hr is not None else _fallback(proj_hr)
-
-        # Compute per-batter matchup lifts
-        lineup_matchup_lifts: dict[str, np.ndarray] = {}
-        per_batter_details: list[dict] = []
-        lineup_batter_ids: list[int] = []
-        has_lineup = False
-
-        if not opp_lu.empty and not arsenal_df.empty and not vuln_df.empty:
-            id_col = "batter_id" if "batter_id" in opp_lu.columns else "player_id"
-            name_col = "batter_name" if "batter_name" in opp_lu.columns else "player_name"
-            _p_ars_hand = arsenal_df[arsenal_df["pitcher_id"] == pid]
-            _p_hand = _p_ars_hand["pitch_hand"].iloc[0] if not _p_ars_hand.empty and "pitch_hand" in _p_ars_hand.columns else None
-
-            k_lifts, bb_lifts, hr_lifts = [], [], []
-            for _, brow in opp_lu.head(9).iterrows():
-                bid = int(brow[id_col]) if pd.notna(brow.get(id_col)) else None
-                if bid:
-                    lineup_batter_ids.append(bid)
-                    _akw = _build_advantage_kwargs(
-                        _matchup_aux, pid, bid,
-                        pitcher_hand=_p_hand, str_df=str_df, hitter_proj=_hitter_proj_df,
-                    )
-                    _ar = score_matchup_advantage(
-                        pid, bid, arsenal_df, vuln_df, baselines_pt, **_akw,
-                    )
-                    kl = _ar["breakdown"]["k_lift"]
-                    k_lifts.append(0.0 if np.isnan(kl) else kl)
-                    bl = _ar["breakdown"]["bb_lift"]
-                    bb_lifts.append(0.0 if np.isnan(bl) else bl)
-                    hl = _ar["breakdown"]["hr_lift"]
-                    hr_lifts.append(0.0 if np.isnan(hl) else hl)
-
-                    k_m = _ar["k_result"]
-                    k_m["batter_name"] = brow.get(name_col, "Unknown")
-                    k_m["batting_order"] = int(brow["batting_order"])
-                    per_batter_details.append(k_m)
-                else:
-                    lineup_batter_ids.append(0)
-                    k_lifts.append(0.0)
-                    bb_lifts.append(0.0)
-                    hr_lifts.append(0.0)
-
-            while len(k_lifts) < 9:
-                k_lifts.append(0.0)
-                bb_lifts.append(0.0)
-                hr_lifts.append(0.0)
-                lineup_batter_ids.append(0)
-
-            has_lineup = True
-            lineup_matchup_lifts = {
-                "k": np.array(k_lifts[:9]),
-                "bb": np.array(bb_lifts[:9]),
-                "hr": np.array(hr_lifts[:9]),
-            }
-
-        # TTO lifts
-        tto_lifts = build_all_tto_lifts(
-            tto_profiles_df if not tto_profiles_df.empty else None,
-            pid, PRIOR_SEASON,
-        )
-
-        # Pitch count features
-        pitcher_ppa_adj = 0.0
-        batter_ppa_adjs = np.zeros(9)
-        if not pitcher_pc.empty and not batter_pc.empty and lineup_batter_ids:
-            pitcher_ppa_adj, batter_ppa_adjs = build_pitch_count_features(
-                pitcher_pc, batter_pc, pid, lineup_batter_ids[:9], PRIOR_SEASON,
-            )
-
-        avg_pitches = _pitcher_avg_pitches(pid)
-
-        # Run PA-by-PA simulation
-        result = simulate_game(
-            pitcher_k_rate_samples=k_samp,
-            pitcher_bb_rate_samples=bb_samp,
-            pitcher_hr_rate_samples=hr_samp,
-            lineup_matchup_lifts=lineup_matchup_lifts,
-            tto_lifts=tto_lifts,
-            pitcher_ppa_adj=pitcher_ppa_adj,
-            batter_ppa_adjs=batter_ppa_adjs,
-            exit_model=exit_model,
-            pitcher_avg_pitches=avg_pitches,
-            umpire_k_lift=ump_k_lift,
-            weather_k_lift=wx_k_lift,
-            n_sims=10_000,
-            random_seed=42 + gpk + (0 if side_info["side"] == "away" else 1),
-        )
-
-        # Pitcher header
-        arch = side_info.get("pitcher_arch")
-        arch_tag = f" ({arch})" if arch else ""
-        if has_lineup:
-            lineup_tag = (
-                f'vs <span class="tdd-team-abbr" data-team="{opp_abbr}">{opp_abbr}</span> lineup'
-            )
-        else:
-            lineup_tag = "league-avg baseline"
-
-        exp_parts = [
-            f"E[K]: {np.mean(result.k_samples):.1f}",
-            f"BB: {np.mean(result.bb_samples):.1f}",
-            f"H: {np.mean(result.h_samples):.1f}",
-            f"HR: {np.mean(result.hr_samples):.1f}",
-            f"IP: {format_ip(np.mean(result.outs_samples) / 3.0)}",
-        ]
-
-        st.markdown(
-            f'<div style="color:var(--tdd-gold); font-size:1rem; font-weight:600; '
-            f'margin:0.8rem 0 0.3rem;">'
-            f'<span class="tdd-team-abbr" data-team="{side_abbr}">{side_abbr}</span>'
-            f' SP: {pitcher_name}{arch_tag}'
-            f'<span style="color:var(--tdd-slate); font-size:0.85rem; font-weight:400;">'
-            f' | {" | ".join(exp_parts)} | {lineup_tag}</span>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-        # --- Inline toolbar: Stat + Line ---
-        _side_key = f"{side_info['side']}_{gpk}"
-        tb_stat, tb_line, _ = st.columns([1, 2, 3])
-        with tb_stat:
-            selected_stat_label = st.selectbox(
-                "Stat", ["K", "BB", "H", "HR", "Outs"],
-                key=f"sim_stat_{_side_key}", label_visibility="collapsed",
-            )
-        stat_key = selected_stat_label.lower()
-        stat_samples = getattr(result, f"{stat_key}_samples")
-        meta = _STAT_META[stat_key]
-
-        # Build line options for this stat
-        lo, hi = meta["lines"]
-        line_opts = [x + 0.5 for x in range(int(lo - 0.5), int(hi - 0.5) + 1)]
-        line_labels = [f"Over {v:.1f}" for v in line_opts]
-        # Default to line closest to (but below) the mean
-        _mean = float(np.mean(stat_samples))
-        _default_idx = 0
-        for i, v in enumerate(line_opts):
-            if v <= _mean:
-                _default_idx = i
-        with tb_line:
-            selected_line = st.selectbox(
-                "Line", line_labels, index=_default_idx,
-                key=f"sim_line_{_side_key}", label_visibility="collapsed",
-            )
-        threshold = line_opts[line_labels.index(selected_line)]
-
-        # Compute probabilities
-        p_over = float(np.mean(stat_samples > threshold))
-        p_under = 1.0 - p_over
-
-        # Signal classification
-        if p_over > 0.65:
-            signal, sig_color = "Strong Over", SAGE
-        elif p_over > 0.55:
-            signal, sig_color = "Lean Over", SAGE
-        elif p_over < 0.35:
-            signal, sig_color = "Strong Under", EMBER
-        elif p_over < 0.45:
-            signal, sig_color = "Lean Under", EMBER
-        else:
-            signal, sig_color = "Toss-up", SLATE
-
-        # --- Two-column layout: chart + scouting notes ---
-        chart_col, notes_col = st.columns([3, 2])
-
-        with chart_col:
-            import plotly.graph_objects as go
-            cfg = _STAT_CHART_CONFIG.get(stat_key, _STAT_CHART_CONFIG["k"])
-            bar_color = cfg["color"]
-            max_val = int(stat_samples.max()) + 1
-            bins = np.arange(0, max_val + 2)
-            counts, edges = np.histogram(stat_samples, bins=bins - 0.5, density=True)
-
-            over_counts = np.where(bins[:-1] > threshold, counts, 0)
-            under_counts = np.where(bins[:-1] <= threshold, counts, 0)
-
-            pfig = go.Figure()
-            pfig.add_trace(go.Bar(
-                x=bins[:-1], y=under_counts, name="Under",
-                marker_color=f"rgba(123,143,166,0.53)", width=0.85,
-                hovertemplate="%{x} " + meta["label"] + ": %{y:.1%}<extra></extra>",
-            ))
-            pfig.add_trace(go.Bar(
-                x=bins[:-1], y=over_counts, name="Over",
-                marker_color=bar_color, width=0.85,
-                hovertemplate="%{x} " + meta["label"] + ": %{y:.1%}<extra></extra>",
-            ))
-            # Threshold line
-            pfig.add_vline(
-                x=threshold, line_dash="dash", line_color=GOLD, line_width=2,
-                annotation_text=f"P(Over {threshold:.1f}) = {p_over:.1%}",
-                annotation_position="top left",
-                annotation_font=dict(color=GOLD, size=13),
-            )
-            pfig.update_layout(
-                barmode="stack", showlegend=False, dragmode=False,
-                xaxis_title=cfg["xlabel"], yaxis_title="",
-                yaxis=dict(showticklabels=False, showgrid=False, fixedrange=True),
-                xaxis=dict(dtick=1, gridcolor="rgba(0,0,0,0)", fixedrange=True),
-                plot_bgcolor="rgba(0,0,0,0)",
-                paper_bgcolor="rgba(0,0,0,0)",
-                font=dict(color=CREAM),
-                margin=dict(l=10, r=10, t=30, b=40),
-                height=300,
-            )
-            st.plotly_chart(pfig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
-
-        with notes_col:
-            mean_val = float(np.mean(stat_samples))
-            std_val = float(np.std(stat_samples))
-            p_hi = float((stat_samples >= meta["hi"]).sum() / len(stat_samples) * 100)
-            p_vhi = float((stat_samples >= meta["vhi"]).sum() / len(stat_samples) * 100)
-
-            st.markdown(
-                f'<div style="margin-bottom:1rem;">'
-                f'<span style="background:{sig_color}22; color:{sig_color}; '
-                f'border:1px solid {sig_color}44; padding:4px 12px; border-radius:12px; '
-                f'font-size:0.9rem; font-weight:700;">{signal}</span>'
-                f'</div>'
-                f'<div style="display:flex; gap:1.5rem; margin-bottom:1rem;">'
-                f'<div>'
-                f'<div style="color:var(--tdd-cream); font-size:1.4rem; font-weight:700;">{p_over:.1%}</div>'
-                f'<div style="color:var(--tdd-slate); font-size:0.75rem;">P(Over {threshold:.1f})</div>'
-                f'</div>'
-                f'<div>'
-                f'<div style="color:var(--tdd-cream); font-size:1.4rem; font-weight:700;">{p_under:.1%}</div>'
-                f'<div style="color:var(--tdd-slate); font-size:0.75rem;">P(Under {threshold:.1f})</div>'
-                f'</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-            st.markdown(
-                f'<div class="insight-card">'
-                f'<div class="insight-bullet">'
-                f'<span class="dot" style="background:{GOLD};"></span>'
-                f'Expect around <strong>{mean_val:.0f} {meta["word"]}</strong> '
-                f'(\u00b1{std_val:.0f}).'
-                f'</div>'
-                f'<div class="insight-bullet">'
-                f'<span class="dot" style="background:{SAGE};"></span>'
-                f'<strong>{p_hi:.0f}%</strong> chance of {meta["hi"]}+ {meta["word"]}, '
-                f'<strong>{p_vhi:.0f}%</strong> chance of {meta["vhi"]}+.'
-                f'</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-
-        # --- Batter Projections (only when actual lineup is set) ---
-        opp_lu = side_info["opp_lineup"]
-        if not opp_lu.empty:
-            name_col_b = "batter_name" if "batter_name" in opp_lu.columns else "player_name"
-            id_col_b = "batter_id" if "batter_id" in opp_lu.columns else "player_id"
-
-            # Find opposing pitcher for context
-            opp_side = next((s for s in _all_sides if s["side"] != side_info["side"]), None)
-            opp_pid = opp_side["pitcher_id"] if opp_side else None
-            opp_proj = opp_side["pitcher_proj"] if opp_side else {}
-            opp_pitcher_name = opp_side["pitcher_name"] if opp_side else "TBD"
-
-            opp_k_rate = float(opp_proj.get("projected_k_rate", 0.22) or 0.22)
-            opp_bb_rate = float(opp_proj.get("projected_bb_rate", 0.08) or 0.08)
-            opp_hr_rate = float(opp_proj.get("projected_hr_per_bf", 0.03) or 0.03)
-
-            opp_bf_mu, opp_bf_sigma = 22.0, 4.5
-            if opp_pid and not bf_priors.empty:
-                bp_row = bf_priors[bf_priors["pitcher_id"] == opp_pid]
-                if not bp_row.empty:
-                    bp_last = bp_row.sort_values("season").iloc[-1]
-                    opp_bf_mu = float(bp_last["mu_bf"])
-                    opp_bf_sigma = float(bp_last["sigma_bf"])
-
-            # Build batter options
-            batter_opts = []
-            for _, brow in opp_lu.head(9).iterrows():
-                bid = int(brow[id_col_b]) if pd.notna(brow.get(id_col_b)) else None
-                bname = brow.get(name_col_b, "Unknown")
-                order = int(brow["batting_order"])
-                if bid:
-                    batter_opts.append((f"{order}. {bname}", bid, order))
-
-            if batter_opts:
-                st.markdown(
-                    f'<div class="tdd-section-hdr" style="margin-top:1rem;">'
-                    f'<span class="tdd-team-abbr" data-team="{opp_abbr}">{opp_abbr}</span>'
-                    f' Batters vs {pitcher_name}</div>',
-                    unsafe_allow_html=True,
-                )
-
-                sel_batter = st.selectbox(
-                    "Batter", [b[0] for b in batter_opts],
-                    key=f"sim_batter_{_side_key}", label_visibility="collapsed",
-                )
-                sel_bid = next(b[1] for b in batter_opts if b[0] == sel_batter)
-                sel_order = next(b[2] for b in batter_opts if b[0] == sel_batter)
-                sel_bname = sel_batter.split(". ", 1)[1]
-
-                bid_key = str(sel_bid)
-                has_batter_samp = (
-                    bid_key in hitter_k_samples
-                    and bid_key in hitter_bb_samples
-                    and bid_key in hitter_hr_samples
-                    and opp_pid is not None
-                )
-
-                if has_batter_samp:
-                    try:
-                        # Matchup lifts
-                        mk_lift = mb_lift = mh_lift = 0.0
-                        if opp_pid and not arsenal_df.empty and not vuln_df.empty:
-                            _opp_ars = arsenal_df[arsenal_df["pitcher_id"] == opp_pid]
-                            _opp_hand = _opp_ars["pitch_hand"].iloc[0] if not _opp_ars.empty and "pitch_hand" in _opp_ars.columns else None
-                            _akw = _build_advantage_kwargs(
-                                _matchup_aux, opp_pid, sel_bid,
-                                pitcher_hand=_opp_hand, str_df=str_df, hitter_proj=_hitter_proj_df,
-                            )
-                            _ar = score_matchup_advantage(
-                                opp_pid, sel_bid, arsenal_df, vuln_df, baselines_pt, **_akw,
-                            )
-                            mk_lift = _ar["breakdown"]["k_lift"]
-                            mb_lift = _ar["breakdown"]["bb_lift"]
-                            mh_lift = _ar["breakdown"]["hr_lift"]
-
-                        b_result = simulate_batter_game(
-                            batter_k_rate_samples=hitter_k_samples[bid_key],
-                            batter_bb_rate_samples=hitter_bb_samples[bid_key],
-                            batter_hr_rate_samples=hitter_hr_samples[bid_key],
-                            batting_order=sel_order,
-                            starter_k_rate=opp_k_rate,
-                            starter_bb_rate=opp_bb_rate,
-                            starter_hr_rate=opp_hr_rate,
-                            starter_bf_mu=opp_bf_mu,
-                            starter_bf_sigma=opp_bf_sigma,
-                            matchup_k_lift=mk_lift if not np.isnan(mk_lift) else 0.0,
-                            matchup_bb_lift=mb_lift if not np.isnan(mb_lift) else 0.0,
-                            matchup_hr_lift=mh_lift if not np.isnan(mh_lift) else 0.0,
-                            bullpen_k_rate=0.23,
-                            bullpen_bb_rate=0.09,
-                            bullpen_hr_rate=0.03,
-                            n_sims=5_000,
-                            random_seed=gpk + sel_bid,
-                        )
-
-                        # Batter stat/line toolbar
-                        _BATTER_STAT_META = {
-                            "k":  {"label": "K",  "word": "strikeouts", "lines": (0.5, 3.5), "hi": 2, "vhi": 3},
-                            "bb": {"label": "BB", "word": "walks",      "lines": (0.5, 2.5), "hi": 1, "vhi": 2},
-                            "h":  {"label": "H",  "word": "hits",       "lines": (0.5, 3.5), "hi": 2, "vhi": 3},
-                            "hr": {"label": "HR", "word": "home runs",  "lines": (0.5, 1.5), "hi": 1, "vhi": 2},
-                        }
-
-                        btb_stat, btb_line, _ = st.columns([1, 2, 3])
-                        with btb_stat:
-                            b_stat_label = st.selectbox(
-                                "Stat", ["H", "HR", "K", "BB"],
-                                key=f"bsim_stat_{_side_key}", label_visibility="collapsed",
-                            )
-                        b_stat_key = b_stat_label.lower()
-                        b_samples = getattr(b_result, f"{b_stat_key}_samples")
-                        b_meta = _BATTER_STAT_META[b_stat_key]
-
-                        blo, bhi = b_meta["lines"]
-                        b_line_opts = [x + 0.5 for x in range(int(blo - 0.5), int(bhi - 0.5) + 1)]
-                        b_line_labels = [f"Over {v:.1f}" for v in b_line_opts]
-                        b_mean = float(np.mean(b_samples))
-                        b_def_idx = 0
-                        for bi, bv in enumerate(b_line_opts):
-                            if bv <= b_mean:
-                                b_def_idx = bi
-                        with btb_line:
-                            b_sel_line = st.selectbox(
-                                "Line", b_line_labels, index=b_def_idx,
-                                key=f"bsim_line_{_side_key}", label_visibility="collapsed",
-                            )
-                        b_threshold = b_line_opts[b_line_labels.index(b_sel_line)]
-
-                        b_p_over = float(np.mean(b_samples > b_threshold))
-                        b_p_under = 1.0 - b_p_over
-
-                        if b_p_over > 0.65:
-                            b_signal, b_sig_color = "Strong Over", SAGE
-                        elif b_p_over > 0.55:
-                            b_signal, b_sig_color = "Lean Over", SAGE
-                        elif b_p_over < 0.35:
-                            b_signal, b_sig_color = "Strong Under", EMBER
-                        elif b_p_over < 0.45:
-                            b_signal, b_sig_color = "Lean Under", EMBER
-                        else:
-                            b_signal, b_sig_color = "Toss-up", SLATE
-
-                        # Two-column: chart + notes
-                        b_chart_col, b_notes_col = st.columns([3, 2])
-
-                        with b_chart_col:
-                            import plotly.graph_objects as go
-                            b_cfg = _STAT_CHART_CONFIG.get(b_stat_key, _STAT_CHART_CONFIG["k"])
-                            b_max_val = int(b_samples.max()) + 1
-                            b_bins = np.arange(0, b_max_val + 2)
-                            b_counts, _ = np.histogram(b_samples, bins=b_bins - 0.5, density=True)
-                            b_over_c = np.where(b_bins[:-1] > b_threshold, b_counts, 0)
-                            b_under_c = np.where(b_bins[:-1] <= b_threshold, b_counts, 0)
-
-                            bfig = go.Figure()
-                            bfig.add_trace(go.Bar(
-                                x=b_bins[:-1], y=b_under_c, name="Under",
-                                marker_color="rgba(123,143,166,0.53)", width=0.85,
-                                hovertemplate="%{x} " + b_meta["label"] + ": %{y:.1%}<extra></extra>",
-                            ))
-                            bfig.add_trace(go.Bar(
-                                x=b_bins[:-1], y=b_over_c, name="Over",
-                                marker_color=b_cfg["color"], width=0.85,
-                                hovertemplate="%{x} " + b_meta["label"] + ": %{y:.1%}<extra></extra>",
-                            ))
-                            bfig.add_vline(
-                                x=b_threshold, line_dash="dash", line_color=GOLD, line_width=2,
-                                annotation_text=f"P(Over {b_threshold:.1f}) = {b_p_over:.1%}",
-                                annotation_position="top left",
-                                annotation_font=dict(color=GOLD, size=13),
-                            )
-                            bfig.update_layout(
-                                barmode="stack", showlegend=False, dragmode=False,
-                                xaxis_title=b_cfg["xlabel"], yaxis_title="",
-                                yaxis=dict(showticklabels=False, showgrid=False, fixedrange=True),
-                                xaxis=dict(dtick=1, gridcolor="rgba(0,0,0,0)", fixedrange=True),
-                                plot_bgcolor="rgba(0,0,0,0)",
-                                paper_bgcolor="rgba(0,0,0,0)",
-                                font=dict(color=CREAM),
-                                margin=dict(l=10, r=10, t=30, b=40),
-                                height=280,
-                            )
-                            st.plotly_chart(bfig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
-
-                        with b_notes_col:
-                            b_std = float(np.std(b_samples))
-                            b_p_hi = float((b_samples >= b_meta["hi"]).sum() / len(b_samples) * 100)
-                            b_p_vhi = float((b_samples >= b_meta["vhi"]).sum() / len(b_samples) * 100)
-
-                            st.markdown(
-                                f'<div style="margin-bottom:1rem;">'
-                                f'<span style="background:{b_sig_color}22; color:{b_sig_color}; '
-                                f'border:1px solid {b_sig_color}44; padding:4px 12px; border-radius:12px; '
-                                f'font-size:0.9rem; font-weight:700;">{b_signal}</span>'
-                                f'</div>'
-                                f'<div style="display:flex; gap:1.5rem; margin-bottom:1rem;">'
-                                f'<div>'
-                                f'<div style="color:var(--tdd-cream); font-size:1.4rem; font-weight:700;">{b_p_over:.1%}</div>'
-                                f'<div style="color:var(--tdd-slate); font-size:0.75rem;">P(Over {b_threshold:.1f})</div>'
-                                f'</div>'
-                                f'<div>'
-                                f'<div style="color:var(--tdd-cream); font-size:1.4rem; font-weight:700;">{b_p_under:.1%}</div>'
-                                f'<div style="color:var(--tdd-slate); font-size:0.75rem;">P(Under {b_threshold:.1f})</div>'
-                                f'</div>'
-                                f'</div>',
-                                unsafe_allow_html=True,
-                            )
-
-                            st.markdown(
-                                f'<div class="insight-card">'
-                                f'<div class="insight-bullet">'
-                                f'<span class="dot" style="background:{GOLD};"></span>'
-                                f'Expect around <strong>{b_mean:.1f} {b_meta["word"]}</strong> '
-                                f'(\u00b1{b_std:.1f}).'
-                                f'</div>'
-                                f'<div class="insight-bullet">'
-                                f'<span class="dot" style="background:{SAGE};"></span>'
-                                f'<strong>{b_p_hi:.0f}%</strong> chance of {b_meta["hi"]}+ {b_meta["word"]}, '
-                                f'<strong>{b_p_vhi:.0f}%</strong> chance of {b_meta["vhi"]}+.'
-                                f'</div>'
-                                f'</div>',
-                                unsafe_allow_html=True,
-                            )
-                    except Exception:
-                        st.info(f"Simulation data not available for {sel_bname}.")
-                else:
-                    st.info(f"No posterior samples available for {sel_bname}.")
-
-        st.markdown("---")
-
-    if not rendered:
-        st.info("No K% samples available for this game's pitchers.")
 
 
 def _render_game_browser() -> None:
