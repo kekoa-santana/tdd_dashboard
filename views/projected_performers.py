@@ -302,6 +302,29 @@ def _render_stat_leaderboard(
 def page_projected_performers() -> None:
     """Render the Props Lab page."""
     st.markdown(
+        """
+        <div class="props-lab-breakpoint-sentinel" style="display:none;"></div>
+        <style>
+        @media (max-width: 1024px) {
+            .stApp:has(.props-lab-breakpoint-sentinel) div[data-testid="stHorizontalBlock"] {
+                flex-direction: column !important;
+                flex-wrap: nowrap !important;
+            }
+            .stApp:has(.props-lab-breakpoint-sentinel) div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+                width: 100% !important;
+                flex: 1 1 100% !important;
+                max-width: 100% !important;
+            }
+            .stApp:has(.props-lab-breakpoint-sentinel) .lb-card {
+                max-width: 100% !important;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
         '<div class="section-header">Props Lab</div>',
         unsafe_allow_html=True,
     )
