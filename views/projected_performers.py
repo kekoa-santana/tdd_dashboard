@@ -30,6 +30,27 @@ _STAT_LABELS = {
     "Outs": "Outs",
 }
 
+# Pitcher-specific labels for shared stats
+_PITCHER_STAT_LABELS = {
+    "K": "Pitcher Strikeouts",
+    "H": "Hits Allowed",
+    "HR": "Home Runs Allowed",
+    "BB": "Walks Issued",
+    "Outs": "Outs Recorded",
+}
+
+# Hitter-specific labels for shared stats
+_HITTER_STAT_LABELS = {
+    "K": "Batter Strikeouts",
+    "H": "Batter Hits",
+    "HR": "Batter Home Runs",
+    "TB": "Total Bases",
+    "BB": "Batter Walks",
+    "R": "Runs",
+    "RBI": "RBIs",
+    "HRR": "H+R+RBI",
+}
+
 # Display order for stat leaderboards
 _STAT_ORDER = ["K", "H", "HR", "TB", "HRR", "BB", "R", "RBI", "Outs"]
 
@@ -211,6 +232,15 @@ def _render_stat_leaderboard(
 ) -> None:
     """Render a single stat leaderboard card showing top picks."""
     stat_label = _STAT_LABELS.get(stat, stat)
+
+    # Use player-type-specific labels when all picks are one type
+    if not picks.empty and "player_type" in picks.columns:
+        ptypes = picks["player_type"].unique()
+        if len(ptypes) == 1:
+            if ptypes[0] == "pitcher":
+                stat_label = _PITCHER_STAT_LABELS.get(stat, stat_label)
+            else:
+                stat_label = _HITTER_STAT_LABELS.get(stat, stat_label)
 
     if picks.empty:
         return
@@ -484,20 +514,29 @@ def page_projected_performers() -> None:
     )
 
     # --- Render leaderboards by stat in 3-column grid ---
-    # Collect stats that have data, in display order
-    active_stats = [
-        s for s in _STAT_ORDER
-        if s in filtered["stat"].values
-    ]
+    # Stats where pitcher/hitter labels differ -- split into separate boards
+    _SPLIT_STATS = {"K", "H", "HR", "BB"}
+
+    # Build list of (stat, picks_df) tuples, splitting shared stats by type
+    boards: list[tuple[str, pd.DataFrame]] = []
+    for s in _STAT_ORDER:
+        s_picks = filtered[filtered["stat"] == s]
+        if s_picks.empty:
+            continue
+        if s in _SPLIT_STATS and "player_type" in s_picks.columns:
+            p_picks = s_picks[s_picks["player_type"] == "pitcher"]
+            h_picks = s_picks[s_picks["player_type"] != "pitcher"]
+            if not p_picks.empty:
+                boards.append((s, p_picks.sort_values("model_p", ascending=False)))
+            if not h_picks.empty:
+                boards.append((s, h_picks.sort_values("model_p", ascending=False)))
+        else:
+            boards.append((s, s_picks.sort_values("model_p", ascending=False)))
 
     # Render in rows of 3 with padding between columns
-    for row_start in range(0, len(active_stats), 3):
-        row_stats = active_stats[row_start:row_start + 3]
-        cols = st.columns(len(row_stats), gap="large")
-        for col, stat in zip(cols, row_stats):
+    for row_start in range(0, len(boards), 3):
+        row_boards = boards[row_start:row_start + 3]
+        cols = st.columns(len(row_boards), gap="large")
+        for col, (stat, stat_picks) in zip(cols, row_boards):
             with col:
-                stat_picks = (
-                    filtered[filtered["stat"] == stat]
-                    .sort_values("model_p", ascending=False)
-                )
                 _render_stat_leaderboard(stat, stat_picks)

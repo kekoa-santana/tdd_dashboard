@@ -84,7 +84,7 @@ def create_posterior_fig(
 
     pct_samples = samples * 100
     kde = gaussian_kde(pct_samples, bw_method=0.3)
-    x = np.linspace(pct_samples.min() - 2, pct_samples.max() + 2, 300)
+    x = np.linspace(max(0, pct_samples.min() - 2), pct_samples.max() + 2, 300)
     y = kde(x)
 
     ci_lo, ci_hi = np.percentile(pct_samples, [2.5, 97.5])
@@ -161,7 +161,7 @@ def create_posterior_fig(
             title=dict(text=stat_label, font=dict(color=SLATE, size=11)),
             tickfont=dict(color=SLATE, size=9),
             showgrid=False, zeroline=False,
-            showline=False,
+            showline=False, rangemode="nonnegative",
         ),
         yaxis=dict(
             showticklabels=False, showgrid=False, zeroline=False,
