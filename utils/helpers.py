@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import unicodedata
+from datetime import datetime, timezone
 
 import pandas as pd
 import streamlit as st
@@ -12,6 +13,42 @@ from services.data_loader import load_player_teams, load_preseason_injuries
 from services.manifest import validate_manifest
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Timezone helpers
+# ---------------------------------------------------------------------------
+
+_LOCAL_TZ_ABBR: str | None = None
+
+
+def _get_local_tz_abbr() -> str:
+    """Return the local timezone abbreviation (e.g. 'HST', 'PST', 'EDT')."""
+    global _LOCAL_TZ_ABBR
+    if _LOCAL_TZ_ABBR is None:
+        _LOCAL_TZ_ABBR = datetime.now().astimezone().strftime("%Z") or "Local"
+    return _LOCAL_TZ_ABBR
+
+
+def format_game_time(utc_iso: str | None, fallback: str = "") -> str:
+    """Convert a UTC ISO datetime string to a local-time display string.
+
+    Returns e.g. ``"4:05 PM HST"`` or the *fallback* if parsing fails.
+    """
+    if not utc_iso:
+        return fallback
+    try:
+        dt_utc = datetime.fromisoformat(utc_iso)
+        if dt_utc.tzinfo is None:
+            dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+        dt_local = dt_utc.astimezone()
+        hour = dt_local.hour
+        minute = dt_local.minute
+        ampm = "AM" if hour < 12 else "PM"
+        display_hour = hour % 12 or 12
+        tz_abbr = _get_local_tz_abbr()
+        return f"{display_hour}:{minute:02d} {ampm} {tz_abbr}"
+    except Exception:
+        return fallback
 
 
 def format_ip(ip: float) -> str:

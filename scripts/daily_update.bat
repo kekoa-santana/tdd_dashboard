@@ -7,12 +7,12 @@ REM
 REM  Modes:
 REM    daily_update.bat                 — full update (ETL + projections + props + push)
 REM    daily_update.bat --skip-etl      — skip ETL, projections + props + push
-REM    daily_update.bat --schedule-only — 10-min mode: schedule + lineups + props + push
-REM                                       only during today's game window (ET)
+REM    daily_update.bat --schedule-only — schedule + lineups + props + push (single run)
 REM
 REM  Task Scheduler setup:
-REM    1. Full daily:   7:00 AM  -> daily_update.bat
-REM    2. Game day:     launch schedule-only task -> script loops every 10 min
+REM    1. Full daily:   6:00 AM  -> daily_update.bat
+REM    2. Game window:  every 10 min (8 AM-4 PM) -> daily_update.bat --schedule-only
+REM                     Task Scheduler handles repetition; each invocation runs once.
 REM ──────────────────────────────────────────────────────────────
 
 set PROJECT_DIR=C:\Users\kekoa\Documents\data_analytics\tdd-dashboard
@@ -31,37 +31,15 @@ REM Create logs directory if needed
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
 if "%IS_SCHEDULE_ONLY%"=="1" (
-    echo [%date% %time%] Starting schedule-only mode (10-min cadence, game-window gated)... >> "%LOG_FILE%" 2>&1
+    echo [%date% %time%] Starting schedule-only refresh... >> "%LOG_FILE%" 2>&1
 ) else (
-    echo [%date% %time%] Starting update... >> "%LOG_FILE%" 2>&1
+    echo [%date% %time%] Starting full update... >> "%LOG_FILE%" 2>&1
 )
 
 REM ── Compute yesterday's date (for ETL) ──
 for /f %%i in ('powershell -NoProfile -Command "(Get-Date).AddDays(-1).ToString('yyyy-MM-dd')"') do set YESTERDAY=%%i
 
-if "%IS_SCHEDULE_ONLY%"=="1" goto schedule_mode
-
 call :run_once
-goto end
-
-:schedule_mode
-call :run_once
-if %ERRORLEVEL% NEQ 0 goto end
-
-call :in_game_window
-if %ERRORLEVEL% NEQ 0 (
-    echo [%date% %time%] Outside game window; schedule-only run complete. >> "%LOG_FILE%" 2>&1
-    goto end
-)
-
-:schedule_loop
-echo [%date% %time%] Sleeping 10 minutes before next schedule refresh... >> "%LOG_FILE%" 2>&1
-timeout /t 600 /nobreak >nul
-call :run_once
-if %ERRORLEVEL% NEQ 0 goto end
-call :in_game_window
-if %ERRORLEVEL% EQU 0 goto schedule_loop
-echo [%date% %time%] Game window closed; stopping schedule-only loop. >> "%LOG_FILE%" 2>&1
 goto end
 
 :run_once
@@ -136,11 +114,6 @@ if %ERRORLEVEL% NEQ 0 (
     echo [%date% %time%] No data changes to push >> "%LOG_FILE%" 2>&1
 )
 exit /b 0
-
-:in_game_window
-REM Return code 0 = inside game window, 1 = outside/no games
-"%PYTHON%" "%PROJECT_DIR%\scripts\in_game_window.py" >> "%LOG_FILE%" 2>&1
-exit /b %ERRORLEVEL%
 
 :end
 echo [%date% %time%] Update finished >> "%LOG_FILE%" 2>&1
