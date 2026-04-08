@@ -1,4 +1,5 @@
 @echo off
+setlocal EnableDelayedExpansion
 REM ──────────────────────────────────────────────────────────────
 REM  TDD Dashboard — Update Runner
 REM  Called by Windows Task Scheduler.
@@ -6,12 +7,12 @@ REM
 REM  Modes:
 REM    daily_update.bat                 — full update (ETL + projections + props + push)
 REM    daily_update.bat --skip-etl      — skip ETL, projections + props + push
-REM    daily_update.bat --schedule-only — 30-min mode: schedule + lineups + props + push
-REM                                       (skips sims if no lineup/pitcher changes)
+REM    daily_update.bat --schedule-only — 10-min mode: schedule + lineups + props + push
+REM                                       only during today's game window (ET)
 REM
 REM  Task Scheduler setup:
 REM    1. Full daily:   7:00 AM  -> daily_update.bat
-REM    2. Game day:     every 30 min, 8 AM-4 PM -> daily_update.bat --schedule-only
+REM    2. Game day:     launch schedule-only task -> script loops every 10 min
 REM ──────────────────────────────────────────────────────────────
 
 set PROJECT_DIR=C:\Users\kekoa\Documents\data_analytics\tdd-dashboard
@@ -22,15 +23,48 @@ set PROFILES_PYTHON=%PROFILES_DIR%\myenv\Scripts\python.exe
 set PYTHON=C:\Users\kekoa\AppData\Local\Programs\Python\Python311\python.exe
 set LOG_DIR=%PROJECT_DIR%\logs
 set LOG_FILE=%LOG_DIR%\update_%date:~-4,4%-%date:~-10,2%-%date:~-7,2%.log
+set IS_SCHEDULE_ONLY=0
+echo %* | findstr /i "schedule-only" >nul
+if %ERRORLEVEL% EQU 0 set IS_SCHEDULE_ONLY=1
 
 REM Create logs directory if needed
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
-echo [%date% %time%] Starting update... >> "%LOG_FILE%" 2>&1
+if "%IS_SCHEDULE_ONLY%"=="1" (
+    echo [%date% %time%] Starting schedule-only mode (10-min cadence, game-window gated)... >> "%LOG_FILE%" 2>&1
+) else (
+    echo [%date% %time%] Starting update... >> "%LOG_FILE%" 2>&1
+)
 
 REM ── Compute yesterday's date (for ETL) ──
 for /f %%i in ('powershell -NoProfile -Command "(Get-Date).AddDays(-1).ToString('yyyy-MM-dd')"') do set YESTERDAY=%%i
 
+if "%IS_SCHEDULE_ONLY%"=="1" goto schedule_mode
+
+call :run_once
+goto end
+
+:schedule_mode
+call :run_once
+if %ERRORLEVEL% NEQ 0 goto end
+
+call :in_game_window
+if %ERRORLEVEL% NEQ 0 (
+    echo [%date% %time%] Outside game window; schedule-only run complete. >> "%LOG_FILE%" 2>&1
+    goto end
+)
+
+:schedule_loop
+echo [%date% %time%] Sleeping 10 minutes before next schedule refresh... >> "%LOG_FILE%" 2>&1
+timeout /t 600 /nobreak >nul
+call :run_once
+if %ERRORLEVEL% NEQ 0 goto end
+call :in_game_window
+if %ERRORLEVEL% EQU 0 goto schedule_loop
+echo [%date% %time%] Game window closed; stopping schedule-only loop. >> "%LOG_FILE%" 2>&1
+goto end
+
+:run_once
 REM ── Step 1: ETL — skip for --schedule-only or --skip-etl ──
 echo %* | findstr /i "schedule-only skip-etl" >nul
 if %ERRORLEVEL% EQU 0 (
@@ -70,7 +104,7 @@ if %ERRORLEVEL% NEQ 0 (
 REM ── Step 3: Regenerate game props (confident_picks) ──
 REM   Fetches fresh lineups from MLB API, runs game sims for all
 REM   today's + tomorrow's games, outputs game_props.parquet.
-REM   This runs every 30 min so props reflect confirmed lineups.
+REM   This runs every 10 min so props reflect confirmed lineups.
 echo [%date% %time%] Generating game props... >> "%LOG_FILE%" 2>&1
 cd /d "%PROFILES_DIR%"
 "%PROFILES_PYTHON%" -c "import sys; sys.path.insert(0, 'scripts/precompute'); sys.path.insert(0, 'scripts'); from confident_picks import run; run()" >> "%LOG_FILE%" 2>&1
@@ -101,6 +135,13 @@ if %ERRORLEVEL% NEQ 0 (
 ) else (
     echo [%date% %time%] No data changes to push >> "%LOG_FILE%" 2>&1
 )
+exit /b 0
+
+:in_game_window
+REM Return code 0 = inside game window, 1 = outside/no games
+"%PYTHON%" "%PROJECT_DIR%\scripts\in_game_window.py" >> "%LOG_FILE%" 2>&1
+exit /b %ERRORLEVEL%
 
 :end
 echo [%date% %time%] Update finished >> "%LOG_FILE%" 2>&1
+endlocal

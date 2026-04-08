@@ -1820,7 +1820,15 @@ def _render_matchup_tab(
             bname = brow.get(name_col, "Unknown")
             order = int(brow["batting_order"])
 
-            pos = pos_lookup.get(bid, "--") if bid else "--"
+            # Prefer game-day position (DH, etc.) over roster primary
+            _game_pos = brow.get("game_position", "")
+            if _game_pos and str(_game_pos).strip():
+                pos = str(_game_pos).strip()
+                # Pitcher in batting order = two-way player batting as DH
+                if pos in ("P", "SP", "RP") and order <= 9:
+                    pos = "DH"
+            else:
+                pos = pos_lookup.get(bid, "--") if bid else "--"
             arch = h_arch_lookup.get(bid, "Prospect") if bid else ""
             stats = h_stat_lookup.get(bid, {}) if bid else {}
             hand_letter = ""
