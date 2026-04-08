@@ -371,6 +371,22 @@ def run_schedule_refresh(game_date: str) -> bool:
 
         roster_rows: list[pd.DataFrame] = []
         _pitcher_pos = {"SP", "RP", "P"}
+
+        # Detect two-way players (pitchers who also have hitter projections)
+        _h_proj_path = DASHBOARD_DIR / "hitter_projections.parquet"
+        _two_way_ids: set[int] = set()
+        if _h_proj_path.exists():
+            _h_proj = pd.read_parquet(_h_proj_path, columns=["batter_id"])
+            _hitter_ids = set(_h_proj["batter_id"].dropna().astype(int))
+            _pitcher_roster = roster_df[
+                roster_df["primary_position"].isin(_pitcher_pos)
+            ]
+            for _, _pr in _pitcher_roster.iterrows():
+                if int(_pr["player_id"]) in _hitter_ids:
+                    _two_way_ids.add(int(_pr["player_id"]))
+            if _two_way_ids:
+                logger.info("Two-way players detected: %s", _two_way_ids)
+
         for _, _g in schedule.iterrows():
             _gpk = int(_g["game_pk"])
             for _side in ["away", "home"]:
@@ -379,10 +395,14 @@ def run_schedule_refresh(game_date: str) -> bool:
                 if (_gpk, _team_abbr) in api_game_teams:
                     continue
                 # Active position players who have played recently
+                # Include two-way players even though their primary_position is a pitcher role
                 _team_roster = roster_df[
                     (roster_df["team_abbr"] == _team_abbr)
                     & (roster_df["roster_status"] == "active")
-                    & (~roster_df["primary_position"].isin(_pitcher_pos))
+                    & (
+                        (~roster_df["primary_position"].isin(_pitcher_pos))
+                        | (roster_df["player_id"].isin(_two_way_ids))
+                    )
                 ].copy()
                 if _team_roster.empty:
                     continue

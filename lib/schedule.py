@@ -306,7 +306,9 @@ def fetch_game_lineups(
 
         for order, pid in enumerate(batting_order[:9], 1):
             pid_key = f"ID{pid}"
-            player_info = players.get(pid_key, {}).get("person", {})
+            player_data = players.get(pid_key, {})
+            player_info = player_data.get("person", {})
+            game_pos = player_data.get("position", {}).get("abbreviation", "")
             rows.append({
                 "game_pk": game_pk,
                 "team_id": team_id,
@@ -314,6 +316,7 @@ def fetch_game_lineups(
                 "batting_order": order,
                 "batter_id": pid,
                 "batter_name": player_info.get("fullName", "Unknown"),
+                "game_position": game_pos,
             })
 
     df = pd.DataFrame(rows)
