@@ -9,9 +9,10 @@ import streamlit as st
 from config import GOLD, SAGE, EMBER, SLATE, CREAM
 from services.data_loader import (
     load_projections, load_game_props, load_dk_props, load_pp_props,
-    fetch_live_schedule,
+    load_todays_games, fetch_live_schedule,
 )
 from components.headshot import headshot_html
+from utils.helpers import format_game_time
 
 
 # ---------------------------------------------------------------------------
@@ -442,13 +443,30 @@ def page_projected_performers() -> None:
     # --- Build game dropdown options ---
     game_options: dict[str, int | None] = {"All Games": None}
     if "game_pk" in props.columns:
-        game_matchups = (
-            props.drop_duplicates("game_pk")[["game_pk", "team", "opponent"]]
-            .sort_values("team")
+        # Get game times from schedule data for sorting + display
+        _sched = load_todays_games()
+        _time_lookup: dict[int, str] = {}
+        if not _sched.empty and "game_datetime_utc" in _sched.columns:
+            for _, _sg in _sched.iterrows():
+                _gpk = _sg.get("game_pk")
+                if pd.notna(_gpk):
+                    _time_lookup[int(_gpk)] = str(_sg["game_datetime_utc"])
+
+        game_matchups = props.drop_duplicates("game_pk")[["game_pk", "team", "opponent"]].copy()
+        game_matchups["_sort_time"] = game_matchups["game_pk"].map(
+            lambda gpk: _time_lookup.get(int(gpk), "")
         )
+        game_matchups = game_matchups.sort_values("_sort_time", na_position="last")
+
         for _, g in game_matchups.iterrows():
-            label = f"{g['team']} vs {g['opponent']}"
-            game_options[label] = int(g["game_pk"])
+            gpk_int = int(g["game_pk"])
+            utc_str = _time_lookup.get(gpk_int, "")
+            time_str = format_game_time(utc_str)
+            if time_str:
+                label = f"{g['team']} vs {g['opponent']} - {time_str}"
+            else:
+                label = f"{g['team']} vs {g['opponent']}"
+            game_options[label] = gpk_int
 
     with col_game:
         game_choice = st.selectbox(

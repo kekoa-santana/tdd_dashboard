@@ -210,11 +210,13 @@ def fetch_todays_schedule(
             status = game.get("status", {}).get("detailedState", "")
             game_dt = game.get("gameDate", "")
 
-            # Parse game time
+            # Parse game time -- store UTC ISO for downstream timezone conversion
             game_time = ""
+            game_datetime_utc = ""
             if game_dt:
                 try:
                     dt = datetime.fromisoformat(game_dt.replace("Z", "+00:00"))
+                    game_datetime_utc = dt.isoformat()
                     # Convert UTC to ET (UTC-4 during DST, UTC-5 otherwise)
                     from datetime import timedelta
                     et_dt = dt - timedelta(hours=4)
@@ -247,6 +249,7 @@ def fetch_todays_schedule(
                 "game_pk": gpk,
                 "game_date": game_date,
                 "game_time": game_time,
+                "game_datetime_utc": game_datetime_utc,
                 "status": status,
                 "away_team_id": away_team.get("id"),
                 "away_team_name": away_team.get("name", ""),

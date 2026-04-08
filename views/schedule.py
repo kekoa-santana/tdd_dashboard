@@ -31,7 +31,7 @@ from services.data_loader import (
     load_pitcher_gb_pct, load_matchup_baselines,
     load_pitcher_game_sim_samples, load_batter_game_sim_samples,
 )
-from utils.helpers import format_ip, get_team_lookup
+from utils.helpers import format_ip, format_game_time, get_team_lookup
 from components.diamond_rating import diamond_rating_html
 from components.expandable_card import EXPANDABLE_CARD_CSS, expandable_card_html
 from components.team_logo import team_logo_html
@@ -445,13 +445,19 @@ def _render_schedule_cards(
         for _gpk_val, _grp in _p_sims.groupby("game_pk"):
             _pitcher_sims_by_gpk[int(_gpk_val)] = _grp
 
+    # Sort games chronologically by start time
+    if "game_datetime_utc" in schedule.columns:
+        schedule = schedule.sort_values("game_datetime_utc", na_position="last")
+
     for _, game in schedule.iterrows():
         gpk = game["game_pk"]
         away_abbr = game.get("away_abbr", "?")
         home_abbr = game.get("home_abbr", "?")
         away_tid = game.get("away_team_id")
         home_tid = game.get("home_team_id")
-        game_time = game.get("game_time", "")
+        game_time = format_game_time(
+            game.get("game_datetime_utc"), fallback=game.get("game_time", ""),
+        )
         game_dt = game.get("game_date", "")
         status = game.get("status", "")
 
