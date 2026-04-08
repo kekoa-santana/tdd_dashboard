@@ -32,7 +32,6 @@ from services.data_loader import (
     load_pitcher_game_sim_samples, load_batter_game_sim_samples,
 )
 from utils.helpers import format_ip, get_team_lookup
-from components.charts import _STAT_CHART_CONFIG
 from components.diamond_rating import diamond_rating_html
 from components.expandable_card import EXPANDABLE_CARD_CSS, expandable_card_html
 from components.team_logo import team_logo_html
@@ -618,6 +617,8 @@ def _render_schedule_cards(
 # ---------------------------------------------------------------------------
 
 _STAT_LABELS = {"TB": "Total Bases", "K": "Strikeouts", "H": "Hits", "HRR": "H+R+RBI", "Outs": "Outs Recorded"}
+_PITCHER_LABELS = {"K": "Pitcher Strikeouts", "H": "Hits Allowed", "HR": "HR Allowed", "BB": "Walks Issued", "Outs": "Outs Recorded"}
+_HITTER_LABELS = {"K": "Batter Strikeouts", "H": "Batter Hits", "HR": "Batter Home Runs", "BB": "Batter Walks", "TB": "Total Bases", "HRR": "H+R+RBI"}
 _LINE_LABELS = {"low": "Low", "mid": "Mid", "high": "High"}
 
 
@@ -773,14 +774,17 @@ def _prop_card_html(row: pd.Series) -> str:
     """Build an expandable card for a single prop edge."""
     name = row["player_name"]
     stat = row["stat"]
-    stat_label = _STAT_LABELS.get(stat, stat)
+    ptype = row.get("player_type", "")
+    if ptype == "pitcher":
+        stat_label = _PITCHER_LABELS.get(stat, _STAT_LABELS.get(stat, stat))
+    else:
+        stat_label = _HITTER_LABELS.get(stat, _STAT_LABELS.get(stat, stat))
     stat_short = stat  # K, H, HR, TB, BB
     team = row["team"]
     opp = row["opponent"]
     expected = row["expected"]
     p_over = row["p_over"]
     line = row["line"]
-    ptype = row["player_type"]
     type_badge = "P" if ptype == "pitcher" else "H"
 
     color = _edge_color(p_over)
@@ -954,18 +958,18 @@ def _render_game_drilldown(
 
 
 _PITCHER_STAT_META = {
-    "k":    {"label": "K",    "word": "strikeouts", "lines": (3.5, 10.5), "hi": 6, "vhi": 8},
-    "bb":   {"label": "BB",   "word": "walks",      "lines": (1.5, 5.5),  "hi": 3, "vhi": 4},
-    "h":    {"label": "H",    "word": "hits",       "lines": (3.5, 9.5),  "hi": 6, "vhi": 8},
-    "hr":   {"label": "HR",   "word": "home runs",  "lines": (0.5, 2.5),  "hi": 1, "vhi": 2},
-    "outs": {"label": "Outs", "word": "outs",       "lines": (11.5, 21.5), "hi": 17, "vhi": 20},
+    "k":    {"label": "K",    "xlabel": "Pitcher Strikeouts", "color": SAGE,  "lines": (3.5, 10.5), "hi": 6, "vhi": 8},
+    "bb":   {"label": "BB",   "xlabel": "Walks Issued",      "color": EMBER, "lines": (1.5, 5.5),  "hi": 3, "vhi": 4},
+    "h":    {"label": "H",    "xlabel": "Hits Allowed",      "color": SLATE, "lines": (3.5, 9.5),  "hi": 6, "vhi": 8},
+    "hr":   {"label": "HR",   "xlabel": "Home Runs Allowed", "color": GOLD,  "lines": (0.5, 2.5),  "hi": 1, "vhi": 2},
+    "outs": {"label": "Outs", "xlabel": "Outs Recorded",     "color": SLATE, "lines": (11.5, 21.5), "hi": 17, "vhi": 20},
 }
 
 _BATTER_STAT_META = {
-    "k":  {"label": "K",  "word": "strikeouts", "lines": (0.5, 3.5), "hi": 2, "vhi": 3},
-    "bb": {"label": "BB", "word": "walks",      "lines": (0.5, 2.5), "hi": 1, "vhi": 2},
-    "h":  {"label": "H",  "word": "hits",       "lines": (0.5, 3.5), "hi": 2, "vhi": 3},
-    "hr": {"label": "HR", "word": "home runs",  "lines": (0.5, 1.5), "hi": 1, "vhi": 2},
+    "k":  {"label": "K",  "xlabel": "Batter Strikeouts", "color": EMBER, "lines": (0.5, 3.5), "hi": 2, "vhi": 3},
+    "bb": {"label": "BB", "xlabel": "Batter Walks",      "color": SAGE,  "lines": (0.5, 2.5), "hi": 1, "vhi": 2},
+    "h":  {"label": "H",  "xlabel": "Batter Hits",       "color": SAGE,  "lines": (0.5, 3.5), "hi": 2, "vhi": 3},
+    "hr": {"label": "HR", "xlabel": "Batter Home Runs",  "color": GOLD,  "lines": (0.5, 1.5), "hi": 1, "vhi": 2},
 }
 
 
@@ -1022,7 +1026,7 @@ def _render_player_sim(
     else:
         signal, sig_color = "Toss-up", SLATE
 
-    cfg = _STAT_CHART_CONFIG.get(stat_key, _STAT_CHART_CONFIG["k"])
+    bar_color = meta.get("color", SAGE)
     max_val = int(stat_samples.max()) + 1
     bins = np.arange(0, max_val + 2)
     counts, _ = np.histogram(stat_samples, bins=bins - 0.5, density=True)
@@ -1037,7 +1041,7 @@ def _render_player_sim(
     ))
     pfig.add_trace(go.Bar(
         x=bins[:-1], y=over_counts, name="Over",
-        marker_color=cfg["color"], width=0.85,
+        marker_color=bar_color, width=0.85,
         hovertemplate="%{x} " + meta["label"] + ": %{y:.1%}<extra></extra>",
     ))
     pfig.add_vline(
@@ -1048,9 +1052,9 @@ def _render_player_sim(
     )
     pfig.update_layout(
         barmode="stack", showlegend=False, dragmode=False,
-        xaxis_title=cfg["xlabel"], yaxis_title="",
+        xaxis_title=meta.get("xlabel", meta["label"]), yaxis_title="",
         yaxis=dict(showticklabels=False, showgrid=False, fixedrange=True),
-        xaxis=dict(dtick=1, gridcolor="rgba(0,0,0,0)", fixedrange=True),
+        xaxis=dict(dtick=1, gridcolor="rgba(0,0,0,0)", fixedrange=True, rangemode="nonnegative"),
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
         font=dict(color=CREAM),
