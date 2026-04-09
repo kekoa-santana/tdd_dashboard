@@ -24,11 +24,28 @@ set PYTHON=C:\Users\kekoa\AppData\Local\Programs\Python\Python311\python.exe
 set LOG_DIR=%PROJECT_DIR%\logs
 set LOG_FILE=%LOG_DIR%\update_%date:~-4,4%-%date:~-10,2%-%date:~-7,2%.log
 set IS_SCHEDULE_ONLY=0
+set IS_SKIP_ETL=0
 echo %* | findstr /i "schedule-only" >nul
 if %ERRORLEVEL% EQU 0 set IS_SCHEDULE_ONLY=1
+echo %* | findstr /i "skip-etl" >nul
+if %ERRORLEVEL% EQU 0 set IS_SKIP_ETL=1
 
 REM Create logs directory if needed
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
+
+REM ── Single-instance lock — skip if another run is active ──
+set LOCK_FILE=%PROJECT_DIR%\logs\.update.lock
+if exist "%LOCK_FILE%" (
+    REM Stale lock check: if lock is older than 20 minutes, remove it
+    for /f %%A in ('powershell -NoProfile -Command "if ((Get-Date) - (Get-Item ''%LOCK_FILE%'').LastWriteTime -gt [TimeSpan]::FromMinutes(20)) { Write-Output 'stale' } else { Write-Output 'active' }"') do set LOCK_STATUS=%%A
+    if "!LOCK_STATUS!"=="active" (
+        echo [%date% %time%] Another update is already running, skipping >> "%LOG_FILE%" 2>&1
+        goto end
+    )
+    echo [%date% %time%] Removing stale lock file >> "%LOG_FILE%" 2>&1
+    del "%LOCK_FILE%" 2>nul
+)
+echo %date% %time% > "%LOCK_FILE%"
 
 if "%IS_SCHEDULE_ONLY%"=="1" (
     echo [%date% %time%] Starting schedule-only refresh... >> "%LOG_FILE%" 2>&1
@@ -40,19 +57,21 @@ REM ── Compute yesterday's date (for ETL) ──
 for /f %%i in ('powershell -NoProfile -Command "(Get-Date).AddDays(-1).ToString('yyyy-MM-dd')"') do set YESTERDAY=%%i
 
 call :run_once %*
+del "%LOCK_FILE%" 2>nul
 goto end
 
 :run_once
 REM ── Step 1: ETL — skip for --schedule-only or --skip-etl ──
-echo %* | findstr /i "schedule-only skip-etl" >nul
-if %ERRORLEVEL% EQU 0 (
+if "%IS_SCHEDULE_ONLY%"=="1" (
+    echo [%date% %time%] Skipping ETL step >> "%LOG_FILE%" 2>&1
+) else if "%IS_SKIP_ETL%"=="1" (
     echo [%date% %time%] Skipping ETL step >> "%LOG_FILE%" 2>&1
 ) else (
     echo [%date% %time%] Running ETL for %YESTERDAY%... >> "%LOG_FILE%" 2>&1
     cd /d "%ETL_DIR%"
     "%ETL_PYTHON%" "%ETL_DIR%\full_pipeline.py" --start-date %YESTERDAY% --end-date %YESTERDAY% >> "%LOG_FILE%" 2>&1
-    if %ERRORLEVEL% NEQ 0 (
-        echo [%date% %time%] ETL FAILED with exit code %ERRORLEVEL% >> "%LOG_FILE%" 2>&1
+    if !ERRORLEVEL! NEQ 0 (
+        echo [%date% %time%] ETL FAILED with exit code !ERRORLEVEL! >> "%LOG_FILE%" 2>&1
         echo [%date% %time%] Continuing with dashboard update using existing data... >> "%LOG_FILE%" 2>&1
     ) else (
         echo [%date% %time%] ETL completed successfully >> "%LOG_FILE%" 2>&1
