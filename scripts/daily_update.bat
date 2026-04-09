@@ -39,7 +39,7 @@ if "%IS_SCHEDULE_ONLY%"=="1" (
 REM ── Compute yesterday's date (for ETL) ──
 for /f %%i in ('powershell -NoProfile -Command "(Get-Date).AddDays(-1).ToString('yyyy-MM-dd')"') do set YESTERDAY=%%i
 
-call :run_once
+call :run_once %*
 goto end
 
 :run_once
