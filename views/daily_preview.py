@@ -52,6 +52,7 @@ def _pitcher_section_html(report: PitcherReport) -> str:
         ("BATTERS TO WATCH", GOLD, report.key_batters),
         ("BATTERS WHO WILL STRUGGLE", SLATE, report.struggling_batters),
         ("BULLPEN", SLATE, report.bullpen_notes),
+        (f"{report.opp_abbr} BATTING OUTLOOK", GOLD, report.batting_outlook),
     ]
 
     for title, color, bullets in sections:

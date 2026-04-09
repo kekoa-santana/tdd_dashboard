@@ -55,6 +55,7 @@ def _render_scouting_html(report) -> None:
         ("BATTERS TO WATCH", GOLD, report.key_batters),
         ("BATTERS WHO WILL STRUGGLE", SLATE, report.struggling_batters),
         ("BULLPEN", SLATE, report.bullpen_notes),
+        (f"{report.opp_abbr} BATTING OUTLOOK", GOLD, report.batting_outlook),
     ]
 
     all_bullets = []

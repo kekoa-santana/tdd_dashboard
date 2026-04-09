@@ -199,6 +199,7 @@ class PitcherReport:
     key_batters: list[str] = field(default_factory=list)
     struggling_batters: list[str] = field(default_factory=list)
     bullpen_notes: list[str] = field(default_factory=list)
+    batting_outlook: list[str] = field(default_factory=list)
     has_lineup: bool = False
 
 
@@ -855,16 +856,108 @@ def _generate_bullpen_notes(
             ]
             bullets.append(random.choice(templates))
 
-    # Opponent bullpen (affects run environment for stacked games)
-    if opp_bp_rates:
-        opp_k = opp_bp_rates["k_rate"]
-        if opp_k < 0.21:
-            bullets.append(
-                f"On the flip side, {opp_team_abbr}'s bullpen is hittable "
-                f"({opp_k:.1%} K rate) -- the bats could feast late"
-            )
-
     return bullets[:3]
+
+
+def _generate_batting_outlook(
+    sim_row: pd.Series,
+    data: ReportData,
+    pitcher_team_abbr: str,
+    opp_team_abbr: str,
+    pitcher_name: str,
+) -> list[str]:
+    """Generate bullets from the opposing lineup's batting perspective.
+
+    Frames how ``opp_team_abbr``'s batters match up against the starter
+    *and* what they can expect from ``pitcher_team_abbr``'s bullpen once
+    the starter exits.
+    """
+    bullets: list[str] = []
+
+    k_rate = sim_row.get("projected_k_rate", 0.0)
+    expected_ip = sim_row.get("expected_ip", 5.0)
+    bp_rates = _get_bullpen_rates(pitcher_team_abbr, data)
+
+    if not bp_rates:
+        return bullets
+
+    bp_k = bp_rates["k_rate"]
+    bp_bb = bp_rates.get("bb_rate", 0.0)
+    bp_hr = bp_rates.get("hr_rate", 0.0)
+
+    tough_starter = k_rate >= 0.25
+    soft_starter = k_rate < 0.20
+    weak_pen = bp_k < 0.21
+    strong_pen = bp_k >= 0.26
+    short_outing = expected_ip < 5.0
+    walky_pen = bp_bb > 0.095
+    hr_pen = bp_hr > 0.032
+
+    # Tough starter + weak bullpen -- survive and thrive
+    if tough_starter and weak_pen:
+        templates = [
+            f"{opp_team_abbr} batters will struggle against {pitcher_name} "
+            f"({k_rate:.1%} K rate) but the bullpen is a different story "
+            f"({bp_k:.1%} K rate)",
+            f"Tough matchup early against {pitcher_name}, but "
+            f"{pitcher_team_abbr}'s pen ({bp_k:.1%} K rate) gives "
+            f"{opp_team_abbr}'s lineup a window late",
+        ]
+        bullets.append(random.choice(templates))
+
+    # Soft starter + weak bullpen -- feast all game
+    elif soft_starter and weak_pen:
+        templates = [
+            f"If {opp_team_abbr} can get to {pitcher_name} early, they are "
+            f"going to feast on the bullpen ({bp_k:.1%} K rate)",
+            f"{pitcher_name} doesn't miss many bats ({k_rate:.1%} K rate) "
+            f"and the pen behind him is no better -- "
+            f"{opp_team_abbr}'s lineup should stay aggressive all game",
+        ]
+        bullets.append(random.choice(templates))
+
+    # Tough starter + strong bullpen -- tough all game
+    elif tough_starter and strong_pen:
+        templates = [
+            f"Tough sledding for {opp_team_abbr} all game -- "
+            f"{pitcher_name} is dominant ({k_rate:.1%} K rate) and "
+            f"the bullpen is just as nasty ({bp_k:.1%} K rate)",
+            f"{opp_team_abbr} needs to capitalize on mistakes -- "
+            f"{pitcher_name} and {pitcher_team_abbr}'s pen "
+            f"({bp_k:.1%} K rate) don't give many free passes",
+        ]
+        bullets.append(random.choice(templates))
+
+    # Short outing + weak bullpen -- late-game opportunity
+    if short_outing and weak_pen and not (tough_starter and weak_pen):
+        templates = [
+            f"{pitcher_name} is on a short leash ({expected_ip:.1f} IP "
+            f"projected) and {pitcher_team_abbr}'s pen is hittable "
+            f"({bp_k:.1%} K rate) -- late innings could open up for "
+            f"{opp_team_abbr}",
+            f"Get through {pitcher_name} early and the game flips: "
+            f"{pitcher_team_abbr}'s bullpen ({bp_k:.1%} K rate) "
+            f"won't shut the door",
+        ]
+        bullets.append(random.choice(templates))
+
+    # HR-prone pen -- power hitters lick their chops
+    if hr_pen and not strong_pen:
+        bullets.append(
+            f"{pitcher_team_abbr}'s pen gives up dingers "
+            f"({bp_hr:.1%} HR rate) -- {opp_team_abbr}'s power bats "
+            f"could do damage late"
+        )
+
+    # Walk-heavy pen -- free baserunners
+    if walky_pen and not strong_pen and len(bullets) < 2:
+        bullets.append(
+            f"{pitcher_team_abbr}'s relievers put runners on "
+            f"({bp_bb:.1%} BB rate) -- patience pays for "
+            f"{opp_team_abbr} in the late innings"
+        )
+
+    return bullets[:2]
 
 
 # ---------------------------------------------------------------------------
@@ -944,6 +1037,9 @@ def _analyze_pitcher_side(
     bullpen_notes = _generate_bullpen_notes(
         sim_row, data, team_abbr, opp_abbr,
     )
+    batting_outlook = _generate_batting_outlook(
+        sim_row, data, team_abbr, opp_abbr, pname,
+    )
 
     return PitcherReport(
         pitcher_name=pname,
@@ -964,6 +1060,7 @@ def _analyze_pitcher_side(
         key_batters=key_batters,
         struggling_batters=struggling_batters,
         bullpen_notes=bullpen_notes,
+        batting_outlook=batting_outlook,
         has_lineup=bool(sim_row.get("has_lineup", False)),
     )
 
@@ -1036,6 +1133,12 @@ def _format_pitcher_section(report: PitcherReport) -> list[str]:
     if report.bullpen_notes:
         lines.append("**Bullpen:**")
         for b in report.bullpen_notes:
+            lines.append(f"- {b}")
+        lines.append("")
+
+    if report.batting_outlook:
+        lines.append(f"**{report.opp_abbr} Batting Outlook:**")
+        for b in report.batting_outlook:
             lines.append(f"- {b}")
         lines.append("")
 
@@ -1124,6 +1227,7 @@ def get_pitcher_scouting(
     advantages = _generate_advantages(sim_row, bs, top_pitches, batter_ids, data, pitcher_name)
     key_batters, struggling_batters = _classify_batters(bs, pitcher_id, data, pitcher_name, pitcher_hand)
     bullpen_notes = _generate_bullpen_notes(sim_row, data, team_abbr, opp_abbr)
+    batting_outlook = _generate_batting_outlook(sim_row, data, team_abbr, opp_abbr, pitcher_name)
 
     return PitcherReport(
         pitcher_name=pitcher_name,
@@ -1144,6 +1248,7 @@ def get_pitcher_scouting(
         key_batters=key_batters,
         struggling_batters=struggling_batters,
         bullpen_notes=bullpen_notes,
+        batting_outlook=batting_outlook,
         has_lineup=bool(sim_row.get("has_lineup", False)),
     )
 
