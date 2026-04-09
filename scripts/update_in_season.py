@@ -742,6 +742,7 @@ def run_schedule_refresh(game_date: str) -> bool:
             sim_sample_arrays[f"{_sim_key}_h"] = result.h_samples.astype(np.float32)
             sim_sample_arrays[f"{_sim_key}_hr"] = result.hr_samples.astype(np.float32)
             sim_sample_arrays[f"{_sim_key}_outs"] = result.outs_samples.astype(np.float32)
+            sim_sample_arrays[f"{_sim_key}_runs"] = result.runs_samples.astype(np.float32)
 
             results.append({
                 "game_pk": gpk,
@@ -806,10 +807,68 @@ def run_schedule_refresh(game_date: str) -> bool:
         n_none = (sim_df["lineup_source"] == "none").sum()
         logger.info("  Lineup sources: %d API, %d depth chart, %d none",
                      n_api, n_dc, n_none)
+
+        # --- Game-level predictions (moneyline / spread / over-under) ---
+        _build_game_predictions(sim_df, sim_sample_arrays)
     else:
         logger.warning("No pitchers could be simulated (missing K samples?)")
 
     return True
+
+
+def _build_game_predictions(
+    sim_df: "pd.DataFrame", sample_arrays: dict[str, "np.ndarray"],
+) -> None:
+    """Compute game-level predictions from pitcher sim runs and save."""
+    import pandas as pd
+    from lib.game_predictions import build_game_predictions_from_sims
+
+    game_preds = build_game_predictions_from_sims(sim_df, sample_arrays)
+    if game_preds.empty:
+        logger.warning("No game-level predictions produced")
+        return
+
+    game_preds.to_parquet(
+        DASHBOARD_DIR / "todays_game_predictions.parquet", index=False,
+    )
+    logger.info("Saved game predictions for %d games", len(game_preds))
+
+
+# ---------------------------------------------------------------------------
+# Game odds collection
+# ---------------------------------------------------------------------------
+
+def _run_game_accuracy_report() -> None:
+    """Run game prediction accuracy report if enough data exists."""
+    log_path = DASHBOARD_DIR / "game_prediction_log.parquet"
+    if not log_path.exists():
+        logger.info("No game prediction log yet. Skipping accuracy report.")
+        return
+    try:
+        from scripts.validate_game_accuracy import print_accuracy_report
+        import pandas as pd
+
+        df = pd.read_parquet(log_path)
+        if len(df) < 5:
+            logger.info("Only %d games in log. Need ≥5 for report.", len(df))
+            return
+        print_accuracy_report(df)
+    except Exception as e:
+        logger.warning("Game accuracy report failed: %s", e)
+
+
+def collect_game_odds_snapshot(game_date: str) -> None:
+    """Fetch game-level odds from DK/Bovada and append to history parquet."""
+    try:
+        from scripts.collect_game_odds import collect_odds, append_to_history
+
+        odds = collect_odds(game_date)
+        if not odds.empty:
+            append_to_history(odds)
+        else:
+            logger.info("No game odds collected for %s", game_date)
+    except Exception as e:
+        logger.warning("Game odds collection failed: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -1303,6 +1362,109 @@ def archive_yesterdays_predictions(game_date: str) -> None:
                          len(new_rows), yesterday, len(combined))
 
 
+def archive_yesterdays_game_predictions(game_date: str) -> None:
+    """Archive yesterday's game-level predictions (ML/spread/O-U) with actuals.
+
+    Reads todays_game_predictions.parquet (which contains yesterday's preds
+    until overwritten), queries game scores from the DB, computes accuracy
+    flags and CRPS, and appends to game_prediction_log.parquet.
+    """
+    import numpy as np
+    import pandas as pd
+    from datetime import timedelta
+
+    yesterday = (date.fromisoformat(game_date) - timedelta(days=1)).isoformat()
+
+    preds_path = DASHBOARD_DIR / "todays_game_predictions.parquet"
+    games_path = DASHBOARD_DIR / "todays_games.parquet"
+
+    if not preds_path.exists() or not games_path.exists():
+        logger.info("No game predictions to archive (files missing)")
+        return
+
+    # Verify predictions are for yesterday
+    games = pd.read_parquet(games_path)
+    if games.empty:
+        return
+    pred_date = str(games.iloc[0].get("game_date", ""))[:10]
+    if pred_date and pred_date != yesterday:
+        logger.info("Game predictions are for %s, not yesterday (%s). Skipping.",
+                     pred_date, yesterday)
+        return
+
+    # Check for duplicate archiving
+    log_path = DASHBOARD_DIR / "game_prediction_log.parquet"
+    if log_path.exists():
+        existing = pd.read_parquet(log_path)
+        if "prediction_date" in existing.columns:
+            if yesterday in existing["prediction_date"].astype(str).values:
+                logger.info("Already archived game predictions for %s. Skipping.",
+                             yesterday)
+                return
+
+    # Query game scores from DB
+    # Aggregate from fact_player_game_mlb (confirmed table) since
+    # fact_game_mlb may not exist in all environments.
+    try:
+        from lib.db import read_sql
+
+        scores = read_sql("""
+            SELECT game_pk,
+                   SUM(CASE WHEN team_id = away_team_id THEN runs_scored ELSE 0 END) AS away_score,
+                   SUM(CASE WHEN team_id = home_team_id THEN runs_scored ELSE 0 END) AS home_score
+            FROM (
+                SELECT fpg.game_pk, fpg.team_id,
+                       SUM(COALESCE(fpg.bat_r, 0)) AS runs_scored,
+                       dg.home_team_id, dg.away_team_id
+                FROM production.fact_player_game_mlb fpg
+                JOIN production.dim_game dg ON fpg.game_pk = dg.game_pk
+                WHERE fpg.game_date = :gd
+                  AND fpg.season = :season
+                  AND fpg.player_role = 'batter'
+                GROUP BY fpg.game_pk, fpg.team_id, dg.home_team_id, dg.away_team_id
+            ) t
+            GROUP BY game_pk
+            HAVING COUNT(DISTINCT team_id) = 2
+        """, params={"gd": yesterday, "season": SEASON})
+    except Exception as e:
+        logger.warning("Could not query game scores from DB: %s. Skipping.", e)
+        return
+
+    if scores.empty:
+        logger.info("No final game scores for %s. Skipping game archive.", yesterday)
+        return
+
+    preds = pd.read_parquet(preds_path)
+    preds["prediction_date"] = yesterday
+
+    # Load sample arrays for CRPS computation
+    samples_path = DASHBOARD_DIR / "pitcher_game_sim_samples.npz"
+    sample_arrays = None
+    if samples_path.exists():
+        try:
+            _d = np.load(samples_path)
+            sample_arrays = {k: _d[k] for k in _d.files}
+        except Exception:
+            pass
+
+    from lib.game_predictions import evaluate_game_predictions
+
+    evaluated = evaluate_game_predictions(preds, scores, sample_arrays)
+    if evaluated.empty:
+        logger.info("No game predictions matched to scores for %s", yesterday)
+        return
+
+    if log_path.exists():
+        existing = pd.read_parquet(log_path)
+        combined = pd.concat([existing, evaluated], ignore_index=True)
+    else:
+        combined = evaluated
+
+    combined.to_parquet(log_path, index=False)
+    logger.info("Archived %d game predictions for %s (total: %d)",
+                 len(evaluated), yesterday, len(combined))
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1341,6 +1503,9 @@ def main() -> None:
             run_batter_sims(game_date)
         else:
             logger.info("Skipping batter sims (no changes)")
+
+        # Collect game odds snapshot
+        collect_game_odds_snapshot(game_date)
 
         # Update metadata timestamp
         meta_path = DASHBOARD_DIR / "update_metadata.json"
@@ -1382,6 +1547,7 @@ def main() -> None:
     # Step 0: Archive yesterday's predictions before anything overwrites them
     logger.info("Step 0: Archiving yesterday's predictions...")
     archive_yesterdays_predictions(game_date)
+    archive_yesterdays_game_predictions(game_date)
 
     # Step 1: Run projection engine (model work lives in player_profiles)
     if not args.skip_engine:
@@ -1397,6 +1563,10 @@ def main() -> None:
     # Step 1b: Run batter sims (uses pitcher sims from Step 1)
     logger.info("Step 1b: Running batter game sims...")
     run_batter_sims(game_date)
+
+    # Step 1c: Collect game odds snapshot
+    logger.info("Step 1c: Collecting game odds...")
+    collect_game_odds_snapshot(game_date)
 
     # Step 2: Export roster from DB to parquet
     logger.info("Step 2: Exporting roster...")
@@ -1426,7 +1596,11 @@ def main() -> None:
         json.dump(metadata, f, indent=2)
     logger.info("Saved update metadata to %s", meta_path)
 
-    # Step 5: Generate artifact manifest
+    # Step 5: Run game prediction accuracy report (if enough data)
+    logger.info("Step 5: Game prediction accuracy check...")
+    _run_game_accuracy_report()
+
+    # Step 6: Generate artifact manifest
     from services.manifest import generate_manifest
     manifest = generate_manifest(DASHBOARD_DIR)
     manifest_path = DASHBOARD_DIR / "manifest.json"

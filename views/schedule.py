@@ -36,6 +36,53 @@ from components.diamond_rating import diamond_rating_html
 from components.expandable_card import EXPANDABLE_CARD_CSS, expandable_card_html
 from components.team_logo import team_logo_html
 from components.headshot import headshot_html
+from lib.fantasy_report import load_report_data, get_pitcher_scouting, ReportData
+
+
+@st.cache_data(ttl=300)
+def _get_scouting_report_data() -> ReportData:
+    """Load scouting report data (cached 5 min)."""
+    return load_report_data(DASHBOARD_DIR)
+
+
+def _render_scouting_html(report) -> None:
+    """Render a PitcherReport's scouting bullets as styled HTML."""
+    from lib.fantasy_report import PitcherReport
+
+    sections = [
+        ("ADVANTAGES", SAGE, report.advantages),
+        ("STRUGGLES", EMBER, report.struggles),
+        ("BATTERS TO WATCH", GOLD, report.key_batters),
+        ("BATTERS WHO WILL STRUGGLE", SLATE, report.struggling_batters),
+        ("BULLPEN", SLATE, report.bullpen_notes),
+    ]
+
+    all_bullets = []
+    for title, color, bullets in sections:
+        if not bullets:
+            continue
+        bullet_html = "".join(
+            f'<li style="margin-bottom:0.25rem;">{b}</li>' for b in bullets
+        )
+        all_bullets.append(
+            f'<div style="color:{color}; font-weight:600; font-size:0.7rem; '
+            f'letter-spacing:0.5px; margin-bottom:0.2rem; margin-top:0.4rem;">'
+            f'{title}</div>'
+            f'<ul style="margin:0; padding-left:1.2rem; '
+            f'color:var(--tdd-cream);">{bullet_html}</ul>'
+        )
+
+    if all_bullets:
+        st.markdown(
+            f'<div style="margin:0.5rem 0 1rem; padding:0.6rem 0.8rem; '
+            f'border-left:2px solid {GOLD}; font-size:0.82rem; '
+            f'color:var(--tdd-cream);">'
+            f'<div style="color:{GOLD}; font-weight:600; '
+            f'font-size:0.75rem; letter-spacing:0.5px; margin-bottom:0.3rem;">'
+            f'SCOUTING REPORT</div>'
+            f'{"".join(all_bullets)}</div>',
+            unsafe_allow_html=True,
+        )
 
 
 def _is_game_window() -> bool:
@@ -1947,26 +1994,14 @@ def _render_matchup_tab(
                 unsafe_allow_html=True,
             )
 
-        # Scouting report
-        if pid and not opp_lu.empty:
-            bullets = _build_scouting_bullets(
-                pid, pitcher_name, opp_lu, arsenal_df, vuln_df,
+        # Scouting report (new engine with creative narratives)
+        if pid:
+            _scouting_data = _get_scouting_report_data()
+            report = get_pitcher_scouting(
+                pid, pitcher_name, side_abbr, opp_abbr,
+                _scouting_data,
             )
-            if bullets:
-                bullet_html = "".join(
-                    f'<li style="margin-bottom:0.3rem;">{b}</li>' for b in bullets
-                )
-                st.markdown(
-                    f'<div style="margin:0.5rem 0 1rem; padding:0.6rem 0.8rem; '
-                    f'border-left:2px solid var(--tdd-gold); font-size:0.82rem; '
-                    f'color:var(--tdd-cream);">'
-                    f'<div style="color:var(--tdd-gold); font-weight:600; '
-                    f'font-size:0.75rem; letter-spacing:0.5px; margin-bottom:0.3rem;">'
-                    f'SCOUTING REPORT</div>'
-                    f'<ul style="margin:0; padding-left:1.2rem; '
-                    f'color:var(--tdd-cream);">{bullet_html}</ul></div>',
-                    unsafe_allow_html=True,
-                )
+            _render_scouting_html(report)
 
 
 def _parse_temp_bucket(temp_str: object) -> str:
