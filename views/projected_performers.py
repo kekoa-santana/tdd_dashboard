@@ -349,6 +349,9 @@ def page_projected_performers() -> None:
             .stApp:has(.props-lab-breakpoint-sentinel) .lb-card {
                 max-width: 100% !important;
             }
+            .stApp:has(.props-lab-breakpoint-sentinel) .lb-headshot {
+                display: none !important;
+            }
         }
         </style>
         """,

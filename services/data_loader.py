@@ -758,9 +758,43 @@ def load_milb_factors(player_type: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=_DATA_TTL)
 def load_rankings(player_type: str) -> pd.DataFrame:
-    """Load precomputed rankings (hitters, pitchers, or prospects)."""
+    """Load live/internal MLB rankings or prospect tables from parquet.
+
+    For hitters and pitchers this reads ``{player_type}_rankings.parquet``,
+    which the projection repo refreshes on an in-season schedule. Use
+    :func:`load_core_rankings` for the stable Player Rankings page lists.
+    """
     filename = f"{player_type}_rankings.parquet"
     path = DASHBOARD_DIR / filename
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+_CORE_RANKING_FILES = {
+    "hitters": "hitters_core_rankings.parquet",
+    "pitchers": "pitchers_core_rankings.parquet",
+}
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_core_rankings(player_type: str) -> pd.DataFrame:
+    """Load frozen core MLB rankings (preseason contract, not weekly-refreshed).
+
+    Written by ``player_profiles`` precompute as ``hitters_core_rankings.parquet``
+    and ``pitchers_core_rankings.parquet``. Same composite columns as live
+    rankings at build time, plus ``rank_type``, ``core_anchor_season``,
+    ``core_projection_season``.
+
+    Parameters
+    ----------
+    player_type
+        ``'hitters'`` or ``'pitchers'``.
+    """
+    fname = _CORE_RANKING_FILES.get(player_type)
+    if not fname:
+        return pd.DataFrame()
+    path = DASHBOARD_DIR / fname
     if not path.exists():
         return pd.DataFrame()
     return pd.read_parquet(path)

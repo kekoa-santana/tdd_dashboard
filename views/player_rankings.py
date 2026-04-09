@@ -11,6 +11,7 @@ from components.expandable_card import EXPANDABLE_CARD_CSS, expandable_card_html
 from components.headshot import headshot_html
 from lib.diamond_rating import score_to_diamonds, diamond_tier
 from services.data_loader import (
+    load_core_rankings,
     load_rankings,
     load_player_teams,
     load_prospect_readiness,
@@ -1216,6 +1217,12 @@ def page_player_rankings() -> None:
     # "Projected Value" = forward-looking 2-3 year outlook (trajectory, age, production)
     value_mode = "projected" if "Projected" in value_mode_label else "overall"
 
+    if category in ("Batters", "Pitchers"):
+        st.caption(
+            "MLB leaderboards use frozen **core** rankings (stable preseason "
+            "contract). Live ``*_rankings.parquet`` tables power other views."
+        )
+
     # Team lookup for MLB sections
     teams_df = load_player_teams()
     teams_lookup: dict[int, str] = {}
@@ -1225,9 +1232,12 @@ def page_player_rankings() -> None:
         ))
 
     if category == "Batters":
-        df = load_rankings("hitters")
+        df = load_core_rankings("hitters")
         if df.empty:
-            st.warning("No batter rankings data found. Run precompute first.")
+            st.warning(
+                "No batter core rankings found. Build "
+                "``hitters_core_rankings.parquet`` (precompute player rankings)."
+            )
             return
         # Merge grade CIs into rankings
         _h_ci = load_hitter_grade_ci()
@@ -1240,9 +1250,12 @@ def page_player_rankings() -> None:
         _render_batter_rankings(df, teams_lookup, league_filter, search, value_mode=value_mode)
 
     elif category == "Pitchers":
-        df = load_rankings("pitchers")
+        df = load_core_rankings("pitchers")
         if df.empty:
-            st.warning("No pitcher rankings data found. Run precompute first.")
+            st.warning(
+                "No pitcher core rankings found. Build "
+                "``pitchers_core_rankings.parquet`` (precompute player rankings)."
+            )
             return
         # Merge grade CIs into rankings
         _p_ci = load_pitcher_grade_ci()
