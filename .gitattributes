@@ -1,9 +1,0 @@
-# Binary data files -- never do CRLF conversion
-*.npz binary
-*.parquet binary
-*.pkl binary
-*.pickle binary
-*.png binary
-*.jpg binary
-*.jpeg binary
-*.ico binary
