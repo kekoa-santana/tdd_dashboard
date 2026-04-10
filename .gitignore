@@ -1,6 +1,8 @@
 # Logs
 logs/
 
+docs/fantasy_team.md
+
 # Python
 __pycache__/
 *.py[cod]
