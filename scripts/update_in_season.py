@@ -858,14 +858,12 @@ def _run_game_accuracy_report() -> None:
 
 
 def collect_game_odds_snapshot(game_date: str) -> None:
-    """Fetch game-level odds from DK/Bovada and append to history parquet."""
+    """Fetch game-level odds (ML, spread, total) from DK/Bovada; append history + daily wide."""
     try:
-        from scripts.collect_game_odds import collect_odds, append_to_history
+        from scripts.collect_game_odds import persist_game_odds
 
-        odds = collect_odds(game_date)
-        if not odds.empty:
-            append_to_history(odds)
-        else:
+        odds = persist_game_odds(game_date)
+        if odds.empty:
             logger.info("No game odds collected for %s", game_date)
     except Exception as e:
         logger.warning("Game odds collection failed: %s", e)
