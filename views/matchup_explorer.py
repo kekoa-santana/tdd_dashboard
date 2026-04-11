@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from config import EMBER, GOLD, SAGE, SLATE, CREAM, DARK_BORDER, PITCH_DISPLAY, PITCH_TYPE_COLORS
+from config import EMBER, SAGE, SLATE, PITCH_DISPLAY
 from services.data_loader import (
     load_baselines_arch,
     load_cluster_metadata,
@@ -47,9 +47,7 @@ def page_matchup_explorer() -> None:
     from lib.matchup import (
         score_matchup,
         score_matchup_advantage,
-        score_matchup_bb,
         score_matchup_by_archetype,
-        score_matchup_hr,
     )
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
     from services.data_loader import (
@@ -154,7 +152,6 @@ def page_matchup_explorer() -> None:
     # --- Platoon-aware filtering for switch hitters ---
     # Determine which side the hitter bats from against this pitcher
     batter_vuln_all = vuln_df[vuln_df["batter_id"] == batter_id]
-    batter_str_all = str_df[str_df["batter_id"] == batter_id] if not str_df.empty else pd.DataFrame()
     side_counts = batter_vuln_all.groupby("batter_stand")["pitches"].sum() if not batter_vuln_all.empty else pd.Series(dtype=float)
     is_switch = len(side_counts) > 1 and all(v >= 50 for v in side_counts.values)
 
@@ -261,12 +258,10 @@ def page_matchup_explorer() -> None:
         pgb = pitcher_gb_df[pitcher_gb_df["pitcher_id"] == pitcher_id]
         if not pgb.empty:
             pitcher_gb_val = float(pgb["gb_pct"].iloc[0])
-    batter_gb_val = None
     batter_fb_val = None
     if not hitter_proj.empty:
         hp = hitter_proj[hitter_proj["batter_id"] == batter_id]
         if not hp.empty:
-            batter_gb_val = float(hp["gb_rate"].iloc[0]) if "gb_rate" in hp.columns else None
             batter_fb_val = float(hp["fb_rate"].iloc[0]) if "fb_rate" in hp.columns else None
 
     # Build matchup scales dict
@@ -283,7 +278,6 @@ def page_matchup_explorer() -> None:
         pitcher_hand=pitcher_hand,
         batter_platoon_splits=batter_platoon_dict,
         pitcher_gb_pct=pitcher_gb_val,
-        batter_gb_rate=batter_gb_val,
         batter_fb_rate=batter_fb_val,
         pitcher_glicko_mu=p_glicko_mu,
         batter_glicko_mu=b_glicko_mu,

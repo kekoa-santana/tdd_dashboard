@@ -23,10 +23,9 @@ import random
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
-from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE, LEAGUE_AVG_OVERALL, PITCH_TO_FAMILY
+from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE, LEAGUE_AVG_OVERALL
 
 # ---------------------------------------------------------------------------
 # Display helpers
@@ -461,7 +460,6 @@ def _generate_struggles(
         pt = top_pitch["pitch_type"]
         pt_name = PITCH_DISPLAY.get(pt, pt)
         usage = top_pitch.get("usage_pct", 0)
-        p_whiff = top_pitch.get("whiff_rate", 0)
         lg = LEAGUE_AVG_BY_PITCH_TYPE.get(pt, LEAGUE_AVG_OVERALL)
         lg_whiff = lg.get("whiff_rate", 0.25)
 
@@ -800,8 +798,6 @@ def _generate_bullpen_notes(
 
     expected_ip = sim_row.get("expected_ip", 5.0)
     bp_rates = _get_bullpen_rates(pitcher_team_abbr, data)
-    bp_score = _get_bullpen_score(pitcher_team_abbr, data)
-    opp_bp_rates = _get_bullpen_rates(opp_team_abbr, data)
 
     # Pitcher's own team bullpen
     if bp_rates:

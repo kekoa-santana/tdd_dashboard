@@ -4,7 +4,14 @@ from pathlib import Path
 
 import yaml
 
-from lib.theme import GOLD, EMBER, SAGE, SLATE, CREAM, DARK
+from lib.theme import (
+    GOLD as GOLD,
+    EMBER,
+    SAGE,
+    SLATE as SLATE,
+    CREAM as CREAM,
+    DARK as DARK,
+)
 
 # Paths
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -168,10 +175,6 @@ PITCHER_TRAD_COUNTING = [
 ]
 
 # Scouting report helpers
-STAT_NAMES = {
-    "k_rate": "strikeout rate",
-    "bb_rate": "walk rate",
-}
 GOOD_DIRECTION_LABEL = {
     ("k_rate", True): "miss more bats",
     ("k_rate", False): "make more contact",

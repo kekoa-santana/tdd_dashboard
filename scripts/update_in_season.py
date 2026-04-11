@@ -110,7 +110,6 @@ def export_roster() -> bool:
     """
     try:
         from lib.db import read_sql
-        import pandas as pd
 
         df = read_sql("""
             SELECT dr.player_id, dr.player_name, dr.org_id, dr.roster_status,
@@ -505,6 +504,26 @@ def run_schedule_refresh(game_date: str) -> bool:
     tend_path = DASHBOARD_DIR / "pitcher_exit_tendencies.parquet"
     exit_tendencies = pd.read_parquet(tend_path) if tend_path.exists() else pd.DataFrame()
 
+    # Team bullpen rates — used for the post-starter tail of the game sim.
+    # Falls back to the most recent completed season when the current
+    # season has insufficient BF (< 200).
+    bullpen_rates_path = DASHBOARD_DIR / "team_bullpen_rates.parquet"
+    bullpen_rates_lookup: dict[int, tuple[float, float, float]] = {}
+    if bullpen_rates_path.exists():
+        _bp_df = pd.read_parquet(bullpen_rates_path)
+        _prev = _bp_df[_bp_df["season"] == SEASON - 1]
+        for _, r in _prev.iterrows():
+            bullpen_rates_lookup[int(r["team_id"])] = (
+                float(r["k_rate"]), float(r["bb_rate"]), float(r["hr_rate"]),
+            )
+        _cur = _bp_df[_bp_df["season"] == SEASON]
+        for _, r in _cur.iterrows():
+            if float(r.get("total_bf", 0.0)) >= 200:
+                bullpen_rates_lookup[int(r["team_id"])] = (
+                    float(r["k_rate"]), float(r["bb_rate"]), float(r["hr_rate"]),
+                )
+        logger.info("Loaded team bullpen rates for %d teams", len(bullpen_rates_lookup))
+
     # --- Load depth chart fallback for pre-lineup sims ---
     dc_path = DASHBOARD_DIR / "probable_starters_by_hand.parquet"
     depth_chart = pd.read_parquet(dc_path) if dc_path.exists() else pd.DataFrame()
@@ -686,6 +705,19 @@ def run_schedule_refresh(game_date: str) -> bool:
 
             avg_pitches = _pitcher_avg_pitches(pid)
 
+            # Pitching team's bullpen rates for the post-starter tail.
+            pitching_team_id = game.get(f"{side}_team_id")
+            bp_rates = bullpen_rates_lookup.get(
+                int(pitching_team_id) if pd.notna(pitching_team_id) else -1
+            )
+            bp_kwargs: dict[str, float] = {}
+            if bp_rates is not None:
+                bp_kwargs = {
+                    "bullpen_k_rate": bp_rates[0],
+                    "bullpen_bb_rate": bp_rates[1],
+                    "bullpen_hr_rate": bp_rates[2],
+                }
+
             # Run PA-by-PA simulation
             result = simulate_game(
                 pitcher_k_rate_samples=k_samp,
@@ -699,6 +731,7 @@ def run_schedule_refresh(game_date: str) -> bool:
                 pitcher_avg_pitches=avg_pitches,
                 umpire_k_lift=ump_k_lift,
                 weather_k_lift=wx_k_lift,
+                **bp_kwargs,
                 n_sims=10_000,
                 random_seed=42 + gpk + (0 if side == "away" else 1),
             )
@@ -743,6 +776,14 @@ def run_schedule_refresh(game_date: str) -> bool:
             sim_sample_arrays[f"{_sim_key}_hr"] = result.hr_samples.astype(np.float32)
             sim_sample_arrays[f"{_sim_key}_outs"] = result.outs_samples.astype(np.float32)
             sim_sample_arrays[f"{_sim_key}_runs"] = result.runs_samples.astype(np.float32)
+            if result.starter_runs_samples is not None:
+                sim_sample_arrays[f"{_sim_key}_starter_runs"] = (
+                    result.starter_runs_samples.astype(np.float32)
+                )
+            if result.bullpen_runs_samples is not None:
+                sim_sample_arrays[f"{_sim_key}_bullpen_runs"] = (
+                    result.bullpen_runs_samples.astype(np.float32)
+                )
 
             results.append({
                 "game_pk": gpk,
@@ -819,8 +860,14 @@ def run_schedule_refresh(game_date: str) -> bool:
 def _build_game_predictions(
     sim_df: "pd.DataFrame", sample_arrays: dict[str, "np.ndarray"],
 ) -> None:
-    """Compute game-level predictions from pitcher sim runs and save."""
+    """Compute game-level predictions from pitcher sim runs and save.
+
+    Also appends to the running archive parquet so we accumulate a
+    sim-vs-market history over the season for calibration and bias
+    learning (see ``run_market_comparison.py``).
+    """
     import pandas as pd
+    from datetime import date as _date
     from lib.game_predictions import build_game_predictions_from_sims
 
     game_preds = build_game_predictions_from_sims(sim_df, sample_arrays)
@@ -832,6 +879,31 @@ def _build_game_predictions(
         DASHBOARD_DIR / "todays_game_predictions.parquet", index=False,
     )
     logger.info("Saved game predictions for %d games", len(game_preds))
+
+    # Archive append — one row per (game_date, game_pk), re-running the
+    # pipeline for the same date overwrites existing rows.
+    try:
+        archive_path = DASHBOARD_DIR / "sim_predictions_archive.parquet"
+        tagged = game_preds.copy()
+        tagged["game_date"] = str(_date.today())
+        tagged["updated_at"] = pd.Timestamp.now("UTC").isoformat()
+
+        if archive_path.exists():
+            existing = pd.read_parquet(archive_path)
+            keys = ["game_date", "game_pk"]
+            dedup_mask = ~existing.set_index(keys).index.isin(
+                tagged.set_index(keys).index
+            )
+            combined = pd.concat([existing[dedup_mask], tagged], ignore_index=True)
+        else:
+            combined = tagged
+
+        combined.to_parquet(archive_path, index=False)
+        logger.info(
+            "Archive updated: +%d rows (total %d)", len(tagged), len(combined),
+        )
+    except Exception as e:
+        logger.warning("Failed to append to sim_predictions_archive: %s", e)
 
 
 # ---------------------------------------------------------------------------

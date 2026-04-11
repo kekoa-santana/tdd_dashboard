@@ -5,16 +5,12 @@ import pandas as pd
 import streamlit as st
 
 from config import (
-    GOLD, SAGE, EMBER, SLATE, CREAM, DARK,
-    DARK_CARD, DARK_BORDER,
-    DASHBOARD_DIR,
+    GOLD, SAGE, EMBER, SLATE, CREAM, DASHBOARD_DIR,
     PITCHER_STATS, HITTER_STATS,
-    PRIOR_SEASON, CURRENT_SEASON,
 )
 from components.metric_cards import metric_card
 from components.backtest_charts import (
     PLOTLY_CONFIG,
-    create_accuracy_bars,
     create_coverage_chart,
     create_game_k_model_comparison,
     create_movers_chart,
@@ -95,7 +91,6 @@ _BATTER_STAT_CONFIGS = {
 
 def _render_in_season_accuracy_tab() -> None:
     """In-season game sim accuracy: pitcher and batter predictions vs actuals."""
-    import numpy as np
 
     player_type = st.radio(
         "Player type", ["Pitcher", "Hitter"],
@@ -106,11 +101,11 @@ def _render_in_season_accuracy_tab() -> None:
     if player_type == "Pitcher":
         df = load_pitcher_sim_log()
         stat_map = _PITCHER_STAT_CONFIGS
-        id_col, name_col = "pitcher_id", "pitcher_name"
+        name_col = "pitcher_name"
     else:
         df = load_batter_sim_log()
         stat_map = _BATTER_STAT_CONFIGS
-        id_col, name_col = "batter_id", "batter_name"
+        name_col = "batter_name"
 
     if df.empty:
         st.info(
@@ -142,7 +137,6 @@ def _render_in_season_accuracy_tab() -> None:
     with c3:
         metric_card("K Correlation", f"{k_corr:.3f}")
     with c4:
-        bias_color = SAGE if abs(k_bias) < 0.3 else EMBER
         metric_card("K Bias", f"{k_bias:+.2f}")
 
     # Stat selector
@@ -416,131 +410,6 @@ def _render_backtest_top10_tab() -> None:
     fig = create_pred_vs_actual_scatter(df["predicted"], df["actual"], stat_label)
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=f"bt_scatter_{stat_label}_{season}")
 
-
-def _render_rate_backtest(ptype: str) -> None:
-    """Rate stat backtest: K% and BB%."""
-    # Try multi-stat first, fall back to single-stat
-    df_multi = load_backtest(f"{ptype}_multi_stat_backtest")
-    df_single = load_backtest(f"{ptype}_k_backtest")
-
-    if df_multi.empty and df_single.empty:
-        st.info(f"No rate stat backtest data found for {ptype}s.")
-        return
-
-    # Use multi-stat if available (has both k_rate and bb_rate)
-    if not df_multi.empty:
-        for stat_name in ["k_rate", "bb_rate"]:
-            df_stat = df_multi[df_multi["stat"] == stat_name]
-            if df_stat.empty:
-                continue
-
-            label = "K%" if stat_name == "k_rate" else "BB%"
-            st.markdown(f'<div class="tdd-section-hdr">{label} Backtest</div>',
-                        unsafe_allow_html=True)
-            _render_backtest_summary(df_stat, label)
-    elif not df_single.empty:
-        st.markdown('<div class="tdd-section-hdr">K% Backtest</div>',
-                    unsafe_allow_html=True)
-        _render_backtest_summary(df_single, "K%")
-
-
-def _render_counting_backtest(ptype: str) -> None:
-    """Counting stat backtest."""
-    df = load_backtest(f"{ptype}_counting_backtest")
-    if df.empty:
-        st.info(f"No counting stat backtest data found for {ptype}s.")
-        return
-
-    stats_available = df["stat"].unique().tolist()
-    for stat_name in stats_available:
-        df_stat = df[df["stat"] == stat_name]
-        label = stat_name.replace("total_", "").upper()
-        st.markdown(f'<div class="tdd-section-hdr">{label} Counting Backtest</div>',
-                    unsafe_allow_html=True)
-        _render_backtest_summary(df_stat, label, is_counting=True)
-
-
-def _render_backtest_summary(
-    df: pd.DataFrame, label: str, is_counting: bool = False,
-) -> None:
-    """Render metric cards, comparison table, and charts for a backtest df."""
-    # Summary metric cards
-    avg_mae_imp = df["mae_improvement_pct"].mean()
-    avg_rmse_imp = df["rmse_improvement_pct"].mean()
-    avg_coverage = df["coverage_95"].mean() * 100 if "coverage_95" in df.columns else None
-    total_n = int(df["n_players"].sum()) if "n_players" in df.columns else 0
-
-    cols = st.columns(4 if avg_coverage is not None else 3)
-    with cols[0]:
-        color = SAGE if avg_mae_imp > 0 else EMBER
-        sign = "+" if avg_mae_imp > 0 else ""
-        st.markdown(metric_card(
-            f"MAE Improvement", f"{sign}{avg_mae_imp:.1f}%",
-        ), unsafe_allow_html=True)
-    with cols[1]:
-        color = SAGE if avg_rmse_imp > 0 else EMBER
-        sign = "+" if avg_rmse_imp > 0 else ""
-        st.markdown(metric_card(
-            f"RMSE Improvement", f"{sign}{avg_rmse_imp:.1f}%",
-        ), unsafe_allow_html=True)
-    if avg_coverage is not None:
-        with cols[2]:
-            st.markdown(metric_card(
-                "95% Coverage", f"{avg_coverage:.1f}%",
-            ), unsafe_allow_html=True)
-    with cols[-1]:
-        st.markdown(metric_card(
-            "Sample Size", f"{total_n:,}",
-        ), unsafe_allow_html=True)
-
-    # Comparison table
-    display_cols = ["test_season", "bayes_mae", "marcel_mae", "mae_improvement_pct",
-                    "bayes_rmse", "marcel_rmse", "rmse_improvement_pct"]
-    if "coverage_95" in df.columns:
-        display_cols.append("coverage_95")
-    if "n_players" in df.columns:
-        display_cols.append("n_players")
-    if is_counting and "coverage_80" in df.columns:
-        display_cols.insert(-1, "coverage_80")
-
-    available_cols = [c for c in display_cols if c in df.columns]
-    st.dataframe(
-        df[available_cols].style.format({
-            "bayes_mae": "{:.4f}",
-            "marcel_mae": "{:.4f}",
-            "mae_improvement_pct": "{:+.1f}%",
-            "bayes_rmse": "{:.4f}",
-            "marcel_rmse": "{:.4f}",
-            "rmse_improvement_pct": "{:+.1f}%",
-            "coverage_95": "{:.1%}",
-            "coverage_80": "{:.1%}",
-        }, na_rep=""),
-        width='stretch',
-        hide_index=True,
-    )
-
-    # Charts
-    col1, col2 = st.columns(2)
-    with col1:
-        fig = create_accuracy_bars(df, "bayes_mae", "marcel_mae", f"{label} MAE by Season")
-        st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=f"mp_acc_{label}")
-    with col2:
-        cov_cols, cov_labels = [], []
-        if "coverage_95" in df.columns:
-            cov_cols.append("coverage_95")
-            cov_labels.append("95% CI")
-        if "coverage_80" in df.columns:
-            cov_cols.append("coverage_80")
-            cov_labels.append("80% CI")
-        if cov_cols:
-            fig = create_coverage_chart(df, cov_cols, cov_labels)
-            st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=f"mp_cov_{label}")
-
-
-# ---------------------------------------------------------------------------
-# Tab 2: Game K Model
-# ---------------------------------------------------------------------------
-
 def _render_game_sim_backtest_tab() -> None:
     """Game sim backtest results for all projected stats individually."""
     summary = load_backtest("game_sim_backtest_summary")
@@ -595,7 +464,6 @@ def _render_game_sim_backtest_tab() -> None:
                 st.markdown(metric_card("Correlation", f"{avg_corr:.3f}"), unsafe_allow_html=True)
         if avg_bias is not None:
             with card_cols[4]:
-                bias_color = SAGE if abs(avg_bias) < 0.3 else EMBER
                 st.markdown(metric_card("Bias", f"{avg_bias:+.2f}"), unsafe_allow_html=True)
 
         # Per-season breakdown table

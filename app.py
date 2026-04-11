@@ -23,9 +23,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from config import (  # noqa: E402
     GOLD, EMBER, SAGE, SLATE, DARK_CARD, DARK_BORDER, CREAM, DARK, ICON_PATH,
     POSITIVE, NEGATIVE,
-    CURRENT_SEASON, TRAINING_RANGE,
 )
-from services.data_loader import load_update_metadata  # noqa: E402
 from utils.helpers import check_data_exists  # noqa: E402
 from components.charts import apply_dark_mpl  # noqa: E402
 

@@ -41,9 +41,6 @@ logger = logging.getLogger(__name__)
 # Transaction types that change org assignment
 ORG_CHANGE_TYPES = {"TR", "SFA", "SGN", "CLW", "SE", "PUR"}
 
-# All transaction types we handle
-HANDLED_TYPES = ORG_CHANGE_TYPES | {"OPT", "CU", "DES", "REL"}
-
 
 def _normalize_il_type(il_type: str | None) -> str:
     """Convert il_type like '60-day' or 'IL-10' to 'il_60' / 'il_10'."""

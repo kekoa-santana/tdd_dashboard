@@ -1,16 +1,13 @@
 """Team Rankings — power rankings, ELO leaderboards, tier groups."""
 from __future__ import annotations
 
-import logging
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 
-from config import GOLD, EMBER, SAGE, SLATE, CREAM, DARK_CARD, DARK_BORDER
+from config import GOLD, EMBER, SAGE, SLATE, DARK_BORDER
 
 from components.expandable_card import EXPANDABLE_CARD_CSS, expandable_card_html
-from components.radar_chart import radar_chart_html
 from components.team_logo import team_logo_html
 from lib.diamond_rating import score_to_diamonds
 from services.data_loader import (
@@ -18,8 +15,6 @@ from services.data_loader import (
     load_team_profiles,
     load_team_elo,
 )
-
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Tier badge colours
@@ -171,50 +166,6 @@ def _pill(label: str, color: str) -> str:
     )
 
 
-def _elo_bar(label: str, value: float, rank: int | None = None,
-             min_v: float = 1350, max_v: float = 1650) -> str:
-    """Horizontal ELO bar (mirrors team_overview pattern)."""
-    pct = max(0, min(100, (value - min_v) / (max_v - min_v) * 100))
-    mid_pct = (1500 - min_v) / (max_v - min_v) * 100
-    color = GOLD if value >= 1520 else SAGE if value >= 1490 else EMBER if value < 1470 else SLATE
-    rank_str = (
-        f'<span style="color:var(--tdd-slate); font-size:0.75rem; margin-left:4px;">#{rank}</span>'
-        if rank else ""
-    )
-    return (
-        f'<div style="margin-bottom:8px;">'
-        f'<div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:2px;">'
-        f'<span style="color:var(--tdd-cream); font-size:0.8rem; font-weight:600;">{label}</span>'
-        f'<span style="color:{color}; font-weight:700; font-size:0.85rem;">{value:.0f}{rank_str}</span>'
-        f'</div>'
-        f'<div style="position:relative; height:14px; background:var(--tdd-dark-card); border-radius:4px; overflow:visible;">'
-        f'<div style="width:{pct:.1f}%; height:100%; background:{color}; border-radius:4px;"></div>'
-        f'<div style="position:absolute; left:{mid_pct:.1f}%; top:0; height:100%; '
-        f'width:1px; background:{SLATE}44;"></div>'
-        f'</div></div>'
-    )
-
-
-def _score_gauge(label: str, score: float) -> str:
-    """Small 0-1 score gauge bar."""
-    pct = max(0, min(100, score * 100))
-    color = GOLD if score >= 0.70 else SAGE if score >= 0.45 else EMBER if score < 0.30 else SLATE
-    return (
-        f'<div style="margin-bottom:6px;">'
-        f'<div style="display:flex; justify-content:space-between; margin-bottom:1px;">'
-        f'<span style="color:var(--tdd-cream); font-size:0.75rem;">{label}</span>'
-        f'<span style="color:{color}; font-weight:600; font-size:0.78rem;">{score:.2f}</span>'
-        f'</div>'
-        f'<div style="height:6px; background:var(--tdd-dark-card); border-radius:3px;">'
-        f'<div style="width:{pct:.1f}%; height:100%; background:{color}; border-radius:3px;"></div>'
-        f'</div></div>'
-    )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Section renderers
-# ══════════════════════════════════════════════════════════════════════════════
-
 def _render_power_rankings(
     df: pd.DataFrame,
     profiles: pd.DataFrame,
@@ -262,8 +213,6 @@ def _render_power_rankings(
         abbr = row.get("abbreviation", "")
         tier = row.get("tier", "")
         tdd = float(row.get("tdd_score", row.get("composite_score", 0)))
-        off_elo = row.get("offense_elo", None)
-        pit_elo = row.get("pitching_elo", None)
 
         # ── summary row ──
         rank_cls = "tr-rank-top tr-rank" if rank <= 5 else "tr-rank"

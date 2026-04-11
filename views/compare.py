@@ -5,8 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from config import (
-    GOLD, EMBER, SAGE, SLATE, CREAM, DARK, DARK_CARD, DARK_BORDER,
-    POSITIVE, NEGATIVE,
+    GOLD, SLATE, CREAM, DARK, DARK_BORDER,
     CURRENT_SEASON, PROJECTION_LABEL,
     PITCHER_STATS, HITTER_STATS,
     PITCHER_OBSERVED_STATS, HITTER_OBSERVED_STATS,
@@ -20,11 +19,10 @@ from services.data_loader import (
     load_pitcher_archetypes,
 )
 from utils.helpers import get_team_lookup
-from utils.formatters import fmt_stat, fmt_pct
+from utils.formatters import fmt_stat
 from components.headshot import headshot_html
 from components.metric_cards import percentile_rank, pctile_color
 from components.diamond_rating import diamond_rating_html_composite
-from lib.diamond_rating import normalize_composite, score_to_diamonds, diamond_tier
 
 
 # ---------------------------------------------------------------------------
@@ -33,7 +31,6 @@ from lib.diamond_rating import normalize_composite, score_to_diamonds, diamond_t
 
 def _stat_row_html(label: str, values: list[str], colors: list[str]) -> str:
     """Build a single comparison row: label on the left, values in columns."""
-    n = len(values)
     val_cells = "".join(
         f'<td style="text-align:center; padding:6px 8px; color:{c}; font-weight:600;">'
         f'{v}</td>'
@@ -391,7 +388,7 @@ def page_compare() -> None:
         counting_rows_exist = False
         counting_row_html: list[str] = []
 
-        for c_label, c_prefix, c_actual, c_hb in counting_display:
+        for c_label, c_prefix, _c_actual, c_hb in counting_display:
             mean_col = f"{c_prefix}_mean"
             p10_col = f"{c_prefix}_p10"
             p90_col = f"{c_prefix}_p90"

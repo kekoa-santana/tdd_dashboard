@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-from config import GOLD, EMBER, SAGE, SLATE, CREAM, DARK
+from config import GOLD, EMBER, SAGE, SLATE, CREAM
 
 # Shared plotly config passed to st.plotly_chart()
 PLOTLY_CONFIG = {"displayModeBar": False, "scrollZoom": False}
@@ -48,44 +48,6 @@ def _hex_to_rgba(hex_color: str, alpha: float) -> str:
 # ---------------------------------------------------------------------------
 # Backtest charts
 # ---------------------------------------------------------------------------
-
-
-def create_accuracy_bars(
-    df: pd.DataFrame,
-    bayes_col: str,
-    marcel_col: str,
-    title: str,
-) -> go.Figure:
-    """Grouped bars: Bayes vs Marcel by test_season."""
-    seasons = df["test_season"].astype(str).tolist()
-    bayes_vals = df[bayes_col].tolist()
-    marcel_vals = df[marcel_col].tolist()
-
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        name="Bayes", x=seasons, y=bayes_vals,
-        marker_color=SAGE, opacity=0.85,
-        text=[f"{v:.3f}" for v in bayes_vals],
-        textposition="outside", textfont=dict(color=SAGE, size=10),
-    ))
-    fig.add_trace(go.Bar(
-        name="Marcel", x=seasons, y=marcel_vals,
-        marker_color=SLATE, opacity=0.85,
-        text=[f"{v:.3f}" for v in marcel_vals],
-        textposition="outside", textfont=dict(color=SLATE, size=10),
-    ))
-
-    fig.update_layout(
-        **_BASE_LAYOUT,
-        barmode="group",
-        height=300,
-        showlegend=True,
-        legend=dict(font=dict(color=CREAM, size=10), bgcolor="rgba(0,0,0,0)"),
-        title=dict(text=title, font=dict(color=CREAM, size=13), x=0.5, xanchor="center"),
-        xaxis=_AXIS_STYLE,
-        yaxis=_GRID_AXIS,
-    )
-    return fig
 
 
 def create_coverage_chart(

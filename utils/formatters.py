@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from config import GOLD, EMBER, SAGE, SLATE, CREAM, POSITIVE, NEGATIVE
+from config import GOLD, EMBER, SAGE, SLATE, POSITIVE, NEGATIVE
 
 
 def fmt_pct(val: float, decimals: int = 1) -> str:
@@ -51,31 +51,6 @@ def delta_html(val: float, higher_is_better: bool = True) -> str:
         return f'<span style="color:{POSITIVE}; font-weight:600;">{pct:+.1f}{_pp}</span>'
     else:
         return f'<span style="color:{NEGATIVE}; font-weight:600;">{pct:+.1f}{_pp}</span>'
-
-
-def whiff_quality_color(whiff_rate: float) -> str:
-    """Color-code a whiff rate: green=elite, gold=avg, red=poor."""
-    if whiff_rate >= 0.35:
-        return SAGE
-    elif whiff_rate >= 0.25:
-        return GOLD
-    elif whiff_rate >= 0.15:
-        return SLATE
-    else:
-        return EMBER
-
-
-def xwoba_quality_color(xwoba: float) -> str:
-    """Color-code xwOBA against: green=suppresses contact, red=gets hit."""
-    if xwoba <= 0.280:
-        return SAGE
-    elif xwoba <= 0.340:
-        return GOLD
-    elif xwoba <= 0.400:
-        return SLATE
-    else:
-        return EMBER
-
 
 def spark_color_rate(value: float, league_avg: float, higher_is_worse: bool) -> str:
     """Color a rate stat relative to league average."""

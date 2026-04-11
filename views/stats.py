@@ -6,7 +6,6 @@ import pandas as pd
 import streamlit as st
 
 from config import (
-    GOLD, SAGE, SLATE, CREAM, DARK_CARD, DARK_BORDER,
     AVAILABLE_SEASONS, UNRELIABLE_BB_SEASONS, PRIOR_SEASON,
 )
 from services.data_loader import (
