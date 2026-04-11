@@ -30,14 +30,12 @@ import pandas as pd  # noqa: E402
 from config import CURRENT_SEASON  # noqa: E402
 from lib.diamond_rating import (  # noqa: E402
     diamond_tier,
-    normalize_composite,
     score_to_diamonds,
 )
 
 log = logging.getLogger("weekly_report")
 
 DASHBOARD_DIR = PROJECT_ROOT / "data" / "dashboard"
-SNAPSHOT_DIR = DASHBOARD_DIR / "snapshots"
 
 
 # ---------------------------------------------------------------------------
@@ -51,11 +49,6 @@ def _load_parquet(name: str) -> pd.DataFrame | None:
         log.warning("Missing parquet: %s", path)
         return None
     return pd.read_parquet(path)
-
-
-def _fmt_pct(val: float) -> str:
-    """Format a 0-1 rate as a percentage string like '24.3%'."""
-    return f"{val * 100:.1f}%"
 
 
 def _fmt_diamonds(rating: float) -> str:

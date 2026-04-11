@@ -4,18 +4,16 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from config import GOLD, EMBER, SAGE, SLATE, CREAM, DARK_CARD, DARK_BORDER
+from config import GOLD, EMBER, SAGE, SLATE, CREAM
 from components.metric_cards import metric_card
-from components.diamond_rating import diamond_rating_text
 from components.expandable_card import EXPANDABLE_CARD_CSS, expandable_card_html
 from components.headshot import headshot_html
-from lib.diamond_rating import score_to_diamonds, diamond_tier
+from lib.diamond_rating import score_to_diamonds
 from services.data_loader import (
     load_core_rankings,
     load_rankings,
     load_player_teams,
     load_prospect_readiness,
-    load_milb_translated,
     load_milb_factors,
     load_hitter_archetypes,
     load_pitcher_archetypes,
@@ -51,26 +49,6 @@ _READINESS_TIER_COLORS = {
 }
 
 _LEVEL_ORDER = ["AAA", "AA", "A+", "A", "ROK"]
-
-
-def _score_color(val: float) -> str:
-    if val >= 4.0:
-        return f"color: {GOLD}; font-weight: bold"
-    if val >= 3.0:
-        return f"color: {SAGE}; font-weight: bold"
-    if val >= 2.0:
-        return f"color: {SLATE}"
-    return f"color: {CREAM}"
-
-
-def _style_tier(val: str) -> str:
-    color = _PROSPECT_TIER_COLORS.get(val, CREAM)
-    return f"color: {color}; font-weight: bold"
-
-
-def _style_health(val: str) -> str:
-    color = _HEALTH_COLORS.get(val, CREAM)
-    return f"color: {color}; font-weight: bold"
 
 
 # ── CSS ─────────────────────────────────────────────────────────────────────
@@ -442,7 +420,6 @@ def _render_ranking_card(
     projected: bool = False,
     info_col: str | None = None,
     max_height: int = 0,
-    n_headshots: int = 999,
     detail_stats: list[tuple[str, str, str]] | None = None,
     wide: bool = False,
     link_type: str = "",

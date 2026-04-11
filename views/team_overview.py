@@ -8,25 +8,16 @@ import streamlit as st
 from config import (
     GOLD, EMBER, SAGE, SLATE, CREAM,
     POSITIVE, NEGATIVE,
-    PITCHER_STATS, HITTER_STATS,
     CURRENT_SEASON, PRIOR_SEASON,
-    DASHBOARD_DIR,
 )
 from services.data_loader import (
-    load_projections, load_counting, load_player_teams, load_roster,
-    load_pitcher_arsenal, load_preseason_injuries,
-    load_pitcher_offerings, load_hitter_vuln_arch_career,
-    load_cluster_metadata, load_baselines_arch,
+    load_projections, load_counting, load_roster,
+    load_preseason_injuries,
     load_hitter_archetypes, load_pitcher_archetypes,
-    load_rankings, load_position_eligibility,
-    load_probable_starters,
-    load_team_elo, load_team_profiles, load_team_rankings,
+    load_rankings, load_team_elo, load_team_profiles, load_team_rankings,
     load_team_elo_history,
     load_standings,
 )
-from utils.helpers import get_team_lookup, get_injury_lookup
-from utils.formatters import fmt_stat
-from components.diamond_rating import diamond_rating_text_composite
 
 # ── Constants ─────────────────────────────────────────────────────────
 _HITTER_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"]
@@ -59,45 +50,6 @@ _TIER_COLORS = {
 # ═══════════════════════════════════════════════════════════════════════
 # TEAM PROFILE TAB — new team intelligence from ELO + profiles
 # ═══════════════════════════════════════════════════════════════════════
-
-def _elo_bar(label: str, value: float, rank: int | None = None,
-             min_v: float = 1350, max_v: float = 1650) -> str:
-    """Render a horizontal bar for an ELO rating."""
-    pct = max(0, min(100, (value - min_v) / (max_v - min_v) * 100))
-    mid_pct = (1500 - min_v) / (max_v - min_v) * 100
-    color = GOLD if value >= 1520 else SAGE if value >= 1490 else EMBER if value < 1470 else SLATE
-    rank_str = f'<span class="tdd-meta" style="margin-left:6px;">#{rank}</span>' if rank else ""
-    return (
-        f'<div style="margin-bottom:10px;">'
-        f'<div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:3px;">'
-        f'<span class="tdd-stat-value">{label}</span>'
-        f'<span style="color:{color}; font-weight:700;">{value:.0f}{rank_str}</span>'
-        f'</div>'
-        f'<div style="position:relative; height:18px; background:var(--tdd-dark-card); border-radius:4px; overflow:visible;">'
-        f'<div style="width:{pct:.1f}%; height:100%; background:{color}; border-radius:4px;"></div>'
-        f'<div style="position:absolute; left:{mid_pct:.1f}%; top:0; height:100%; '
-        f'width:1px; background:{SLATE}44;"></div>'
-        f'</div></div>'
-    )
-
-
-def _score_gauge(label: str, score: float, extra: str = "") -> str:
-    """Small score gauge for sub-dimensions (0-1 scale)."""
-    pct = max(0, min(100, score * 100))
-    color = GOLD if score >= 0.70 else SAGE if score >= 0.45 else EMBER if score < 0.30 else SLATE
-    extra_html = f'<span class="tdd-meta" style="margin-left:4px;">{extra}</span>' if extra else ""
-    return (
-        f'<div style="margin-bottom:8px;">'
-        f'<div style="display:flex; justify-content:space-between; margin-bottom:2px;">'
-        f'<span class="tdd-meta" style="color:var(--tdd-cream);">{label}</span>'
-        f'<span class="tdd-stat-value" style="color:{color};">'
-        f'{score:.2f}{extra_html}</span>'
-        f'</div>'
-        f'<div style="height:8px; background:var(--tdd-dark-card); border-radius:4px;">'
-        f'<div style="width:{pct:.1f}%; height:100%; background:{color}; border-radius:4px;"></div>'
-        f'</div></div>'
-    )
-
 
 def _pill(label: str, color: str) -> str:
     """Render a colored pill/tag."""
@@ -513,58 +465,6 @@ def _render_team_profile_tab(
 # DEPTH CHART TAB (unchanged from original)
 # ═══════════════════════════════════════════════════════════════════════
 
-def _build_depth_chart(
-    selected_team: str, teams_df: pd.DataFrame,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Assemble per-position player lists from rankings + archetypes."""
-    h_rank = load_rankings("hitters")
-    p_rank = load_rankings("pitchers")
-    if h_rank.empty and p_rank.empty:
-        return pd.DataFrame(), pd.DataFrame()
-
-    team_pids = set(
-        teams_df[teams_df["team_abbr"] == selected_team]["player_id"].astype(int)
-    )
-
-    if not h_rank.empty:
-        team_h = h_rank[h_rank["batter_id"].isin(team_pids)].copy()
-        elig = load_position_eligibility()
-        if not elig.empty and not team_h.empty:
-            team_elig = elig[elig["player_id"].isin(team_pids)].copy()
-            team_elig = team_elig.rename(columns={"player_id": "batter_id"})
-            base = team_h.drop(columns=["position"], errors="ignore")
-            team_h = base.merge(
-                team_elig[["batter_id", "position", "starts", "pct", "is_primary"]],
-                on="batter_id", how="inner",
-            )
-            team_h.loc[~team_h["is_primary"], "pos_rank"] = pd.NA
-            team_h = team_h.sort_values(
-                ["position", "tdd_value_score"], ascending=[True, False],
-            )
-    else:
-        team_h = pd.DataFrame()
-
-    team_p = (
-        p_rank[p_rank["pitcher_id"].isin(team_pids)].copy()
-        if not p_rank.empty else pd.DataFrame()
-    )
-
-    h_arch = load_hitter_archetypes()
-    p_arch = load_pitcher_archetypes()
-    if not h_arch.empty and not team_h.empty:
-        team_h = team_h.merge(
-            h_arch[["batter_id", "archetype_name"]].drop_duplicates("batter_id"),
-            on="batter_id", how="left",
-        )
-    if not p_arch.empty and not team_p.empty:
-        team_p = team_p.merge(
-            p_arch[["pitcher_id", "archetype_name"]].drop_duplicates("pitcher_id"),
-            on="pitcher_id", how="left",
-        )
-
-    return team_h, team_p
-
-
 def _player_row_html(
     name: str, rank: int, score: float, arch: str, health: str,
     is_first: bool, *, hand: str = "", secondary: bool = False,
@@ -741,52 +641,6 @@ def _render_depth_chart_tab(
         if not team_rp.empty:
             st.markdown(f"### Bullpen Profile")
             _render_staff_metrics(team_rp, lg_rp, _k_col, _bb_col)
-
-
-def _render_hitter_depth(team_h: pd.DataFrame) -> None:
-    """Render hitter depth chart."""
-    if team_h.empty:
-        return
-    st.markdown("### Hitter Depth")
-
-    has_elig = "is_primary" in team_h.columns
-
-    for pos in _HITTER_POSITIONS:
-        pos_players = team_h[team_h["position"] == pos].sort_values(
-            "tdd_value_score", ascending=False,
-        )
-        if pos_players.empty:
-            st.markdown(
-                f'<div style="padding:8px 12px; margin-bottom:6px; '
-                f'border-left:3px solid var(--tdd-slate); opacity:0.3;">'
-                f'<span class="tdd-stat-label" style="font-weight:600;">{pos}</span> '
-                f'<span class="tdd-context">'
-                f'\u2014 No ranked player</span></div>',
-                unsafe_allow_html=True,
-            )
-            continue
-
-        rows_html = ""
-        for i, (_, row) in enumerate(pos_players.iterrows()):
-            name = row["batter_name"]
-            is_secondary = has_elig and not row.get("is_primary", True)
-            if is_secondary:
-                pct = row.get("pct", 0)
-                name += f" ({pct:.0%})" if pct else ""
-            rank_val = int(row["pos_rank"]) if pd.notna(row.get("pos_rank")) else 0
-            rows_html += _player_row_html(
-                name=name, rank=rank_val, score=row["tdd_value_score"],
-                arch=row.get("archetype_name", ""),
-                health=row.get("health_label", "Unknown"),
-                is_first=i == 0 and not is_secondary, secondary=is_secondary,
-            )
-
-        st.markdown(
-            f'<div style="margin-bottom:10px;">'
-            f'<div class="tdd-section-hdr" style="margin-bottom:4px; padding-left:15px;">{pos}</div>'
-            f'{rows_html}</div>',
-            unsafe_allow_html=True,
-        )
 
 
 def _render_pitching_depth(team_p: pd.DataFrame) -> None:
@@ -1203,322 +1057,6 @@ def _render_staff_metrics(
         else:
             st.markdown('<span class="tdd-context">None vs league average</span>', unsafe_allow_html=True)
 
-
-def _build_limited_pitcher_rows(
-    pitchers: pd.DataFrame, injury_lookup: dict, use_priors: bool,
-) -> list[dict]:
-    """Build display rows for pitchers without full projections."""
-    rows: list[dict] = []
-    for _, row in pitchers.sort_values("player_name").iterrows():
-        pid = int(row["player_id"])
-        inj = injury_lookup.get(pid)
-        name = row["player_name"]
-        if inj and inj["missed_games"] > 0:
-            sev = inj["severity"]
-            tag = "[IL-60]" if sev == "major" else "[IL]" if sev == "significant" else "[DTD]"
-            name = f"{tag} {name}"
-        status = row.get("roster_status", "active")
-        badge = "IL" if status.startswith("il_") else "Limited Data"
-        r: dict[str, object] = {
-            "Name": name,
-            "Age": "",
-            "Hand": "",
-            "Rating": badge,
-        }
-        if use_priors:
-            for label, key, _, _ in PITCHER_STATS:
-                r[f"{label} ({PRIOR_SEASON})"] = "--"
-            for label, _ in [("Whiff%", "whiff_rate"), ("Avg Velo", "avg_velo")]:
-                r[label] = "--"
-        else:
-            for label, key, _, _ in PITCHER_STATS:
-                r[label] = "--"
-            r["Proj. K"] = "--"
-        rows.append(r)
-    return rows
-
-
-def _build_limited_hitter_rows(
-    hitters: pd.DataFrame, injury_lookup: dict, use_priors: bool,
-) -> list[dict]:
-    """Build display rows for hitters without full projections."""
-    rows: list[dict] = []
-    for _, row in hitters.sort_values("player_name").iterrows():
-        pid = int(row["player_id"])
-        inj = injury_lookup.get(pid)
-        name = row["player_name"]
-        if inj and inj["missed_games"] > 0:
-            sev = inj["severity"]
-            tag = "[IL-60]" if sev == "major" else "[IL]" if sev == "significant" else "[DTD]"
-            name = f"{tag} {name}"
-        pos = row.get("primary_position", "")
-        status = row.get("roster_status", "active")
-        badge = "IL" if status.startswith("il_") else "Limited Data"
-        r: dict[str, object] = {
-            "Name": name,
-            "Age": "",
-            "Bats": "",
-            "Rating": f"{badge} ({pos})" if pos else badge,
-        }
-        if use_priors:
-            for label, key, _, _ in HITTER_STATS:
-                r[f"{label} ({PRIOR_SEASON})"] = "--"
-            for label, _ in [("Whiff%", "whiff_rate"), ("Avg EV", "avg_exit_velo"), ("Hard-Hit%", "hard_hit_pct")]:
-                r[label] = "--"
-        else:
-            for label, key, _, _ in HITTER_STATS:
-                r[label] = "--"
-            for c_label, _ in [("Proj. HR", "total_hr"), ("Proj. BB", "total_bb")]:
-                r[c_label] = "--"
-        rows.append(r)
-    return rows
-
-
-def _build_pitcher_rows(
-    pitchers: pd.DataFrame, injury_lookup: dict, use_priors: bool,
-) -> list[dict]:
-    """Build display rows for a set of pitchers."""
-    rows: list[dict] = []
-    # Diamond rating — always derived from tdd_value_score
-    from lib.diamond_rating import score_to_diamonds
-    _p_ranks = load_rankings("pitchers") if "tdd_value_score" not in pitchers.columns else pd.DataFrame()
-    if not _p_ranks.empty and "tdd_value_score" in _p_ranks.columns:
-        pitchers = pitchers.merge(
-            _p_ranks[["pitcher_id", "tdd_value_score"]].drop_duplicates(),
-            on="pitcher_id", how="left",
-        )
-    sort_col = "tdd_value_score" if "tdd_value_score" in pitchers.columns else "composite_score"
-    for _, row in pitchers.sort_values(sort_col, ascending=False).iterrows():
-        pid = int(row["pitcher_id"])
-        inj = injury_lookup.get(pid)
-        name = row["pitcher_name"]
-        if inj and inj["missed_games"] > 0:
-            sev = inj["severity"]
-            tag = "[IL-60]" if sev == "major" else "[IL]" if sev == "significant" else "[DTD]"
-            name = f"{tag} {name}"
-        tvs = row.get("tdd_value_score")
-        rating_str = f"{score_to_diamonds(tvs):.1f}" if pd.notna(tvs) else diamond_rating_text_composite(row.get("composite_score", 0))
-        r: dict[str, object] = {
-            "Name": name,
-            "Age": int(row["age"]) if pd.notna(row.get("age")) else "",
-            "Hand": row.get("pitch_hand", ""),
-            "Rating": rating_str,
-        }
-        if use_priors:
-            for label, key, _, _ in PITCHER_STATS:
-                obs_col = f"observed_{key}"
-                if obs_col in row.index and pd.notna(row.get(obs_col)):
-                    r[f"{label} ({PRIOR_SEASON})"] = fmt_stat(row[obs_col], key)
-                else:
-                    r[f"{label} ({PRIOR_SEASON})"] = "--"
-            for label, key in [("Whiff%", "whiff_rate"), ("Avg Velo", "avg_velo")]:
-                if key in row.index and pd.notna(row.get(key)):
-                    r[label] = fmt_stat(row[key], key)
-                else:
-                    r[label] = "--"
-        else:
-            for label, key, _, _ in PITCHER_STATS:
-                proj_col = f"projected_{key}"
-                delta_col = f"delta_{key}"
-                if proj_col in row.index and pd.notna(row.get(proj_col)):
-                    proj_val = fmt_stat(row[proj_col], key)
-                    delta_pp = row[delta_col] * 100
-                    r[label] = f"{proj_val} ({delta_pp:+.1f})" if abs(delta_pp) >= 0.05 else proj_val
-                else:
-                    r[label] = "--"
-            if "total_k_mean" in row.index and pd.notna(row.get("total_k_mean")):
-                r["Proj. K"] = int(round(row["total_k_mean"]))
-            else:
-                r["Proj. K"] = "--"
-        rows.append(r)
-    return rows
-
-
-def _render_roster_tab(
-    selected_team: str,
-    team_hitters: pd.DataFrame,
-    team_pitchers: pd.DataFrame,
-    h_proj: pd.DataFrame,
-    p_proj: pd.DataFrame,
-    injury_lookup: dict,
-    *,
-    missing_hitters: pd.DataFrame | None = None,
-    missing_pitchers: pd.DataFrame | None = None,
-) -> None:
-    """Roster tab — the original overview content (projections, tables)."""
-    if missing_hitters is None:
-        missing_hitters = pd.DataFrame()
-    if missing_pitchers is None:
-        missing_pitchers = pd.DataFrame()
-    view_mode = st.radio(
-        "View",
-        [f"{CURRENT_SEASON} Projections", f"{PRIOR_SEASON} Priors (Observed)"],
-        horizontal=True, key="team_view_mode",
-    )
-    use_priors = view_mode == f"{PRIOR_SEASON} Priors (Observed)"
-
-    if use_priors:
-        _p_k_col = "observed_k_rate"
-        _p_bb_col = "observed_bb_rate"
-        _view_label = f"{PRIOR_SEASON} Observed"
-    else:
-        _p_k_col = "projected_k_rate"
-        _p_bb_col = "projected_bb_rate"
-        _view_label = f"{CURRENT_SEASON} Projected"
-
-    # ── Pitching staff profile — split by role ──────────────────────
-    if not team_pitchers.empty and not p_proj.empty:
-        team_sp = team_pitchers[team_pitchers["is_starter"] == True]  # noqa: E712
-        team_rp = team_pitchers[team_pitchers["is_starter"] == False]  # noqa: E712
-        lg_sp = p_proj[p_proj["is_starter"] == True]  # noqa: E712
-        lg_rp = p_proj[p_proj["is_starter"] == False]  # noqa: E712
-
-        if not team_sp.empty:
-            st.markdown(f"### Rotation Profile ({_view_label})")
-            _render_staff_metrics(team_sp, lg_sp, _p_k_col, _p_bb_col)
-        if not team_rp.empty:
-            st.markdown(f"### Bullpen Profile ({_view_label})")
-            _render_staff_metrics(team_rp, lg_rp, _p_k_col, _p_bb_col)
-
-    # ── Injured players ─────────────────────────────────────────────
-    inj_df_full = load_preseason_injuries()
-    if not inj_df_full.empty:
-        team_inj = inj_df_full[
-            (inj_df_full["team_abbr"] == selected_team)
-            & (inj_df_full["est_missed_games"] > 0)
-        ].sort_values("est_missed_games", ascending=False)
-    else:
-        team_inj = pd.DataFrame()
-
-    if not team_inj.empty:
-        st.markdown("### Injured Players")
-        inj_rows = []
-        for _, row in team_inj.iterrows():
-            inj_rows.append({
-                "Player": row["player_name"], "Pos": row["position"],
-                "Injury": row["injury"], "Status": row["status"],
-                "Est. Return": row["est_return_date"],
-                "~Games Missed": int(row["est_missed_games"]),
-            })
-        st.dataframe(pd.DataFrame(inj_rows), width='stretch', hide_index=True)
-
-    # ── Pitchers tables ─────────────────────────────────────────────
-    # Split missing pitchers by role using roster is_starter flag
-    if not missing_pitchers.empty and "is_starter" in missing_pitchers.columns:
-        miss_sp = missing_pitchers[missing_pitchers["is_starter"] == True]  # noqa: E712
-        miss_rp = missing_pitchers[missing_pitchers["is_starter"] == False]  # noqa: E712
-    elif not missing_pitchers.empty:
-        miss_sp = missing_pitchers[missing_pitchers["primary_position"] == "SP"]
-        miss_rp = missing_pitchers[missing_pitchers["primary_position"] != "SP"]
-    else:
-        miss_sp = pd.DataFrame()
-        miss_rp = pd.DataFrame()
-
-    has_any_pitchers = not team_pitchers.empty or not missing_pitchers.empty
-
-    if not has_any_pitchers:
-        st.markdown("### Pitchers")
-        st.info("No pitcher data for this team.")
-    else:
-        team_sp_tbl = team_pitchers[team_pitchers["is_starter"] == True] if not team_pitchers.empty else pd.DataFrame()  # noqa: E712
-        team_rp_tbl = team_pitchers[team_pitchers["is_starter"] == False] if not team_pitchers.empty else pd.DataFrame()  # noqa: E712
-
-        st.markdown("### Starting Rotation")
-        sp_rows = _build_pitcher_rows(team_sp_tbl, injury_lookup, use_priors) if not team_sp_tbl.empty else []
-        sp_rows += _build_limited_pitcher_rows(miss_sp, injury_lookup, use_priors) if not miss_sp.empty else []
-        if sp_rows:
-            st.dataframe(pd.DataFrame(sp_rows), width='stretch', hide_index=True)
-        else:
-            st.info("No starters for this team.")
-
-        st.markdown("### Bullpen")
-        rp_rows = _build_pitcher_rows(team_rp_tbl, injury_lookup, use_priors) if not team_rp_tbl.empty else []
-        rp_rows += _build_limited_pitcher_rows(miss_rp, injury_lookup, use_priors) if not miss_rp.empty else []
-        if rp_rows:
-            st.dataframe(pd.DataFrame(rp_rows), width='stretch', hide_index=True)
-        else:
-            st.info("No relievers for this team.")
-
-    # ── Hitters table ───────────────────────────────────────────────
-    st.markdown("### Hitters")
-    has_any_hitters = not team_hitters.empty or not missing_hitters.empty
-    if not has_any_hitters:
-        st.info("No hitter data for this team.")
-    else:
-        h_rows = []
-        if not team_hitters.empty:
-            # Diamond rating — always derived from tdd_value_score
-            from lib.diamond_rating import score_to_diamonds
-            _h_ranks = load_rankings("hitters") if "tdd_value_score" not in team_hitters.columns else pd.DataFrame()
-            if not _h_ranks.empty and "tdd_value_score" in _h_ranks.columns:
-                team_hitters = team_hitters.merge(
-                    _h_ranks[["batter_id", "tdd_value_score"]].drop_duplicates(),
-                    on="batter_id", how="left",
-                )
-            sort_col = "tdd_value_score" if "tdd_value_score" in team_hitters.columns else "composite_score"
-            for _, row in team_hitters.sort_values(sort_col, ascending=False).iterrows():
-                pid = int(row["batter_id"])
-                inj = injury_lookup.get(pid)
-                name = row["batter_name"]
-                if inj and inj["missed_games"] > 0:
-                    sev = inj["severity"]
-                    tag = "[IL-60]" if sev == "major" else "[IL]" if sev == "significant" else "[DTD]"
-                    name = f"{tag} {name}"
-                tvs = row.get("tdd_value_score")
-                rating_str = f"{score_to_diamonds(tvs):.1f}" if pd.notna(tvs) else diamond_rating_text_composite(row.get("composite_score", 0))
-                r: dict[str, object] = {
-                    "Name": name,
-                    "Age": int(row["age"]) if pd.notna(row.get("age")) else "",
-                    "Bats": row.get("batter_stand", ""),
-                    "Rating": rating_str,
-                }
-                if use_priors:
-                    for label, key, _, _ in HITTER_STATS:
-                        obs_col = f"observed_{key}"
-                        if obs_col in row.index and pd.notna(row.get(obs_col)):
-                            r[f"{label} ({PRIOR_SEASON})"] = fmt_stat(row[obs_col], key)
-                        else:
-                            r[f"{label} ({PRIOR_SEASON})"] = "--"
-                    for label, key in [("Whiff%", "whiff_rate"), ("Avg EV", "avg_exit_velo"), ("Hard-Hit%", "hard_hit_pct")]:
-                        if key in row.index and pd.notna(row.get(key)):
-                            r[label] = fmt_stat(row[key], key)
-                        else:
-                            r[label] = "--"
-                else:
-                    for label, key, _, _ in HITTER_STATS:
-                        proj_col = f"projected_{key}"
-                        delta_col = f"delta_{key}"
-                        if proj_col in row.index and pd.notna(row.get(proj_col)):
-                            proj_val = fmt_stat(row[proj_col], key)
-                            delta_pp = row[delta_col] * 100
-                            r[label] = f"{proj_val} ({delta_pp:+.1f})" if abs(delta_pp) >= 0.05 else proj_val
-                        else:
-                            r[label] = "--"
-                    for c_label, c_prefix in [("Proj. HR", "total_hr"), ("Proj. BB", "total_bb")]:
-                        mean_col = f"{c_prefix}_mean"
-                        if mean_col in row.index and pd.notna(row.get(mean_col)):
-                            r[c_label] = int(round(row[mean_col]))
-                        else:
-                            r[c_label] = "--"
-                h_rows.append(r)
-        # Append limited-data hitters at the end
-        h_rows += _build_limited_hitter_rows(missing_hitters, injury_lookup, use_priors) if not missing_hitters.empty else []
-        st.dataframe(pd.DataFrame(h_rows), width='stretch', hide_index=True)
-
-    st.caption(
-        "Strengths/weaknesses compare team averages to league average. "
-        + (
-            f"Showing {PRIOR_SEASON} observed stats (priors for the Bayesian model)."
-            if use_priors
-            else f"Deltas shown in parentheses (pp vs {PRIOR_SEASON})."
-        )
-    )
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# MAIN PAGE ENTRY POINT
-# ═══════════════════════════════════════════════════════════════════════
-
 def page_team_overview() -> None:
     """Team-level view with team intelligence, roster, depth chart, and trade sim."""
     st.markdown(
@@ -1530,9 +1068,6 @@ def page_team_overview() -> None:
     if teams_df.empty:
         st.warning("No team data found. Run precompute first.")
         return
-
-    team_lookup = get_team_lookup()
-    injury_lookup = get_injury_lookup()
 
     all_teams = sorted(
         teams_df["team_abbr"].replace("", pd.NA).dropna().unique().tolist()

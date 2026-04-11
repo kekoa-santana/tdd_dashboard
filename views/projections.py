@@ -4,7 +4,6 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from config import GOLD, SAGE, SLATE, CREAM, DARK_CARD, DARK_BORDER
 from services.data_loader import load_counting_sim, load_roster
 from components.headshot import headshot_html
 
@@ -384,7 +383,7 @@ def page_projections() -> None:
             label_visibility="collapsed"
         )
     with filter_cols[1]:
-        league_filter = st.selectbox(
+        st.selectbox(
             "League",
             options=["All", "American League", "National League"],
             key="proj_league",

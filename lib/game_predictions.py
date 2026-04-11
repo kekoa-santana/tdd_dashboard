@@ -13,6 +13,9 @@ CRPS (Continuous Ranked Probability Score) is used as the primary
 evaluation metric until we have enough historical odds to evaluate
 against actual market lines.  CRPS behaves like MAE but respects
 the full predictive distribution.
+
+Canonical: ``player_profiles/src/models/game_predictions.py``. Dashboard copy:
+``tdd-dashboard/lib/game_predictions.py`` — keep identical (``sync_lib.py``).
 """
 from __future__ import annotations
 

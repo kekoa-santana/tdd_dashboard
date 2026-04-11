@@ -1,33 +1,15 @@
 """Player Profile page |Deep dive into a single player's projections."""
 from __future__ import annotations
 
-import base64
-from io import BytesIO
-
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
 import numpy as np
 import pandas as pd
 import streamlit as st
 
-
-def _fig_to_b64_img(fig: Figure) -> str:
-    """Convert a matplotlib Figure to a base64 <img> tag for embedding in HTML."""
-    buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight",
-                facecolor=fig.get_facecolor(), edgecolor="none")
-    buf.seek(0)
-    b64 = base64.b64encode(buf.read()).decode("utf-8")
-    buf.close()
-    return f'<img src="data:image/png;base64,{b64}" style="width:100%;height:auto;" />'
-
 from config import (
-    GOLD, EMBER, SAGE, SLATE, CREAM, DARK, DARK_BORDER, DARK_CARD,
-    POSITIVE, NEGATIVE,
+    GOLD, EMBER, SAGE, SLATE, CREAM, POSITIVE, NEGATIVE,
     CURRENT_SEASON, PRIOR_SEASON, TRAIN_START, PROJECTION_LABEL,
     AVAILABLE_SEASONS, UNRELIABLE_BB_SEASONS,
     PITCHER_STATS, HITTER_STATS,
-    PITCHER_OBSERVED_STATS, HITTER_OBSERVED_STATS,
     PITCHER_COUNTING_DISPLAY, HITTER_COUNTING_DISPLAY,
     HITTER_TRAD_STATS, HITTER_TRAD_COUNTING,
     PITCHER_TRAD_STATS, PITCHER_TRAD_COUNTING,
@@ -38,25 +20,22 @@ from services.data_loader import (
     load_k_samples, load_traditional_stats_all,
     load_pitcher_arsenal, load_pitcher_arsenal_all,
     load_hitter_vulnerability, load_hitter_vulnerability_all,
-    load_hitter_strength,
     load_pitcher_location_grid, load_pitcher_location_grid_all,
     load_hitter_zone_grid, load_hitter_zone_grid_all,
     load_pitcher_offerings, load_hitter_vuln_arch, load_hitter_vuln_arch_career,
     load_cluster_metadata, load_baselines_arch,
     load_hitter_aggressiveness, load_hitter_aggressiveness_all,
     load_pitcher_efficiency, load_pitcher_efficiency_all,
-    load_full_stats, load_preseason_injuries,
-    load_hitter_archetypes, load_pitcher_archetypes,
+    load_full_stats, load_hitter_archetypes, load_pitcher_archetypes,
     load_archetype_matchup_matrix,
     load_hitter_breakout_candidates,
     load_hitter_grade_ci, load_pitcher_grade_ci,
     season_selector,
 )
 from utils.helpers import get_team_lookup, get_injury_lookup
-from utils.formatters import fmt_stat, fmt_pct, fmt_trad, delta_html
+from utils.formatters import fmt_stat, fmt_trad
 from components.metric_cards import (
-    metric_card, percentile_rank, pctile_color,
-    pctile_bar_html, observed_pctile_bar_html,
+    metric_card, percentile_rank,
 )
 from components.charts import (
     create_posterior_fig, create_arsenal_donut,
@@ -74,64 +53,6 @@ from components.diamond_rating import diamond_rating_html, diamond_rating_html_c
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
-
-def career_aggregate_trad(trad_player: pd.DataFrame, player_type: str) -> pd.Series:
-    """Aggregate multi-season traditional stats into career totals."""
-    numeric_cols = trad_player.select_dtypes(include="number").columns.tolist()
-    # Separate counting vs rate columns
-    if player_type == "Hitter":
-        counting = ["pa", "ab", "hits", "doubles", "triples", "hr", "rbi",
-                     "bb", "k", "hbp", "sb", "cs", "sac_fly"]
-        denom_col = "pa"
-    else:
-        counting = ["games", "starts", "wins", "losses", "saves", "holds",
-                     "ip", "k", "bb", "hr", "hits_allowed", "er",
-                     "batters_faced", "go", "ao"]
-        denom_col = "batters_faced" if "batters_faced" in trad_player.columns else "ip"
-
-    counting = [c for c in counting if c in numeric_cols]
-    result = trad_player[counting].sum()
-
-    # Recompute rate stats from totals
-    if player_type == "Hitter":
-        ab = result.get("ab", 0)
-        pa = result.get("pa", 0)
-        h = result.get("hits", 0)
-        bb = result.get("bb", 0)
-        hbp = result.get("hbp", 0)
-        sf = result.get("sac_fly", 0)
-        hr = result.get("hr", 0)
-        doubles = result.get("doubles", 0)
-        triples = result.get("triples", 0)
-        result["avg"] = h / ab if ab > 0 else 0
-        result["obp"] = (h + bb + hbp) / (ab + bb + hbp + sf) if (ab + bb + hbp + sf) > 0 else 0
-        tb = h + doubles + 2 * triples + 3 * hr
-        result["slg"] = tb / ab if ab > 0 else 0
-        result["ops"] = result["obp"] + result["slg"]
-        result["iso"] = result["slg"] - result["avg"]
-    else:
-        ip = result.get("ip", 0)
-        bf = result.get("batters_faced", 0)
-        er = result.get("er", 0)
-        k = result.get("k", 0)
-        bb = result.get("bb", 0)
-        hr = result.get("hr", 0)
-        ha = result.get("hits_allowed", 0)
-        go = result.get("go", 0)
-        ao = result.get("ao", 0)
-        result["era"] = (er / ip * 9) if ip > 0 else 0
-        result["whip"] = (ha + bb) / ip if ip > 0 else 0
-        result["k_per_9"] = (k / ip * 9) if ip > 0 else 0
-        result["bb_per_9"] = (bb / ip * 9) if ip > 0 else 0
-        result["hr_per_9"] = (hr / ip * 9) if ip > 0 else 0
-        result["k_bb_ratio"] = (k / bb) if bb > 0 else 0
-        result["go_ao_ratio"] = (go / ao) if ao > 0 else 0
-        # FIP
-        c_fip = 3.20
-        result["fip"] = ((13 * hr + 3 * bb - 2 * k) / ip + c_fip) if ip > 0 else 0
-
-    return result
-
 
 def render_approach_efficiency(
     player_type: str,
@@ -628,79 +549,6 @@ def render_pitch_profiles(
                     )
 
 
-def render_observed_percentiles(
-    player_type: str,
-    player_id: int,
-    selected_season: int | None = None,
-    is_career: bool = False,
-) -> None:
-    """Render observed percentile bars for any season, ranked within that season's population."""
-    obs_stat_configs = PITCHER_OBSERVED_STATS if player_type == "Pitcher" else HITTER_OBSERVED_STATS
-    id_col = "pitcher_id" if player_type == "Pitcher" else "batter_id"
-
-    full_df = load_full_stats(player_type.lower())
-    if full_df.empty:
-        return
-
-    if is_career:
-        # Average across seasons for the player; rank against all players' career averages
-        career_avg = full_df.groupby(id_col).mean(numeric_only=True).reset_index()
-        player_vals = career_avg[career_avg[id_col] == player_id]
-        pop_df = career_avg
-        season_label = "Career"
-    else:
-        _season = selected_season if selected_season else PRIOR_SEASON
-        season_df = full_df[full_df["season"] == _season]
-        player_vals = season_df[season_df[id_col] == player_id]
-        pop_df = season_df
-        season_label = str(_season)
-
-    if player_vals.empty:
-        return
-
-    player_data = player_vals.iloc[0]
-
-    # Filter out unreliable batted ball stats for pre-2022
-    unreliable_keys = {"hard_hit_pct", "avg_exit_velo", "barrel_pct", "fb_pct"}
-    is_unreliable_bb = (selected_season is not None and selected_season in UNRELIABLE_BB_SEASONS)
-
-    obs_bars_html = ""
-    for label, key, higher_better, _ in obs_stat_configs:
-        if is_unreliable_bb and key in unreliable_keys:
-            continue
-        if key not in player_data.index or pd.isna(player_data.get(key)):
-            continue
-        val = player_data[key]
-        if key not in pop_df.columns:
-            continue
-        pctile = percentile_rank(pop_df[key], val, higher_better)
-        obs_bars_html += observed_pctile_bar_html(label, pctile, val, key)
-
-    if obs_bars_html:
-        st.markdown(
-            f'<div class="tdd-section-hdr">{season_label} Observed Percentiles</div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f'<div class="insight-card">{obs_bars_html}</div>',
-            unsafe_allow_html=True,
-        )
-        note = (
-            f"Skill profile based on {season_label} observed data, "
-            f"ranked among {len(pop_df)} {player_type.lower()}s in {season_label}. "
-        )
-        if is_unreliable_bb:
-            note += "Batted ball metrics hidden (insufficient Statcast coverage pre-2022). "
-        note += (
-            "100th = best, 1st = worst. "
-            f"<span style='color:var(--tdd-sage);'>Green</span> = elite (80+), "
-            f"<span style='color:var(--tdd-gold);'>gold</span> = above-avg (60-79), "
-            f"<span style='color:var(--tdd-slate);'>gray</span> = mid-tier (40-59), "
-            f"<span style='color:var(--tdd-ember);'>orange</span> = below-avg (&lt;40)."
-        )
-        st.caption(note, unsafe_allow_html=True)
-
-
 def render_season_trends(
     player_type: str,
     player_id: int,
@@ -957,10 +805,10 @@ def render_arsenal_evolution(
                 delta_str = f"{d:+.{decimals}f}"
             return val_str, f"{prev_v*100:.{decimals}f}%" if is_pct else f"{prev_v:.{decimals}f}", delta_str
 
-        u_curr, u_prev, u_delta = _delta_fmt(usage, usage_prev)
-        v_curr, v_prev, v_delta = _delta_fmt(velo, velo_prev, is_pct=False)
-        w_curr, w_prev, w_delta = _delta_fmt(whiff, whiff_prev)
-        c_curr, c_prev, c_delta = _delta_fmt(csw, csw_prev)
+        u_curr, _, u_delta = _delta_fmt(usage, usage_prev)
+        v_curr, _, v_delta = _delta_fmt(velo, velo_prev, is_pct=False)
+        w_curr, _, w_delta = _delta_fmt(whiff, whiff_prev)
+        c_curr, _, c_delta = _delta_fmt(csw, csw_prev)
 
         rows.append({
             "Pitch": pt,
@@ -996,7 +844,6 @@ def page_player_profile() -> None:
     st.markdown('<div class="tdd-section-hdr">Player Profile</div>',
                 unsafe_allow_html=True)
 
-    qp_player_type = st.query_params.get("player_type", "")
     qp_player_id = st.query_params.get("player_id", "")
 
     # Load both pitcher and hitter projections into a unified list
@@ -1112,7 +959,6 @@ def page_player_profile() -> None:
     is_projection = season_choice == PROJECTION_LABEL
     is_career = season_choice == "Career"
     selected_season = None if is_projection or is_career else int(season_choice)
-    show_trad = not is_projection  # backwards-compat for header logic
 
     # --- Header card ---
     # Team abbreviation
@@ -1541,7 +1387,7 @@ def page_player_profile() -> None:
 
             for item in counting_display:
                 c_label = item[0]
-                c_prefix, c_actual, c_hb = item[1], item[2], item[3]
+                c_prefix = item[1]
                 confidence = item[4] if len(item) == 5 else "med"
                 mean_col = f"{c_prefix}_mean"
                 p10_col = f"{c_prefix}_p10"

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from config import DASHBOARD_DIR, RUNTIME
+from config import RUNTIME
 
 logger = logging.getLogger(__name__)
 

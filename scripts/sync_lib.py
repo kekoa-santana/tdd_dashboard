@@ -40,6 +40,7 @@ FILE_MAP: dict[str, str] = {
     "in_season_updater.py": "models/in_season_updater.py",
     "schedule.py":          "data/schedule.py",
     "db.py":                "data/db.py",
+    "game_predictions.py":  "models/game_predictions.py",
 }
 
 # Verify targets: module name -> list of names to import
@@ -54,6 +55,7 @@ VERIFY_IMPORTS: dict[str, list[str]] = {
     "in_season_updater": ["conjugate_update", "update_projections", "update_pitcher_k_samples"],
     "schedule":          ["fetch_todays_schedule", "fetch_game_lineups", "fetch_all_lineups"],
     "db":                ["get_engine", "read_sql"],
+    "game_predictions": ["build_game_predictions_from_sims", "compute_game_predictions"],
 }
 
 # ---------------------------------------------------------------------------

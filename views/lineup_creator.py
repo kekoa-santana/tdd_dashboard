@@ -5,13 +5,12 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from config import GOLD, SAGE, SLATE, EMBER, CREAM, DARK_CARD, DARK_BORDER
+from config import GOLD, SAGE, SLATE, EMBER
 from services.data_loader import (
     load_probable_starters,
     load_rankings,
     load_roster,
 )
-from components.headshot import headshot_html
 from components.diamond_rating import diamond_rating_html
 from lib.diamond_rating import score_to_diamonds
 

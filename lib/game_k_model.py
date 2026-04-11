@@ -21,7 +21,6 @@ from lib.bf_model import draw_bf_samples, get_bf_distribution
 from lib.matchup import score_matchup, score_matchup_for_stat
 from lib.rest_adjustment import (
     apply_rest_to_bf,
-    compute_rest_for_game,
     get_rest_adjustment,
 )
 from lib.constants import CLIP_LO, CLIP_HI
@@ -1313,7 +1312,6 @@ def simulate_batter_game_stat(
     np.ndarray
         Shape (n_draws,) of integer stat totals.
     """
-    combined_lift = matchup_logit_lift + context_logit_lift
     matchup_array = np.array([matchup_logit_lift])
 
     if model_type == "poisson":

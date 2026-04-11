@@ -8,7 +8,6 @@ from pathlib import Path
 from lib.schedule import fetch_todays_schedule, fetch_game_lineups
 from lib.matchup import score_matchup, score_matchup_bb, score_matchup_hr
 from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
-from config import PITCH_DISPLAY
 
 DASHBOARD_DIR = Path(r'C:\Users\kekoa\Documents\data_analytics\tdd-dashboard\data\dashboard')
 

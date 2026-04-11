@@ -238,14 +238,42 @@ def write_game_odds_daily_parquet(long_df: pd.DataFrame) -> None:
     logger.info("Wrote %d rows to game_odds_daily.parquet", len(wide))
 
 
+def rebuild_daily_wide_from_history(game_date: str) -> None:
+    """Rebuild ``game_odds_daily.parquet`` using the newest snapshot *per source*.
+
+    If one book fails on the latest pull, the wide file still keeps the other
+    book's last good snapshot for that date (all from ``game_odds_history``).
+    """
+    if not HISTORY_PATH.exists():
+        return
+    hist = pd.read_parquet(HISTORY_PATH)
+    if hist.empty:
+        return
+    hist = hist.copy()
+    hist["game_date"] = pd.to_datetime(hist["game_date"]).dt.strftime("%Y-%m-%d")
+    day = hist[hist["game_date"] == game_date].copy()
+    if day.empty:
+        logger.warning("No odds history for %s — skipping daily wide rebuild", game_date)
+        return
+    day["snapshot_ts"] = pd.to_datetime(day["snapshot_ts"], utc=True, errors="coerce")
+    chunks: list[pd.DataFrame] = []
+    for src in sorted(day["source"].dropna().unique()):
+        sub = day[day["source"] == src]
+        last_ts = sub["snapshot_ts"].max()
+        chunks.append(sub[sub["snapshot_ts"] == last_ts])
+    combined = pd.concat(chunks, ignore_index=True)
+    write_game_odds_daily_parquet(combined)
+
+
 def persist_game_odds(game_date: str) -> pd.DataFrame:
     """Fetch, append to history, and refresh the daily wide snapshot."""
     odds = collect_odds(game_date)
     if odds.empty:
         logger.info("No game odds to persist")
+        rebuild_daily_wide_from_history(game_date)
         return odds
     append_to_history(odds)
-    write_game_odds_daily_parquet(odds)
+    rebuild_daily_wide_from_history(game_date)
     return odds
 
 

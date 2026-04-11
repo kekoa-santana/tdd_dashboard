@@ -11,7 +11,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
 
 # Ensure project root is on sys.path (conftest.py also does this)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -103,11 +102,6 @@ class TestImports:
     def test_import_compare(self):
         from views.compare import page_compare  # noqa: F401
 
-    def test_import_backtest_charts(self):
-        from components.backtest_charts import create_accuracy_bars  # noqa: F401
-
-    def test_import_build_depth_chart(self):
-        from views.team_overview import _build_depth_chart  # noqa: F401
 
     def test_import_render_depth_chart_tab(self):
         from views.team_overview import _render_depth_chart_tab  # noqa: F401
@@ -133,20 +127,12 @@ class TestImports:
     def test_import_archetype_matchup_matrix(self):
         from services.data_loader import load_archetype_matchup_matrix  # noqa: F401
 
-    def test_import_load_bb_samples(self):
-        from services.data_loader import load_bb_samples  # noqa: F401
-
-    def test_import_load_hr_samples(self):
-        from services.data_loader import load_hr_samples  # noqa: F401
-
-    def test_import_simulate_game_outcomes(self):
-        from lib.game_k_model import simulate_game_outcomes  # noqa: F401
+    def test_import_simulate_game_stat(self):
+        from lib.game_k_model import simulate_game_stat  # noqa: F401
 
     def test_import_compute_over_probs(self):
         from lib.game_k_model import compute_over_probs  # noqa: F401
 
-    def test_import_create_game_stat_fig(self):
-        from components.charts import create_game_stat_fig  # noqa: F401
 
 
 # =====================================================================
@@ -346,50 +332,29 @@ class TestBacktestLoaders:
         snaps = load_weekly_snapshots("nonexistent")
         assert snaps == {}
 
-    def test_load_latest_weekly_snapshot(self, dashboard_dir):
-        from services.data_loader import load_latest_weekly_snapshot
-        result = load_latest_weekly_snapshot("pitcher")
-        assert result is not None
-        date_str, df = result
-        assert date_str == "2026-03-01"
-        assert not df.empty
-
-
 class TestBacktestCharts:
-    """Verify chart functions return Figure objects."""
-
-    def test_create_accuracy_bars(self, dashboard_dir):
-        import matplotlib.pyplot as plt
-        from services.data_loader import load_backtest
-        from components.backtest_charts import create_accuracy_bars
-
-        df = load_backtest("pitcher_k_backtest")
-        fig = create_accuracy_bars(df, "bayes_mae", "marcel_mae", "Test")
-        assert isinstance(fig, plt.Figure)
-        plt.close(fig)
+    """Verify chart functions return plotly Figure objects."""
 
     def test_create_coverage_chart(self, dashboard_dir):
-        import matplotlib.pyplot as plt
+        import plotly.graph_objects as go
         from services.data_loader import load_backtest
         from components.backtest_charts import create_coverage_chart
 
         df = load_backtest("pitcher_k_backtest")
         fig = create_coverage_chart(df, ["coverage_95"], ["95% CI"])
-        assert isinstance(fig, plt.Figure)
-        plt.close(fig)
+        assert isinstance(fig, go.Figure)
 
     def test_create_game_k_model_comparison(self, dashboard_dir):
-        import matplotlib.pyplot as plt
+        import plotly.graph_objects as go
         from services.data_loader import load_backtest
         from components.backtest_charts import create_game_k_model_comparison
 
         df = load_backtest("game_k_backtest")
         fig = create_game_k_model_comparison(df)
-        assert isinstance(fig, plt.Figure)
-        plt.close(fig)
+        assert isinstance(fig, go.Figure)
 
     def test_create_movers_chart(self):
-        from matplotlib.figure import Figure
+        import plotly.graph_objects as go
         from components.backtest_charts import create_movers_chart
 
         fig = create_movers_chart(
@@ -397,7 +362,7 @@ class TestBacktestCharts:
             [2.5, 1.8, -0.3],
             "Test Movers",
         )
-        assert isinstance(fig, Figure)
+        assert isinstance(fig, go.Figure)
 
 
 # =====================================================================
@@ -423,13 +388,6 @@ class TestScheduleConfig:
 # =====================================================================
 class TestMilbLoaders:
     """Verify MiLB data loaders."""
-
-    def test_load_milb_translated_batters(self, dashboard_dir):
-        import pandas as _pd
-        from services.data_loader import load_milb_translated
-        # No fixture data — should return empty gracefully
-        df = load_milb_translated("batters")
-        assert isinstance(df, _pd.DataFrame)
 
     def test_load_milb_factors_missing(self, dashboard_dir):
         import pandas as _pd
@@ -463,51 +421,40 @@ class TestRestAdjustment:
 
 
 # =====================================================================
-# 10. Multi-stat game outcome simulator tests
+# 10. Game stat simulator tests
 # =====================================================================
-class TestSimulateGameOutcomes:
-    """Verify simulate_game_outcomes returns correct shapes and dtypes."""
+class TestSimulateGameStat:
+    """Verify simulate_game_stat returns correct shapes and dtypes."""
 
-    def test_k_only_mode(self):
+    def test_k_simulation(self):
         import numpy as np
-        from lib.game_k_model import simulate_game_outcomes
+        from lib.game_k_model import simulate_game_stat
         rng = np.random.default_rng(0)
         k_samples = rng.beta(5, 17, size=500)  # ~22% K rate
-        results = simulate_game_outcomes(
-            k_rate_samples=k_samples,
-            bb_rate_samples=None,
-            hr_rate_samples=None,
-            bf_mu=24.0,
-            bf_sigma=3.0,
+        result = simulate_game_stat(
+            rate_samples=k_samples,
+            opp_mu=24.0,
+            opp_sigma=3.0,
             n_draws=200,
             random_seed=42,
         )
-        assert "k" in results
-        assert "bb" not in results
-        assert "hr" not in results
-        assert results["k"].shape == (200,)
-        assert results["k"].dtype == int
+        assert result.shape == (200,)
+        assert np.issubdtype(result.dtype, np.integer)
 
-    def test_all_three_stats(self):
+    def test_k_bb_hr_ordering(self):
         import numpy as np
-        from lib.game_k_model import simulate_game_outcomes
+        from lib.game_k_model import simulate_game_stat
         rng = np.random.default_rng(0)
         k_samples = rng.beta(5, 17, size=500)
         bb_samples = rng.beta(2, 22, size=500)
         hr_samples = rng.beta(1, 32, size=500)
-        results = simulate_game_outcomes(
-            k_rate_samples=k_samples,
-            bb_rate_samples=bb_samples,
-            hr_rate_samples=hr_samples,
-            bf_mu=24.0,
-            bf_sigma=3.0,
-            n_draws=200,
-            random_seed=42,
-        )
-        assert set(results.keys()) == {"k", "bb", "hr"}
-        for key in results:
-            assert results[key].shape == (200,)
-            assert results[key].dtype == int
+        kwargs = dict(opp_mu=24.0, opp_sigma=3.0, n_draws=200, random_seed=42)
+        k_result = simulate_game_stat(rate_samples=k_samples, **kwargs)
+        bb_result = simulate_game_stat(rate_samples=bb_samples, **kwargs)
+        hr_result = simulate_game_stat(rate_samples=hr_samples, **kwargs)
+        for r in (k_result, bb_result, hr_result):
+            assert r.shape == (200,)
+            assert np.issubdtype(r.dtype, np.integer)
         # Sanity: K mean > BB mean > HR mean
-        assert np.mean(results["k"]) > np.mean(results["bb"])
-        assert np.mean(results["bb"]) > np.mean(results["hr"])
+        assert np.mean(k_result) > np.mean(bb_result)
+        assert np.mean(bb_result) > np.mean(hr_result)

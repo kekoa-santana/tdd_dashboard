@@ -89,22 +89,6 @@ def load_k_samples() -> LazyNpzDict | dict:
     return LazyNpzDict(path)
 
 
-@st.cache_resource(ttl=_DATA_TTL)
-def load_bb_samples() -> LazyNpzDict | dict:
-    path = DASHBOARD_DIR / "pitcher_bb_samples.npz"
-    if not path.exists():
-        return {}
-    return LazyNpzDict(path)
-
-
-@st.cache_resource(ttl=_DATA_TTL)
-def load_hr_samples() -> LazyNpzDict | dict:
-    path = DASHBOARD_DIR / "pitcher_hr_samples.npz"
-    if not path.exists():
-        return {}
-    return LazyNpzDict(path)
-
-
 @st.cache_data(ttl=_DATA_TTL)
 def load_bf_priors() -> pd.DataFrame:
     path = DASHBOARD_DIR / "bf_priors.parquet"
@@ -218,55 +202,6 @@ def load_counting_sim(player_type: str) -> pd.DataFrame:
         return pd.DataFrame()
     return pd.read_parquet(path)
 
-
-@st.cache_data(ttl=_DATA_TTL)
-def load_confidence_tiers(player_type: str) -> pd.DataFrame:
-    """Extract confidence tier columns from the sim parquet.
-
-    Returns a DataFrame with the player id column, ``confidence_score``,
-    and ``confidence_tier``.  Returns empty if the parquet or columns
-    are missing.
-
-    Parameters
-    ----------
-    player_type : str
-        ``"pitcher"`` or ``"hitter"``.
-
-    Returns
-    -------
-    pd.DataFrame
-        Columns: player id, confidence_score, confidence_tier.
-    """
-    df = load_counting_sim(player_type)
-    if df.empty:
-        return pd.DataFrame()
-
-    id_col = "pitcher_id" if player_type == "pitcher" else "batter_id"
-    name_col = "pitcher_name" if player_type == "pitcher" else "batter_name"
-    keep = [id_col]
-    if name_col in df.columns:
-        keep.append(name_col)
-    if "confidence_score" in df.columns:
-        keep.append("confidence_score")
-    if "confidence_tier" in df.columns:
-        keep.append("confidence_tier")
-
-    # Return empty if no confidence columns present
-    if "confidence_score" not in df.columns and "confidence_tier" not in df.columns:
-        return pd.DataFrame()
-
-    return df[keep].copy()
-
-
-@st.cache_data(ttl=_DATA_TTL)
-def load_game_info() -> pd.DataFrame:
-    path = DASHBOARD_DIR / "game_info.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-@st.cache_data(ttl=_DATA_TTL)
 def load_player_teams() -> pd.DataFrame:
     """Load player-to-team mapping.
 
@@ -297,22 +232,6 @@ def load_roster() -> pd.DataFrame:
 @st.cache_data(ttl=_DATA_TTL)
 def load_probable_starters() -> pd.DataFrame:
     path = DASHBOARD_DIR / "probable_starters.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-@st.cache_data(ttl=_DATA_TTL)
-def load_probable_starters_by_hand() -> pd.DataFrame:
-    path = DASHBOARD_DIR / "probable_starters_by_hand.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-@st.cache_data(ttl=_DATA_TTL)
-def load_lineup_priors() -> pd.DataFrame:
-    path = DASHBOARD_DIR / "lineup_priors.parquet"
     if not path.exists():
         return pd.DataFrame()
     return pd.read_parquet(path)
@@ -350,14 +269,6 @@ def load_hitter_zone_grid(career: bool = False) -> pd.DataFrame:
 @st.cache_data(ttl=_DATA_TTL)
 def load_todays_games() -> pd.DataFrame:
     path = DASHBOARD_DIR / "todays_games.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-@st.cache_data(ttl=_DATA_TTL)
-def load_todays_sims() -> pd.DataFrame:
-    path = DASHBOARD_DIR / "todays_sims.parquet"
     if not path.exists():
         return pd.DataFrame()
     return pd.read_parquet(path)
@@ -484,14 +395,6 @@ def load_hitter_vulnerability_all() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_DATA_TTL)
-def load_hitter_strength_all() -> pd.DataFrame:
-    path = DASHBOARD_DIR / "hitter_str_all.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-@st.cache_data(ttl=_DATA_TTL)
 def load_full_stats(player_type: str) -> pd.DataFrame:
     path = DASHBOARD_DIR / f"{player_type}_full_stats.parquet"
     if not path.exists():
@@ -583,22 +486,6 @@ def load_pitcher_archetypes() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_DATA_TTL)
-def load_hitter_archetype_metadata() -> pd.DataFrame:
-    path = DASHBOARD_DIR / "hitter_archetype_metadata.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-@st.cache_data(ttl=_DATA_TTL)
-def load_pitcher_archetype_metadata() -> pd.DataFrame:
-    path = DASHBOARD_DIR / "pitcher_archetype_metadata.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-@st.cache_data(ttl=_DATA_TTL)
 def load_archetype_matchup_matrix() -> pd.DataFrame:
     path = DASHBOARD_DIR / "archetype_matchup_matrix.parquet"
     if not path.exists():
@@ -638,16 +525,6 @@ def load_weekly_snapshots(player_type: str) -> dict[str, pd.DataFrame]:
         date_str = f.stem.replace(prefix, "")
         result[date_str] = pd.read_parquet(f)
     return result
-
-
-@st.cache_data(ttl=_DATA_TTL)
-def load_latest_weekly_snapshot(player_type: str) -> tuple[str, pd.DataFrame] | None:
-    """Load the most recent weekly snapshot. Returns (date_str, df) or None."""
-    snapshots = load_weekly_snapshots(player_type)
-    if not snapshots:
-        return None
-    latest_date = max(snapshots.keys())
-    return latest_date, snapshots[latest_date]
 
 
 @st.cache_data(ttl=600)  # 10-minute TTL for live schedule data
@@ -739,15 +616,6 @@ def fetch_live_boxscores(schedule_df: pd.DataFrame) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_DATA_TTL)
-def load_milb_translated(player_type: str) -> pd.DataFrame:
-    """Load MiLB translated stats (batters or pitchers)."""
-    path = DASHBOARD_DIR / f"milb_translated_{player_type}.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-@st.cache_data(ttl=_DATA_TTL)
 def load_milb_factors(player_type: str) -> pd.DataFrame:
     """Load MiLB translation factors (batters or pitchers)."""
     path = DASHBOARD_DIR / f"milb_{player_type}_factors.parquet"
@@ -800,16 +668,6 @@ def load_core_rankings(player_type: str) -> pd.DataFrame:
     return pd.read_parquet(path)
 
 
-@st.cache_data(ttl=_DATA_TTL)
-def load_position_eligibility() -> pd.DataFrame:
-    """Load hitter multi-position eligibility table."""
-    path = DASHBOARD_DIR / "hitter_position_eligibility.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-@st.cache_data(ttl=_DATA_TTL)
 def load_prospect_readiness() -> pd.DataFrame:
     """Load prospect readiness scores with rankings."""
     path = DASHBOARD_DIR / "prospect_readiness.parquet"
@@ -854,30 +712,6 @@ def season_selector(
 # -----------------------------------------------------------------------
 # Game Simulator Data (Layer 3 v2)
 # -----------------------------------------------------------------------
-
-@st.cache_resource(ttl=_DATA_TTL)
-def load_hitter_k_samples() -> LazyNpzDict | dict:
-    path = DASHBOARD_DIR / "hitter_k_samples.npz"
-    if not path.exists():
-        return {}
-    return LazyNpzDict(path)
-
-
-@st.cache_resource(ttl=_DATA_TTL)
-def load_hitter_bb_samples() -> LazyNpzDict | dict:
-    path = DASHBOARD_DIR / "hitter_bb_samples.npz"
-    if not path.exists():
-        return {}
-    return LazyNpzDict(path)
-
-
-@st.cache_resource(ttl=_DATA_TTL)
-def load_hitter_hr_samples() -> LazyNpzDict | dict:
-    path = DASHBOARD_DIR / "hitter_hr_samples.npz"
-    if not path.exists():
-        return {}
-    return LazyNpzDict(path)
-
 
 class GameSimSampleStore:
     """Lazy loader for precomputed game sim sample arrays.
@@ -930,67 +764,6 @@ def load_batter_game_sim_samples() -> GameSimSampleStore | None:
     if not path.exists():
         return None
     return GameSimSampleStore(path, ["k", "bb", "h", "hr"])
-
-
-@st.cache_data(ttl=_DATA_TTL)
-def load_exit_model():
-    """Load the trained pitcher exit model.
-
-    Returns
-    -------
-    ExitModel or None
-        Trained model, or None if file doesn't exist.
-    """
-    path = DASHBOARD_DIR / "exit_model.pkl"
-    if not path.exists():
-        return None
-    try:
-        from lib.game_sim.exit_model import ExitModel
-    except ImportError:
-        return None
-    model = ExitModel()
-    model.load(path)
-    return model
-
-
-@st.cache_data(ttl=_DATA_TTL)
-def load_pitcher_pitch_count_features() -> pd.DataFrame:
-    path = DASHBOARD_DIR / "pitcher_pitch_count_features.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-@st.cache_data(ttl=_DATA_TTL)
-def load_batter_pitch_count_features() -> pd.DataFrame:
-    path = DASHBOARD_DIR / "batter_pitch_count_features.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-@st.cache_data(ttl=_DATA_TTL)
-def load_tto_profiles() -> pd.DataFrame:
-    path = DASHBOARD_DIR / "tto_profiles.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-@st.cache_data(ttl=_DATA_TTL)
-def load_team_bullpen_rates() -> pd.DataFrame:
-    path = DASHBOARD_DIR / "team_bullpen_rates.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-@st.cache_data(ttl=_DATA_TTL)
-def load_pitcher_exit_tendencies() -> pd.DataFrame:
-    path = DASHBOARD_DIR / "pitcher_exit_tendencies.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
 
 
 # ---------------------------------------------------------------------------

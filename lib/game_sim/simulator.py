@@ -11,14 +11,12 @@ a single simulation run.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 import pandas as pd
-from scipy.special import expit, logit
 
-from lib.game_sim.bip_model import BIPOutcomeModel
 from lib.game_sim.exit_model import ExitModel
 from lib.game_sim.pa_outcome_model import (
     PA_DOUBLE,
@@ -33,7 +31,128 @@ from lib.game_sim.pa_outcome_model import (
     compute_fatigue_adjustments,
 )
 from lib.game_sim.pitch_count_model import PitchCountModel
-from lib.game_sim.tto_model import BF_PER_TTO, get_tto_for_bf
+from lib.game_sim.tto_model import BF_PER_TTO
+
+# League-average bullpen fallback rates (used when a team has no entry in
+# team_bullpen_rates.parquet). Mirrors src.utils.constants in player_profiles.
+_LEAGUE_BULLPEN_K_RATE = 0.253
+_LEAGUE_BULLPEN_BB_RATE = 0.084
+_LEAGUE_BULLPEN_HR_RATE = 0.024
+
+# Safety cap on bullpen tail PAs.
+_MAX_BULLPEN_PA = 80
+
+# Runner advancement probabilities (league-average, see CLAUDE discussion
+# 2026-04-10).
+_SAC_FLY_PROB_0OUT = 0.50
+_SAC_FLY_PROB_1OUT = 0.30
+_R2_SCORES_ON_SINGLE = 0.60
+_R1_SCORES_ON_DOUBLE = 0.40
+
+
+def _advance_runners(
+    outcomes: np.ndarray,
+    r1: np.ndarray,
+    r2: np.ndarray,
+    r3: np.ndarray,
+    inning_outs: np.ndarray,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Apply PA outcomes to base state and return runs + new base occupancy.
+
+    See ``player_profiles/src/models/game_sim/simulator.py`` for the full
+    docstring. Advancement rules (approved 2026-04-10):
+    - K / non-K out: no movement, except R3 scores on non-K out with prob
+      0.50 (0 outs) / 0.30 (1 out) / 0.0 (2 outs) for sac fly modeling.
+    - Walk/HBP: forced advancement only.
+    - Single: batter→1B, R3 scores, R2 scores 60% else→3B, R1→2B.
+    - Double: batter→2B, R3 scores, R2 scores, R1 scores 40% else→3B.
+    - Triple: all on base score, batter→3B.
+    - HR: clears bases, all score.
+    """
+    n = outcomes.shape[0]
+    runs = np.zeros(n, dtype=np.int32)
+    new_r1 = r1.copy()
+    new_r2 = r2.copy()
+    new_r3 = r3.copy()
+
+    # Non-K out: sac fly with runner on 3B
+    out_mask = outcomes == PA_OUT
+    sf_prob = np.where(
+        out_mask & (r3 == 1) & (inning_outs == 0),
+        _SAC_FLY_PROB_0OUT,
+        np.where(
+            out_mask & (r3 == 1) & (inning_outs == 1),
+            _SAC_FLY_PROB_1OUT,
+            0.0,
+        ),
+    )
+    sf_draw = rng.random(n) < sf_prob
+    runs += sf_draw.astype(np.int32)
+    new_r3 = np.where(sf_draw, 0, new_r3)
+
+    # Walk / HBP: forced advancement
+    walk_mask = (outcomes == PA_WALK) | (outcomes == PA_HBP)
+    bases_loaded_walk = walk_mask & (r1 == 1) & (r2 == 1) & (r3 == 1)
+    runs += bases_loaded_walk.astype(np.int32)
+    walk_push_r3 = walk_mask & (r1 == 1) & (r2 == 1)
+    walk_push_r2 = walk_mask & (r1 == 1)
+    new_r3 = np.where(walk_push_r3, 1, new_r3)
+    new_r2 = np.where(walk_push_r2, 1, new_r2)
+    new_r1 = np.where(walk_mask, 1, new_r1)
+
+    # Single
+    single_mask = outcomes == PA_SINGLE
+    runs += (single_mask & (r3 == 1)).astype(np.int32)
+
+    r2_on_single = single_mask & (r2 == 1)
+    r2_score_draw = rng.random(n) < _R2_SCORES_ON_SINGLE
+    runs += (r2_on_single & r2_score_draw).astype(np.int32)
+    r2_holds_at_3_single = r2_on_single & ~r2_score_draw
+
+    r1_on_single = single_mask & (r1 == 1)
+
+    new_r3 = np.where(single_mask, r2_holds_at_3_single.astype(np.int32), new_r3)
+    new_r2 = np.where(single_mask, r1_on_single.astype(np.int32), new_r2)
+    new_r1 = np.where(single_mask, 1, new_r1)
+
+    # Double
+    double_mask = outcomes == PA_DOUBLE
+    runs += (double_mask & (r3 == 1)).astype(np.int32)
+    runs += (double_mask & (r2 == 1)).astype(np.int32)
+
+    r1_on_double = double_mask & (r1 == 1)
+    r1_score_draw = rng.random(n) < _R1_SCORES_ON_DOUBLE
+    runs += (r1_on_double & r1_score_draw).astype(np.int32)
+    r1_holds_at_3_double = r1_on_double & ~r1_score_draw
+
+    new_r3 = np.where(double_mask, r1_holds_at_3_double.astype(np.int32), new_r3)
+    new_r2 = np.where(double_mask, 1, new_r2)
+    new_r1 = np.where(double_mask, 0, new_r1)
+
+    # Triple
+    triple_mask = outcomes == PA_TRIPLE
+    runs += (triple_mask & (r3 == 1)).astype(np.int32)
+    runs += (triple_mask & (r2 == 1)).astype(np.int32)
+    runs += (triple_mask & (r1 == 1)).astype(np.int32)
+    new_r3 = np.where(triple_mask, 1, new_r3)
+    new_r2 = np.where(triple_mask, 0, new_r2)
+    new_r1 = np.where(triple_mask, 0, new_r1)
+
+    # Home run
+    hr_mask = outcomes == PA_HOME_RUN
+    hr_runs = (
+        hr_mask.astype(np.int32)
+        + (hr_mask & (r1 == 1)).astype(np.int32)
+        + (hr_mask & (r2 == 1)).astype(np.int32)
+        + (hr_mask & (r3 == 1)).astype(np.int32)
+    )
+    runs += hr_runs
+    new_r3 = np.where(hr_mask, 0, new_r3)
+    new_r2 = np.where(hr_mask, 0, new_r2)
+    new_r1 = np.where(hr_mask, 0, new_r1)
+
+    return runs, new_r1, new_r2, new_r3
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +168,11 @@ class SimulationResult:
     """Results from a game simulation run.
 
     All arrays have shape (n_sims,) — one value per simulated game.
+
+    Starter counting stats (k/bb/h/hr/hbp/bf/pitch_count/outs) back pitcher
+    prop probabilities. ``runs_samples`` is the full-game run total
+    (starter + bullpen); ``starter_runs_samples`` / ``bullpen_runs_samples``
+    are diagnostic components that sum to ``runs_samples``.
     """
 
     k_samples: np.ndarray
@@ -60,6 +184,8 @@ class SimulationResult:
     pitch_count_samples: np.ndarray
     outs_samples: np.ndarray
     runs_samples: np.ndarray
+    starter_runs_samples: np.ndarray | None = None
+    bullpen_runs_samples: np.ndarray | None = None
     n_sims: int = 0
 
     def summary(self) -> dict[str, dict[str, float]]:
@@ -130,6 +256,114 @@ class SimulationResult:
         return full_innings + partial / 10.0  # Baseball IP notation
 
 
+def simulate_bullpen_tail(
+    *,
+    outs: np.ndarray,
+    inning: np.ndarray,
+    inning_outs: np.ndarray,
+    r1: np.ndarray,
+    r2: np.ndarray,
+    r3: np.ndarray,
+    bullpen_k_rate: float,
+    bullpen_bb_rate: float,
+    bullpen_hr_rate: float,
+    umpire_k_lift: float,
+    umpire_bb_lift: float,
+    park_hr_lift: float,
+    weather_k_lift: float,
+    babip_adj: float,
+    rng: np.random.Generator,
+    n_sims: int,
+) -> np.ndarray:
+    """Continue a game simulation after the starter exits using team bullpen rates.
+
+    Runs PA-by-PA with team-aggregate bullpen rates until every sim reaches
+    27 outs (or ``_MAX_BULLPEN_PA`` is hit as a safety valve). Mutates the
+    passed-in state vectors (``outs``, ``inning``, ``inning_outs``,
+    ``r1``, ``r2``, ``r3``) in place.
+
+    Matchup, TTO, fatigue, pitch counts, and the exit model are all disabled
+    in the tail. Park/umpire/weather lifts carry through since the
+    environment doesn't change mid-game.
+
+    Returns
+    -------
+    np.ndarray
+        ``bullpen_runs`` of shape ``(n_sims,)``.
+    """
+    pa_outcome_model = PAOutcomeModel()
+
+    bullpen_runs = np.zeros(n_sims, dtype=np.int32)
+
+    # Active = sims that still need more outs (skip complete games)
+    active = outs < 27
+
+    for _ in range(_MAX_BULLPEN_PA):
+        n_active = int(active.sum())
+        if n_active == 0:
+            break
+
+        zeros_active = np.zeros(n_active, dtype=np.float64)
+        k_rates = np.full(n_active, bullpen_k_rate, dtype=np.float64)
+        bb_rates = np.full(n_active, bullpen_bb_rate, dtype=np.float64)
+        hr_rates = np.full(n_active, bullpen_hr_rate, dtype=np.float64)
+
+        probs = pa_outcome_model.compute_pa_probs(
+            pitcher_k_rate=k_rates,
+            pitcher_bb_rate=bb_rates,
+            pitcher_hr_rate=hr_rates,
+            matchup_k_lift=zeros_active,
+            matchup_bb_lift=zeros_active,
+            matchup_hr_lift=zeros_active,
+            tto_k_lift=zeros_active,
+            tto_bb_lift=zeros_active,
+            tto_hr_lift=zeros_active,
+            fatigue_k_lift=zeros_active,
+            fatigue_bb_lift=zeros_active,
+            fatigue_hr_lift=zeros_active,
+            umpire_k_lift=umpire_k_lift,
+            umpire_bb_lift=umpire_bb_lift,
+            park_hr_lift=park_hr_lift,
+            weather_k_lift=weather_k_lift,
+        )
+
+        outcomes = pa_outcome_model.draw_outcomes(
+            probs=probs, rng=rng, n_draws=n_active, babip_adj=babip_adj,
+        )
+
+        # Runner advancement (pre-out-increment for sac fly eligibility)
+        runs_scored, new_r1, new_r2, new_r3 = _advance_runners(
+            outcomes=outcomes,
+            r1=r1[active],
+            r2=r2[active],
+            r3=r3[active],
+            inning_outs=inning_outs[active],
+            rng=rng,
+        )
+
+        bullpen_runs[active] += runs_scored
+        r1[active] = new_r1
+        r2[active] = new_r2
+        r3[active] = new_r3
+
+        # Outs (after sac fly check)
+        is_out = np.isin(outcomes, [PA_STRIKEOUT, PA_OUT])
+        outs[active] += is_out.astype(np.int32)
+        inning_outs[active] += is_out.astype(np.int32)
+
+        # Inning rollover
+        inning_over = inning_outs[active] >= 3
+        inning[active] = np.where(inning_over, inning[active] + 1, inning[active])
+        inning_outs[active] = np.where(inning_over, 0, inning_outs[active])
+        r1[active] = np.where(inning_over, 0, r1[active])
+        r2[active] = np.where(inning_over, 0, r2[active])
+        r3[active] = np.where(inning_over, 0, r3[active])
+
+        active = outs < 27
+
+    return bullpen_runs
+
+
 def simulate_game(
     pitcher_k_rate_samples: np.ndarray,
     pitcher_bb_rate_samples: np.ndarray,
@@ -145,6 +379,9 @@ def simulate_game(
     umpire_bb_lift: float = 0.0,
     park_hr_lift: float = 0.0,
     weather_k_lift: float = 0.0,
+    bullpen_k_rate: float = _LEAGUE_BULLPEN_K_RATE,
+    bullpen_bb_rate: float = _LEAGUE_BULLPEN_BB_RATE,
+    bullpen_hr_rate: float = _LEAGUE_BULLPEN_HR_RATE,
     n_sims: int = 10_000,
     random_seed: int = 42,
 ) -> SimulationResult:
@@ -226,7 +463,11 @@ def simulate_game(
     inning_outs = np.zeros(n_sims, dtype=np.int32)  # 0, 1, 2 within inning
     lineup_pos = np.zeros(n_sims, dtype=np.int32)    # 0-8
     bf_count = np.zeros(n_sims, dtype=np.int32)
-    runners = np.zeros(n_sims, dtype=np.int32)        # simplified count
+    # Base occupancy flags (exit model still takes a total count, computed
+    # on the fly as r1+r2+r3).
+    r1 = np.zeros(n_sims, dtype=np.int32)
+    r2 = np.zeros(n_sims, dtype=np.int32)
+    r3 = np.zeros(n_sims, dtype=np.int32)
     runs = np.zeros(n_sims, dtype=np.int32)
     score_diff = np.zeros(n_sims, dtype=np.int32)     # pitcher team perspective
 
@@ -313,60 +554,35 @@ def simulate_game(
         is_hit = np.isin(outcomes, [PA_SINGLE, PA_DOUBLE, PA_TRIPLE, PA_HOME_RUN])
         h_total[active] += is_hit.astype(np.int32)
 
-        # Update outs
+        # --- Runner advancement (pre-out-increment so sac flies can see
+        #     the current inning_outs as 0 or 1).
+        runs_scored, new_r1, new_r2, new_r3 = _advance_runners(
+            outcomes=outcomes,
+            r1=r1[active],
+            r2=r2[active],
+            r3=r3[active],
+            inning_outs=inning_outs[active],
+            rng=rng,
+        )
+
+        runs[active] += runs_scored
+        score_diff[active] -= runs_scored
+        r1[active] = new_r1
+        r2[active] = new_r2
+        r3[active] = new_r3
+
+        # Update outs (after sac fly check)
         is_out = np.isin(outcomes, [PA_STRIKEOUT, PA_OUT])
         outs[active] += is_out.astype(np.int32)
         inning_outs[active] += is_out.astype(np.int32)
-
-        # Update runners (simplified model)
-        # Outs clear no runners; walks/HBP/singles add 1; doubles add 1
-        # (and may score a runner); HR clears bases + scores all + batter
-        is_on_base = np.isin(
-            outcomes, [PA_WALK, PA_HBP, PA_SINGLE, PA_DOUBLE, PA_TRIPLE]
-        )
-
-        # Score runs on HR: all runners + batter
-        hr_mask_active = (outcomes == PA_HOME_RUN)
-        runs_scored = np.where(hr_mask_active, runners[active] + 1, 0)
-
-        # Score some runners on doubles/triples (simplified)
-        double_mask = (outcomes == PA_DOUBLE)
-        triple_mask = (outcomes == PA_TRIPLE)
-        runs_scored += np.where(
-            double_mask, np.minimum(runners[active], 2), 0
-        )
-        runs_scored += np.where(
-            triple_mask, runners[active], 0
-        )
-
-        runs[active] += runs_scored.astype(np.int32)
-        score_diff[active] -= runs_scored.astype(np.int32)
-
-        # Update runners
-        # HR: clear bases
-        runners[active] = np.where(hr_mask_active, 0, runners[active])
-        # Doubles/triples: some runners scored, batter on base
-        runners[active] = np.where(
-            double_mask,
-            np.minimum(runners[active] - np.minimum(runners[active], 2) + 1, 3),
-            runners[active],
-        )
-        runners[active] = np.where(
-            triple_mask, 1, runners[active]  # batter on 3rd
-        )
-        # Single/walk/HBP: add batter, keep existing (capped at 3)
-        runners[active] = np.where(
-            is_on_base & ~double_mask & ~triple_mask,
-            np.minimum(runners[active] + 1, 3),
-            runners[active],
-        )
-        # Outs: don't change runner count (simplified)
 
         # Check for inning change (3 outs in inning)
         inning_over = inning_outs[active] >= 3
         inning[active] = np.where(inning_over, inning[active] + 1, inning[active])
         inning_outs[active] = np.where(inning_over, 0, inning_outs[active])
-        runners[active] = np.where(inning_over, 0, runners[active])
+        r1[active] = np.where(inning_over, 0, r1[active])
+        r2[active] = np.where(inning_over, 0, r2[active])
+        r3[active] = np.where(inning_over, 0, r3[active])
 
         # Update recent trouble
         is_trouble = np.isin(
@@ -394,7 +610,7 @@ def simulate_game(
             inning=inning[active],
             inning_outs=inning_outs[active],
             score_diff=score_diff[active],
-            runners=runners[active],
+            runners=r1[active] + r2[active] + r3[active],
             tto=current_tto,
             recent_trouble=recent_trouble[active],
             pitcher_avg_pitches=pitcher_avg_pitches,
@@ -408,6 +624,32 @@ def simulate_game(
         active_indices = np.where(active)[0]
         active[active_indices[exits]] = False
 
+    # --- Bullpen tail: finish the game to 27 outs using team bullpen rates ---
+    # Snapshot starter totals before the tail mutates shared state arrays.
+    starter_runs = runs.copy()
+    starter_outs = outs.copy()
+
+    bullpen_runs = simulate_bullpen_tail(
+        outs=outs,
+        inning=inning,
+        inning_outs=inning_outs,
+        r1=r1,
+        r2=r2,
+        r3=r3,
+        bullpen_k_rate=bullpen_k_rate,
+        bullpen_bb_rate=bullpen_bb_rate,
+        bullpen_hr_rate=bullpen_hr_rate,
+        umpire_k_lift=umpire_k_lift,
+        umpire_bb_lift=umpire_bb_lift,
+        park_hr_lift=park_hr_lift,
+        weather_k_lift=weather_k_lift,
+        babip_adj=babip_adj,
+        rng=rng,
+        n_sims=n_sims,
+    )
+
+    total_runs = starter_runs + bullpen_runs
+
     return SimulationResult(
         k_samples=k_total,
         bb_samples=bb_total,
@@ -416,8 +658,10 @@ def simulate_game(
         hbp_samples=hbp_total,
         bf_samples=bf_count,
         pitch_count_samples=pitches,
-        outs_samples=outs,
-        runs_samples=runs,
+        outs_samples=starter_outs,
+        runs_samples=total_runs,
+        starter_runs_samples=starter_runs,
+        bullpen_runs_samples=bullpen_runs,
         n_sims=n_sims,
     )
 
@@ -440,6 +684,9 @@ def predict_game(
     umpire_bb_lift: float = 0.0,
     park_hr_lift: float = 0.0,
     weather_k_lift: float = 0.0,
+    bullpen_k_rate: float = _LEAGUE_BULLPEN_K_RATE,
+    bullpen_bb_rate: float = _LEAGUE_BULLPEN_BB_RATE,
+    bullpen_hr_rate: float = _LEAGUE_BULLPEN_HR_RATE,
     n_sims: int = 10_000,
     random_seed: int = 42,
 ) -> dict[str, Any]:
@@ -516,6 +763,9 @@ def predict_game(
         umpire_bb_lift=umpire_bb_lift,
         park_hr_lift=park_hr_lift,
         weather_k_lift=weather_k_lift,
+        bullpen_k_rate=bullpen_k_rate,
+        bullpen_bb_rate=bullpen_bb_rate,
+        bullpen_hr_rate=bullpen_hr_rate,
         n_sims=n_sims,
         random_seed=random_seed,
     )

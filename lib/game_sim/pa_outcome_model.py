@@ -231,7 +231,6 @@ class PAOutcomeModel:
         bb_p = np.broadcast_to(np.asarray(probs["bb"]), (n_draws,))
         hbp_p = np.broadcast_to(np.asarray(probs["hbp"]), (n_draws,))
         hr_p = np.broadcast_to(np.asarray(probs["hr"]), (n_draws,))
-        bip_p = np.broadcast_to(np.asarray(probs["bip"]), (n_draws,))
 
         # Use inverse CDF sampling for speed
         u = rng.random(n_draws)

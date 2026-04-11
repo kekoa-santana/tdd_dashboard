@@ -12,23 +12,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 import pandas as pd
 from scipy.special import expit, logit
 
-from lib.game_sim.bip_model import (
-    BIP_DOUBLE,
-    BIP_SINGLE,
-    BIP_TRIPLE,
-    BIPOutcomeModel,
-)
 from lib.game_sim.pa_outcome_model import (
     PA_DOUBLE,
     PA_HBP,
     PA_HOME_RUN,
-    PA_OUT,
     PA_SINGLE,
     PA_STRIKEOUT,
     PA_TRIPLE,

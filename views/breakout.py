@@ -4,7 +4,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from config import GOLD, SAGE, SLATE, EMBER, CREAM, DARK_CARD, DARK_BORDER
+from config import GOLD, SAGE, SLATE, EMBER, DARK_CARD
 from services.data_loader import (
     load_hitter_breakout_candidates,
     load_pitcher_breakout_candidates,
@@ -12,7 +12,6 @@ from services.data_loader import (
 )
 from components.headshot import headshot_html
 from components.diamond_rating import diamond_rating_html
-from lib.diamond_rating import score_to_diamonds
 from views.player_rankings import _render_ranking_card, _CSS as _RANKING_CSS
 from components.expandable_card import EXPANDABLE_CARD_CSS
 
@@ -184,18 +183,6 @@ def _fmt(val: float, spec: str) -> str:
         return f"{val:+.2f}"
     return str(val)
 
-
-def _get_cluster_prob(row: pd.Series, prob_map: dict[str, str]) -> float:
-    """Get cluster probability for the player's assigned archetype."""
-    archetype = row.get("breakout_type", "")
-    col = prob_map.get(archetype, "")
-    if col and col in row.index:
-        val = row[col]
-        if pd.notna(val):
-            return float(val)
-    return 0.0
-
-
 def _merge_teams(
     df: pd.DataFrame, id_col: str,
 ) -> tuple[pd.DataFrame, dict[int, str]]:
@@ -219,112 +206,7 @@ def _merge_teams(
     return df, teams_lookup
 
 
-def _score_color(val: float) -> str:
-    """Color-code a diamond rating value."""
-    if val >= 4.0:
-        return f"color: {GOLD}; font-weight: bold"
-    if val >= 3.0:
-        return f"color: {SAGE}; font-weight: bold"
-    if val >= 2.0:
-        return f"color: {SLATE}"
-    return f"color: {CREAM}"
-
-
 # ── Card builders ────────────────────────────────────────────────────────
-
-def _build_card_html(
-    row: pd.Series,
-    id_col: str,
-    name_col: str,
-    teams_lookup: dict[int, str],
-    archetype_stats: dict[str, list[tuple[str, str, str]]],
-    prob_map: dict[str, str],
-    rank: int,
-) -> str:
-    """Build HTML for a single breakout candidate card."""
-    pid = int(row[id_col])
-    name = row[name_col]
-    age = int(row["age"]) if pd.notna(row.get("age")) else ""
-    pos = row.get("position", "")
-    team = teams_lookup.get(pid, "")
-    archetype = row.get("breakout_type", "")
-    score = row.get("breakout_score", 0)
-    narrative = row.get("breakout_narrative", "")
-    hole = row.get("breakout_hole", "")
-
-    # Meta line
-    meta_parts = []
-    if age:
-        meta_parts.append(str(age))
-    if pos:
-        meta_parts.append(pos)
-    if team:
-        meta_parts.append(f'<span data-team="{team}">{team}</span>')
-    meta_str = " \u00b7 ".join(meta_parts)
-
-    # Archetype badge
-    arch_color = _ARCHETYPE_COLORS.get(archetype, SLATE)
-    badge = (
-        f'<span class="breakout-card-badge" '
-        f'style="background:{arch_color}; color:{DARK_CARD};">'
-        f'{archetype}</span>'
-    )
-
-    # Diamond rating
-    rating_html = diamond_rating_html(score, size="sm")
-
-    # Cluster probability
-    cluster_prob = _get_cluster_prob(row, prob_map)
-    prob_str = f'<span class="breakout-card-meta">{cluster_prob:.0%} fit</span>'
-
-    # Stat badges
-    stats_config = archetype_stats.get(archetype, [])
-    stat_parts: list[str] = []
-    for label, col, fmt_spec in stats_config:
-        val = row.get(col)
-        if pd.notna(val):
-            formatted = _fmt(val, fmt_spec)
-            stat_parts.append(
-                f'<span class="breakout-stat">'
-                f'<span class="breakout-stat-label">{label}</span>'
-                f'<span class="breakout-stat-value">{formatted}</span>'
-                f'</span>'
-            )
-    stats_html = "".join(stat_parts)
-
-    # Hole
-    hole_html = (
-        f'<div class="breakout-hole">Key: {hole}</div>' if hole else ""
-    )
-
-    # Narrative
-    narrative_html = (
-        f'<div class="breakout-card-narrative">{narrative}</div>'
-        if narrative else ""
-    )
-
-    headshot = headshot_html(pid, size=45)
-
-    return (
-        f'<div class="breakout-card">'
-        f'<div class="breakout-card-header">'
-        f'{headshot}'
-        f'<div>'
-        f'<div class="breakout-card-name">'
-        f'<span class="breakout-card-meta" style="color:var(--tdd-gold);">{rank}.</span> '
-        f'{name} <span class="breakout-card-meta">{meta_str}</span></div>'
-        f'<div style="display:flex; align-items:center; gap:0.4rem; '
-        f'margin-top:0.2rem; flex-wrap:wrap;">'
-        f'{rating_html} {badge} {prob_str}'
-        f'</div>'
-        f'</div>'
-        f'</div>'
-        f'{narrative_html}'
-        f'<div class="breakout-card-stats">{stats_html}</div>'
-        f'{hole_html}'
-        f'</div>'
-    )
-
 
 def _build_compact_card_html(
     row: pd.Series,

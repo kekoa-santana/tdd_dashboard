@@ -7,7 +7,7 @@ import pandas as pd
 from config import (
     GOLD, EMBER, SAGE, SLATE, POSITIVE, NEGATIVE,
     PITCH_DISPLAY,
-    STAT_NAMES, GOOD_DIRECTION_LABEL,
+    GOOD_DIRECTION_LABEL,
 )
 from components.metric_cards import percentile_rank
 from utils.formatters import fmt_stat
@@ -46,7 +46,6 @@ def generate_scouting_bullets(
 
         improving = (delta_pp > 0 and higher_better) or (delta_pp < 0 and not higher_better)
 
-        stat_name = STAT_NAMES.get(key, label)
         obs_str = fmt_stat(observed, key)
         proj_str = fmt_stat(projected, key)
 

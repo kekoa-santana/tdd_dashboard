@@ -131,8 +131,6 @@ class ExitModel:
         np.ndarray
             Feature matrix, shape (n_samples, n_features).
         """
-        n = len(cumulative_pitches)
-
         # Pitch count features
         pitches = cumulative_pitches.astype(float)
         pitches_sq = pitches ** 2 / 10000.0  # Quadratic term, scaled

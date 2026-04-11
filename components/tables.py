@@ -6,8 +6,7 @@ import numpy as np
 import pandas as pd
 
 from config import (
-    GOLD, EMBER, SAGE, SLATE, CREAM,
-    PITCH_DISPLAY, PITCH_ORDER, PITCH_TYPE_TO_FAMILY, PITCH_FAMILY_COLORS,
+    EMBER, SAGE, SLATE, PITCH_DISPLAY, PITCH_ORDER, PITCH_TYPE_TO_FAMILY, PITCH_FAMILY_COLORS,
 )
 from utils.formatters import spark_color_rate, spark_color_xwoba, spark_html
 

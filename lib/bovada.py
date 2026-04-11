@@ -13,7 +13,6 @@ import json
 import logging
 import re
 import urllib.request
-from datetime import date
 from typing import Any
 
 import pandas as pd

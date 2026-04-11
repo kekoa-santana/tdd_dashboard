@@ -1166,9 +1166,6 @@ def _compute_platoon_lift(
     # Determine same/opposite side for league baseline
     # We need batter_stand — infer from which hands have data
     # If batter has data vs both hands, check which side of pitcher_hand
-    other_hand = "L" if pitcher_hand == "R" else "R"
-    other_data = batter_platoon_splits.get(other_hand)
-
     # Heuristic: if batter K% is higher vs this hand → likely same-side
     # But more reliable: compare to overall
     if k_vs_hand > overall_k:
@@ -1472,7 +1469,6 @@ def score_matchup_advantage(
     pitcher_hand: str | None = None,
     batter_platoon_splits: dict | None = None,
     pitcher_gb_pct: float | None = None,
-    batter_gb_rate: float | None = None,
     batter_fb_rate: float | None = None,
     pitcher_glicko_mu: float | None = None,
     batter_glicko_mu: float | None = None,
@@ -1506,8 +1502,6 @@ def score_matchup_advantage(
            "overall_k_rate", "overall_bb_rate"}``.
     pitcher_gb_pct : float | None
         Pitcher ground-ball percentage.
-    batter_gb_rate : float | None
-        Batter ground-ball rate.
     batter_fb_rate : float | None
         Batter fly-ball rate.
     pitcher_glicko_mu : float | None
@@ -1621,7 +1615,6 @@ def score_matchup_advantage(
     # ------------------------------------------------------------------
     # 8. Tier / advantage / reason
     # ------------------------------------------------------------------
-    strong_t = tiers.get("strong", 0.30)
     moderate_t = tiers.get("moderate", 0.12)
 
     if edge_score > moderate_t:

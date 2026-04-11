@@ -164,7 +164,7 @@ def plot_pitcher_location_heatmap(
         grid = _build_grid(pt_df, "pct")
 
         # Draw heatmap
-        im = ax.pcolormesh(
+        ax.pcolormesh(
             _X_EDGES, _Z_EDGES, grid,
             cmap=cmap, vmin=0, vmax=max(0.12, np.nanmax(grid)),
             shading="flat", zorder=2,
@@ -304,7 +304,7 @@ def plot_hitter_zone_grid(
 
     # Draw heatmap
     norm = mcolors.TwoSlopeNorm(vcenter=center, vmin=vmin, vmax=vmax)
-    im = ax.pcolormesh(
+    ax.pcolormesh(
         _X_EDGES, _Z_EDGES, grid,
         cmap=cmap, norm=norm, shading="flat", zorder=2,
     )

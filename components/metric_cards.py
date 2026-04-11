@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from config import GOLD, EMBER, SAGE, SLATE, CREAM, DARK, DARK_CARD, DARK_BORDER, PRIOR_SEASON
-from utils.formatters import fmt_stat
+from config import GOLD, EMBER, SAGE, SLATE
 
 
 def pctile_color(pctile: float) -> str:
@@ -51,70 +50,3 @@ def metric_card(label: str, value: str, delta_html: str = "", pctile: float | No
         f'</div>'
     )
 
-
-def pctile_bar_html(
-    label: str,
-    pctile: float,
-    ci_lo: float,
-    ci_hi: float,
-    key: str,
-    pctile_prev: float | None = None,
-) -> str:
-    """Render a percentile bar row with optional prior-season dashed reference line."""
-    color = pctile_color(pctile)
-    ci_str = f"{fmt_stat(ci_lo, key)} - {fmt_stat(ci_hi, key)}"
-
-    prev_line = ""
-    prev_label = ""
-    if pctile_prev is not None:
-        diff = pctile - pctile_prev
-        if abs(diff) >= 1:
-            arrow = "&#9650;" if diff > 0 else "&#9660;"
-            arrow_color = SAGE if diff > 0 else EMBER
-        else:
-            arrow = ""
-            arrow_color = SLATE
-        prev_line = (
-            f'<div style="position:absolute; left:{pctile_prev:.0f}%; top:0; '
-            f'height:100%; width:2px; border-left:2px dashed var(--tdd-slate); opacity:0.7; z-index:2;"></div>'
-        )
-        prev_label = (
-            f'<span style="color:{arrow_color}; font-size:0.75rem; margin-left:8px;">'
-            f'{arrow} {PRIOR_SEASON}: {pctile_prev:.0f}th</span>'
-        )
-
-    return (
-        f'<div class="pctile-bar-row">'
-        f'<div class="pctile-bar-header">'
-        f'<span class="pctile-bar-label">{label}{prev_label}</span>'
-        f'<span class="pctile-bar-detail">{pctile:.0f}th percentile | Range: {ci_str}</span>'
-        f'</div>'
-        f'<div class="pctile-bar-track">'
-        f'<div class="pctile-bar-fill-inner" style="width:{pctile:.0f}%; background:{color};"></div>'
-        f'{prev_line}'
-        f'</div>'
-        f'</div>'
-    )
-
-
-def observed_pctile_bar_html(
-    label: str,
-    pctile: float,
-    value: float,
-    key: str,
-) -> str:
-    """Render a percentile bar for an observed stat (no CI)."""
-    color = pctile_color(pctile)
-    val_str = fmt_stat(value, key)
-
-    return (
-        f'<div class="pctile-bar-row">'
-        f'<div class="pctile-bar-header">'
-        f'<span class="pctile-bar-label">{label}</span>'
-        f'<span class="pctile-bar-detail">{pctile:.0f}th percentile | {val_str}</span>'
-        f'</div>'
-        f'<div class="pctile-bar-track">'
-        f'<div class="pctile-bar-fill-inner" style="width:{pctile:.0f}%; background:{color};"></div>'
-        f'</div>'
-        f'</div>'
-    )

@@ -1,7 +1,6 @@
 """Data Health page -- Artifact freshness, inventory, and manifest validation."""
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -9,9 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from config import (
-    GOLD, SAGE, EMBER, SLATE, CREAM,
-    DARK_CARD, DARK_BORDER,
-    DASHBOARD_DIR,
+    GOLD, SAGE, EMBER, DASHBOARD_DIR,
     CURRENT_SEASON, PRIOR_SEASON, TRAIN_START, TRAIN_END,
     TRAINING_RANGE, AVAILABLE_SEASONS,
 )
