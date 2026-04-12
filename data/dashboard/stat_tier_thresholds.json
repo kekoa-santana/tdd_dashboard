@@ -4,19 +4,20 @@
     "Strong": 0.58,
     "Lean": 0.53
   },
-  "min_n_per_bucket": 90,
+  "min_n_per_bin": 25,
+  "bin_width": 0.05,
   "thresholds": {
     "batter_BB": {
-      "n_total": 71,
+      "n_total": 74,
       "Lock": null,
       "Strong": null,
       "Lean": null
     },
     "batter_H": {
-      "n_total": 1640,
+      "n_total": 1725,
       "Lock": null,
-      "Strong": 0.62,
-      "Lean": 0.5
+      "Strong": 0.65,
+      "Lean": 0.6
     },
     "batter_HR": {
       "n_total": 1,
@@ -25,55 +26,55 @@
       "Lean": null
     },
     "batter_HRR": {
-      "n_total": 813,
+      "n_total": 864,
       "Lock": null,
       "Strong": null,
       "Lean": null
     },
     "batter_K": {
-      "n_total": 214,
+      "n_total": 226,
       "Lock": null,
       "Strong": null,
       "Lean": null
     },
     "batter_R": {
-      "n_total": 318,
-      "Lock": 0.58,
-      "Strong": 0.5,
+      "n_total": 333,
+      "Lock": null,
+      "Strong": 0.6,
       "Lean": 0.5
     },
     "batter_RBI": {
-      "n_total": 106,
-      "Lock": 0.5,
-      "Strong": 0.5,
-      "Lean": 0.5
+      "n_total": 107,
+      "Lock": 0.65,
+      "Strong": 0.65,
+      "Lean": 0.65
     },
     "batter_TB": {
-      "n_total": 531,
+      "n_total": 555,
       "Lock": null,
-      "Strong": 0.59,
-      "Lean": 0.5
+      "Strong": 0.6,
+      "Lean": 0.55
     },
     "pitcher_BB": {
-      "n_total": 54,
+      "n_total": 59,
       "Lock": null,
       "Strong": null,
       "Lean": null
     },
     "pitcher_H": {
-      "n_total": 66,
+      "n_total": 71,
       "Lock": null,
       "Strong": null,
       "Lean": null
     },
     "pitcher_K": {
-      "n_total": 171,
+      "n_total": 179,
       "Lock": null,
       "Strong": null,
       "Lean": null
     },
     "pitcher_Outs": {
-      "n_total": 6,
+      "n_total": 13,
       "Lock": null,
       "Strong": null,
       "Lean": null
