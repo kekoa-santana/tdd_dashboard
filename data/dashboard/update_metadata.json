@@ -1,6 +1,6 @@
 {
   "last_updated": "2026-04-11T18:26:10.758133",
-  "game_date": "2026-04-11",
+  "game_date": "2026-04-12",
   "season": 2026,
   "hitters_updated": 477,
   "pitchers_updated": 571,
@@ -13,5 +13,5 @@
   "hitter_trad_count": 414,
   "pitcher_trad_count": 447,
   "weekly_refresh": false,
-  "last_schedule_refresh": "2026-04-11T23:30:12.413377"
+  "last_schedule_refresh": "2026-04-12T00:00:08.993481"
 }
