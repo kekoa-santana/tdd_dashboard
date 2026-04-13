@@ -28,50 +28,13 @@ from components.headshot import headshot_html
 from lib.fantasy_report import load_report_data, get_pitcher_scouting, ReportData
 
 
+from components.scouting import render_scouting_html as _render_scouting_html
+
+
 @st.cache_data(ttl=300)
 def _get_scouting_report_data() -> ReportData:
     """Load scouting report data (cached 5 min)."""
     return load_report_data(DASHBOARD_DIR)
-
-
-def _render_scouting_html(report) -> None:
-    """Render a PitcherReport's scouting bullets as styled HTML."""
-
-    sections = [
-        ("ADVANTAGES", SAGE, report.advantages),
-        ("STRUGGLES", EMBER, report.struggles),
-        ("BATTERS TO WATCH", GOLD, report.key_batters),
-        ("BATTERS WHO WILL STRUGGLE", SLATE, report.struggling_batters),
-        ("BULLPEN", SLATE, report.bullpen_notes),
-        (f"{report.opp_abbr} BATTING OUTLOOK", GOLD, report.batting_outlook),
-    ]
-
-    all_bullets = []
-    for title, color, bullets in sections:
-        if not bullets:
-            continue
-        bullet_html = "".join(
-            f'<li style="margin-bottom:0.25rem;">{b}</li>' for b in bullets
-        )
-        all_bullets.append(
-            f'<div style="color:{color}; font-weight:600; font-size:0.7rem; '
-            f'letter-spacing:0.5px; margin-bottom:0.2rem; margin-top:0.4rem;">'
-            f'{title}</div>'
-            f'<ul style="margin:0; padding-left:1.2rem; '
-            f'color:var(--tdd-cream);">{bullet_html}</ul>'
-        )
-
-    if all_bullets:
-        st.markdown(
-            f'<div style="margin:0.5rem 0 1rem; padding:0.6rem 0.8rem; '
-            f'border-left:2px solid {GOLD}; font-size:0.82rem; '
-            f'color:var(--tdd-cream);">'
-            f'<div style="color:{GOLD}; font-weight:600; '
-            f'font-size:0.75rem; letter-spacing:0.5px; margin-bottom:0.3rem;">'
-            f'SCOUTING REPORT</div>'
-            f'{"".join(all_bullets)}</div>',
-            unsafe_allow_html=True,
-        )
 
 
 def _detect_lineup_changes(
@@ -545,7 +508,18 @@ def _render_schedule_cards(
 
         st.markdown(card_html, unsafe_allow_html=True)
 
-        if st.toggle("Matchups & Projections", key=f"expand_{gpk}", value=False):
+        _toggle_col, _link_col = st.columns([3, 1])
+        with _link_col:
+            st.markdown(
+                f'<a href="?page=game_analysis&game_pk={gpk}" target="_self" '
+                f'style="color:var(--tdd-gold); font-size:0.78rem; '
+                f'text-decoration:none; float:right;">Full Analysis &#8594;</a>',
+                unsafe_allow_html=True,
+            )
+        with _toggle_col:
+            _expanded = st.toggle("Matchups & Projections", key=f"expand_{gpk}", value=False)
+
+        if _expanded:
             _dd = _get_drilldown_data()
             _render_game_drilldown(
                 game, lineups, _h_arch_lookup, _p_arch_lookup, _h_stat_lookup,
@@ -903,138 +877,11 @@ def _render_game_drilldown(
         )
 
 
-_PITCHER_STAT_META = {
-    "k":    {"label": "K",    "xlabel": "Pitcher Strikeouts", "color": SAGE,  "lines": (3.5, 10.5), "hi": 6, "vhi": 8},
-    "bb":   {"label": "BB",   "xlabel": "Walks Issued",      "color": EMBER, "lines": (1.5, 5.5),  "hi": 3, "vhi": 4},
-    "h":    {"label": "H",    "xlabel": "Hits Allowed",      "color": SLATE, "lines": (3.5, 9.5),  "hi": 6, "vhi": 8},
-    "hr":   {"label": "HR",   "xlabel": "Home Runs Allowed", "color": GOLD,  "lines": (0.5, 2.5),  "hi": 1, "vhi": 2},
-    "outs": {"label": "Outs", "xlabel": "Outs Recorded",     "color": SLATE, "lines": (11.5, 21.5), "hi": 17, "vhi": 20},
-}
-
-_BATTER_STAT_META = {
-    "k":  {"label": "K",  "xlabel": "Batter Strikeouts", "color": EMBER, "lines": (0.5, 3.5), "hi": 2, "vhi": 3},
-    "bb": {"label": "BB", "xlabel": "Batter Walks",      "color": SAGE,  "lines": (0.5, 2.5), "hi": 1, "vhi": 2},
-    "h":  {"label": "H",  "xlabel": "Batter Hits",       "color": SAGE,  "lines": (0.5, 3.5), "hi": 2, "vhi": 3},
-    "hr": {"label": "HR", "xlabel": "Batter Home Runs",  "color": GOLD,  "lines": (0.5, 1.5), "hi": 1, "vhi": 2},
-}
-
-
-@st.fragment
-def _render_player_sim(
-    samples_dict: dict[str, np.ndarray],
-    stat_meta: dict[str, dict],
-    stat_options: list[str],
-    widget_key: str,
-) -> None:
-    """Render sim distribution chart + notes for one player.
-
-    This is a nested fragment so that stat/line changes only rerun this
-    player's chart, not the entire lineup.
-    """
-    import plotly.graph_objects as go
-
-    tb_stat, tb_line, _ = st.columns([1, 2, 3])
-    with tb_stat:
-        stat_label = st.selectbox(
-            "Stat", stat_options,
-            key=f"psim_stat_{widget_key}", label_visibility="collapsed",
-        )
-    stat_key = stat_label.lower()
-    stat_samples = samples_dict[stat_key]
-    meta = stat_meta[stat_key]
-
-    lo, hi = meta["lines"]
-    line_opts = [x + 0.5 for x in range(int(lo - 0.5), int(hi - 0.5) + 1)]
-    line_labels = [f"Over {v:.1f}" for v in line_opts]
-    _mean = float(np.mean(stat_samples))
-    _default_idx = 0
-    for i, v in enumerate(line_opts):
-        if v <= _mean:
-            _default_idx = i
-    with tb_line:
-        sel_line = st.selectbox(
-            "Line", line_labels, index=_default_idx,
-            key=f"psim_line_{widget_key}", label_visibility="collapsed",
-        )
-    threshold = line_opts[line_labels.index(sel_line)]
-
-    p_over = float(np.mean(stat_samples > threshold))
-    p_under = 1.0 - p_over
-
-    if p_over > 0.65:
-        signal, sig_color = "Strong Over", SAGE
-    elif p_over > 0.55:
-        signal, sig_color = "Lean Over", SAGE
-    elif p_over < 0.35:
-        signal, sig_color = "Strong Under", EMBER
-    elif p_over < 0.45:
-        signal, sig_color = "Lean Under", EMBER
-    else:
-        signal, sig_color = "Toss-up", SLATE
-
-    bar_color = meta.get("color", SAGE)
-    max_val = int(stat_samples.max()) + 1
-    bins = np.arange(0, max_val + 2)
-    counts, _ = np.histogram(stat_samples, bins=bins - 0.5, density=True)
-    over_counts = np.where(bins[:-1] > threshold, counts, 0)
-    under_counts = np.where(bins[:-1] <= threshold, counts, 0)
-
-    pfig = go.Figure()
-    pfig.add_trace(go.Bar(
-        x=bins[:-1], y=under_counts, name="Under",
-        marker_color="rgba(123,143,166,0.53)", width=0.85,
-        hovertemplate="%{x} " + meta["label"] + ": %{y:.1%}<extra></extra>",
-    ))
-    pfig.add_trace(go.Bar(
-        x=bins[:-1], y=over_counts, name="Over",
-        marker_color=bar_color, width=0.85,
-        hovertemplate="%{x} " + meta["label"] + ": %{y:.1%}<extra></extra>",
-    ))
-    pfig.add_vline(
-        x=threshold, line_dash="dash", line_color=GOLD, line_width=2,
-        annotation_text=f"P(Over {threshold:.1f}) = {p_over:.1%}",
-        annotation_position="top left",
-        annotation_font=dict(color=GOLD, size=12),
-    )
-    pfig.update_layout(
-        barmode="stack", showlegend=False, dragmode=False,
-        xaxis_title=meta.get("xlabel", meta["label"]), yaxis_title="",
-        yaxis=dict(showticklabels=False, showgrid=False, fixedrange=True),
-        xaxis=dict(dtick=1, gridcolor="rgba(0,0,0,0)", fixedrange=True, rangemode="nonnegative"),
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color=CREAM),
-        margin=dict(l=10, r=10, t=30, b=40),
-        height=260,
-    )
-    st.plotly_chart(pfig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
-
-    mean_val = float(np.mean(stat_samples))
-    std_val = float(np.std(stat_samples))
-    p_hi = float((stat_samples >= meta["hi"]).sum() / len(stat_samples) * 100)
-    p_vhi = float((stat_samples >= meta["vhi"]).sum() / len(stat_samples) * 100)
-
-    st.markdown(
-        f'<div style="display:flex; align-items:center; gap:1rem; margin:0.5rem 0;">'
-        f'<span style="background:{sig_color}22; color:{sig_color}; '
-        f'border:1px solid {sig_color}44; padding:3px 10px; border-radius:12px; '
-        f'font-size:0.82rem; font-weight:700;">{signal}</span>'
-        f'<span style="color:var(--tdd-cream); font-size:1rem; font-weight:700;">'
-        f'{p_over:.1%}</span>'
-        f'<span style="color:var(--tdd-slate); font-size:0.75rem;">'
-        f'Over {threshold:.1f}</span>'
-        f'<span style="color:var(--tdd-cream); font-size:1rem; font-weight:700;">'
-        f'{p_under:.1%}</span>'
-        f'<span style="color:var(--tdd-slate); font-size:0.75rem;">'
-        f'Under {threshold:.1f}</span>'
-        f'</div>'
-        f'<div style="color:var(--tdd-slate); font-size:0.78rem; margin-top:0.3rem;">'
-        f'E[{meta["label"]}] {mean_val:.1f} (\u00b1{std_val:.1f})'
-        f' | {p_hi:.0f}% chance {meta["hi"]}+'
-        f' | {p_vhi:.0f}% chance {meta["vhi"]}+'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
+from components.sim_chart import (
+    PITCHER_STAT_META as _PITCHER_STAT_META,
+    BATTER_STAT_META as _BATTER_STAT_META,
+    render_player_sim as _render_player_sim,
+)
 
 
 def _render_matchup_tab_sidebyside(
@@ -1069,93 +916,12 @@ def _render_matchup_tab_sidebyside(
             )
 
 
-def _grade_color(grade: int) -> str:
-    """Return color for a 20-80 scouting grade."""
-    if grade >= 70:
-        return "var(--tdd-gold)"
-    if grade >= 55:
-        return "var(--tdd-sage)"
-    if grade >= 45:
-        return "var(--tdd-cream)"
-    return "var(--tdd-slate)"
-
-
-def _hitter_grades_html(stats: dict) -> str:
-    """Compact grade chips for a hitter: Con/Pow/Spd/Disc/Fld with CI ranges."""
-    labels = [
-        ("Con", "grade_hit"), ("Pow", "grade_power"), ("Spd", "grade_speed"),
-        ("Disc", "grade_discipline"), ("Fld", "grade_fielding"),
-    ]
-    parts = []
-    for abbr, key in labels:
-        v = stats.get(key)
-        if v is not None:
-            c = _grade_color(v)
-            lo = stats.get(f"{key}_lo")
-            hi = stats.get(f"{key}_hi")
-            ci_html = ""
-            if lo is not None and hi is not None:
-                ci_html = (
-                    f'<span style="color:var(--tdd-slate); font-size:0.55rem; '
-                    f'opacity:0.7; margin-left:1px;">({lo}-{hi})</span>'
-                )
-            parts.append(f'<span style="color:{c};">{abbr} {v}{ci_html}</span>')
-    if not parts:
-        return ""
-    return (
-        f'<span style="font-size:0.65rem; letter-spacing:0.3px; '
-        f'display:inline-flex; gap:0.4rem;">'
-        + "".join(parts) + '</span>'
-    )
-
-
-def _pitcher_grades_html(proj: dict) -> str:
-    """Compact grade chips for a pitcher: Stuff/Cmd/Dur with CI ranges."""
-    labels = [
-        ("Stuff", "grade_stuff"), ("Cmd", "grade_command"), ("Dur", "grade_durability"),
-    ]
-    parts = []
-    for abbr, key in labels:
-        v = proj.get(key)
-        if v is not None:
-            c = _grade_color(v)
-            lo = proj.get(f"{key}_lo")
-            hi = proj.get(f"{key}_hi")
-            ci_html = ""
-            if lo is not None and hi is not None:
-                ci_html = (
-                    f'<span style="color:var(--tdd-slate); font-size:0.55rem; '
-                    f'opacity:0.7; margin-left:1px;">({lo}-{hi})</span>'
-                )
-            parts.append(f'<span style="color:{c};">{abbr} {v}{ci_html}</span>')
-    if not parts:
-        return ""
-    return (
-        f'<span style="font-size:0.65rem; letter-spacing:0.3px; '
-        f'display:inline-flex; gap:0.4rem;">'
-        + "".join(parts) + '</span>'
-    )
-
-
-def _matchup_lift_badge_html(k_lift: float, bb_lift: float, hr_lift: float) -> str:
-    """Compact matchup badge from precomputed lift values."""
-    # Positive k_lift = pitcher advantage (more K), negative = hitter advantage
-    net = k_lift - 0.5 * bb_lift - 0.5 * hr_lift
-    if net > 0.03:
-        color_var, label = "--tdd-ember", "Pitcher"
-    elif net < -0.03:
-        color_var, label = "--tdd-sage", "Hitter"
-    else:
-        return (
-            f'<span style="color:var(--tdd-slate); font-size:0.68rem; '
-            f'margin-left:0.3rem;">Even</span>'
-        )
-    return (
-        f'<span style="color:var({color_var}); font-size:0.68rem; '
-        f'font-weight:600; margin-left:0.3rem;">{label} '
-        f'<span style="font-weight:400; font-size:0.62rem;">'
-        f'K {k_lift:+.2f}</span></span>'
-    )
+from components.grades import (
+    grade_color as _grade_color,
+    hitter_grades_html as _hitter_grades_html,
+    pitcher_grades_html as _pitcher_grades_html,
+    matchup_lift_badge_html as _matchup_lift_badge_html,
+)
 
 
 def _render_matchup_tab(
@@ -1185,7 +951,7 @@ def _render_matchup_tab(
     All sim results and matchup lifts come from precomputed data -- no live
     Monte Carlo or matchup scoring runs at render time.
     """
-    from components.scouting import build_matchup_scouting_bullets
+    from components.scouting import build_matchup_scouting_bullets, compute_matchup_xwoba_edge
 
     if pos_lookup is None:
         pos_lookup = {}
@@ -1330,22 +1096,12 @@ def _render_matchup_tab(
                 # Rich HTML detail
                 detail_parts: list[str] = []
 
-                # Headshot + diamond + matchup badge
-                composite = stats.get("tdd_value_score")
-                _top_parts = []
-                if bid:
-                    _top_parts.append(headshot_html(bid, size=32))
-                if pd.notna(composite):
-                    _top_parts.append(diamond_rating_html(0, size="sm", precomputed=composite))
-                if abs(k_lift) > 0.01 or abs(bb_lift) > 0.01:
-                    _top_parts.append(_matchup_lift_badge_html(k_lift, bb_lift, hr_lift))
-                if _top_parts:
-                    detail_parts.append(
-                        f'<div style="display:flex; align-items:center; gap:0.5rem;">'
-                        + "".join(_top_parts) + '</div>'
-                    )
-
-                # Scouting bullets
+                # Matchup edge via odds-ratio xwOBA
+                _advantage_badge = ""
+                _p_arsenal = pd.DataFrame()
+                _h_vuln = pd.DataFrame()
+                _h_str = pd.DataFrame()
+                _pitcher_hand = None
                 if matchup_pid and bid and not arsenal_df.empty and not vuln_df.empty:
                     _p_arsenal = arsenal_df[arsenal_df["pitcher_id"] == matchup_pid]
                     _h_vuln = vuln_df[vuln_df["batter_id"] == bid]
@@ -1354,16 +1110,70 @@ def _render_matchup_tab(
                         if str_df is not None and not str_df.empty
                         else pd.DataFrame()
                     )
+                    if not _p_arsenal.empty and "pitch_hand" in _p_arsenal.columns:
+                        _pitcher_hand = str(_p_arsenal["pitch_hand"].iloc[0])
+                    _batter_hand = hand_letter or None
+
+                    if not _p_arsenal.empty and not _h_vuln.empty:
+                        _edge_result = compute_matchup_xwoba_edge(
+                            _p_arsenal, _h_vuln, _h_str,
+                            pitcher_hand=_pitcher_hand,
+                            batter_hand=_batter_hand,
+                        )
+                        _adv_label = _edge_result["advantage"]
+                        _edge_val = _edge_result["edge"]
+                        _xw = _edge_result["matchup_xwoba"]
+                        if _adv_label == "pitcher":
+                            _advantage_badge = (
+                                f'<span style="color:var(--tdd-ember); font-size:0.68rem; '
+                                f'font-weight:600; margin-left:0.3rem;">Pitcher Edge'
+                                f'<span style="font-weight:400; font-size:0.6rem; '
+                                f'margin-left:0.2rem;">.{int(_xw*1000):03d} xwOBA</span></span>'
+                            )
+                        elif _adv_label == "hitter":
+                            _advantage_badge = (
+                                f'<span style="color:var(--tdd-sage); font-size:0.68rem; '
+                                f'font-weight:600; margin-left:0.3rem;">Hitter Edge'
+                                f'<span style="font-weight:400; font-size:0.6rem; '
+                                f'margin-left:0.2rem;">.{int(_xw*1000):03d} xwOBA</span></span>'
+                            )
+                        else:
+                            _advantage_badge = (
+                                f'<span style="color:var(--tdd-slate); font-size:0.68rem; '
+                                f'margin-left:0.3rem;">Even'
+                                f'<span style="font-weight:400; font-size:0.6rem; '
+                                f'margin-left:0.2rem;">.{int(_xw*1000):03d} xwOBA</span></span>'
+                            )
+
+                # Headshot + diamond + matchup badge
+                composite = stats.get("tdd_value_score")
+                _top_parts = []
+                if bid:
+                    _top_parts.append(headshot_html(bid, size=32))
+                if pd.notna(composite):
+                    _top_parts.append(diamond_rating_html(0, size="sm", precomputed=composite))
+                if _advantage_badge:
+                    _top_parts.append(_advantage_badge)
+                if _top_parts:
+                    detail_parts.append(
+                        f'<div style="display:flex; align-items:center; gap:0.5rem;">'
+                        + "".join(_top_parts) + '</div>'
+                    )
+
+                # Scouting bullets (descriptive + platoon info)
+                if not _p_arsenal.empty and not _h_vuln.empty:
                     _opp_pname = opp_side["pitcher_name"] if opp_side else pitcher_name
-                    bullets = build_matchup_scouting_bullets(
+                    _scouting_bullets = build_matchup_scouting_bullets(
                         _p_arsenal, _h_vuln, _h_str,
                         pitcher_name=_opp_pname, hitter_name=bname,
+                        pitcher_hand=_pitcher_hand,
+                        batter_hand=hand_letter or None,
                     )
-                    if bullets:
+                    if _scouting_bullets:
                         bullet_html = "".join(
                             f'<div style="color:{c}; font-size:0.78rem; margin:0.12rem 0; '
                             f'padding-left:0.65rem; border-left:2px solid {c};">{t}</div>'
-                            for c, t in bullets[:3]
+                            for c, t in _scouting_bullets[:4]
                         )
                         detail_parts.append(bullet_html)
 

@@ -450,7 +450,7 @@ def _generate_struggles(
             f"Command is a concern at {bb_rate_proj:.1%} BB rate -- "
             f"walks will put runners on and drive up his pitch count",
             f"{pitcher_name} has {_control_desc(bb_rate_proj)} and projects "
-            f"for {exp_bb:.1f} walks today",
+            f"for {exp_bb:.0f} walks today",
         ]
         bullets.append(random.choice(templates))
 
@@ -535,10 +535,10 @@ def _generate_advantages(
     if k_rate >= 0.25:
         templates = [
             f"{pitcher_name} is {_k_rate_desc(k_rate)} -- {k_rate:.1%} K rate "
-            f"with {expected_k:.1f} projected punchouts today",
+            f"with {expected_k:.0f} projected punchouts today",
             f"The strikeout upside is real: {k_rate:.1%} K rate translates "
-            f"to {expected_k:.1f} projected Ks",
-            f"Big K upside: {pitcher_name} projects for {expected_k:.1f} Ks "
+            f"to {expected_k:.0f} projected Ks",
+            f"Big K upside: {pitcher_name} projects for {expected_k:.0f} Ks "
             f"on a {k_rate:.1%} strikeout rate",
         ]
         bullets.append(random.choice(templates))
@@ -623,16 +623,7 @@ def _generate_advantages(
                 ]
                 bullets.append(random.choice(templates))
 
-    # 5. Low HR risk
-    if expected_hr < 0.5:
-        templates = [
-            f"Low damage risk with only {expected_hr:.1f} HR projected "
-            f"-- he keeps the ball in the yard",
-            f"The long ball shouldn't be a factor ({expected_hr:.1f} HR projected)",
-        ]
-        bullets.append(random.choice(templates))
-
-    # 6. Many batters are K-vulnerable
+    # 5. Many batters are K-vulnerable
     if not batter_sims.empty and "matchup_k_lift" in batter_sims.columns:
         k_vuln = batter_sims[batter_sims["matchup_k_lift"] > 0.04]
         n_vuln = len(k_vuln)
@@ -718,8 +709,6 @@ def _classify_batters(
                         f"{_damage_desc(b_xwoba)} vs the {primary_name} "
                         f"(.{int(b_xwoba * 1000):03d} xwOBA)"
                     )
-                elif hr_lift > 0.03:
-                    reason = "has HR upside in this matchup"
                 elif k_lift < -0.04:
                     reason = f"tough to strike out with this arsenal"
                 elif bb_lift > 0.03:
@@ -835,19 +824,12 @@ def _generate_bullpen_notes(
             ]
             bullets.append(random.choice(templates))
 
-        # HR-prone bullpen
-        if bp_hr > 0.032:
-            bullets.append(
-                f"The pen gives up dingers ({bp_hr:.1%} HR rate) -- "
-                f"danger zone if the game goes to the relievers"
-            )
-
         # Short outing + bad pen compound
         if expected_ip < 5.0 and bp_k < 0.23:
             templates = [
-                f"Short leash expected ({expected_ip:.1f} IP projected) "
+                f"Short leash expected ({expected_ip:.0f} IP projected) "
                 f"and {_bullpen_quality(bp_k)} behind him -- risky combo",
-                f"Only {expected_ip:.1f} IP projected, handing the ball to "
+                f"Only {expected_ip:.0f} IP projected, handing the ball to "
                 f"a pen that doesn't miss bats -- proceed with caution",
             ]
             bullets.append(random.choice(templates))
@@ -927,7 +909,7 @@ def _generate_batting_outlook(
     # Short outing + weak bullpen -- late-game opportunity
     if short_outing and weak_pen and not (tough_starter and weak_pen):
         templates = [
-            f"{pitcher_name} is on a short leash ({expected_ip:.1f} IP "
+            f"{pitcher_name} is on a short leash ({expected_ip:.0f} IP "
             f"projected) and {pitcher_team_abbr}'s pen is hittable "
             f"({bp_k:.1%} K rate) -- late innings could open up for "
             f"{opp_team_abbr}",
@@ -936,14 +918,6 @@ def _generate_batting_outlook(
             f"won't shut the door",
         ]
         bullets.append(random.choice(templates))
-
-    # HR-prone pen -- power hitters lick their chops
-    if hr_pen and not strong_pen:
-        bullets.append(
-            f"{pitcher_team_abbr}'s pen gives up dingers "
-            f"({bp_hr:.1%} HR rate) -- {opp_team_abbr}'s power bats "
-            f"could do damage late"
-        )
 
     # Walk-heavy pen -- free baserunners
     if walky_pen and not strong_pen and len(bullets) < 2:
@@ -1087,11 +1061,11 @@ def _format_pitcher_section(report: PitcherReport) -> list[str]:
     # Quick stat line
     parts = []
     if report.expected_k > 0:
-        parts.append(f"{report.expected_k:.1f} K")
+        parts.append(f"{report.expected_k:.0f} K")
     if report.expected_ip > 0:
-        parts.append(f"{report.expected_ip:.1f} IP")
+        parts.append(f"{report.expected_ip:.0f} IP")
     if report.expected_bb > 0:
-        parts.append(f"{report.expected_bb:.1f} BB")
+        parts.append(f"{report.expected_bb:.0f} BB")
     if report.dk_mean > 0:
         parts.append(f"{report.dk_mean:.1f} DK pts")
     if report.archetype:

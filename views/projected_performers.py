@@ -9,7 +9,7 @@ import streamlit as st
 from config import GOLD, SAGE, EMBER, SLATE, CREAM
 from services.data_loader import (
     load_projections, load_game_props, load_dk_props, load_pp_props,
-    load_todays_games, fetch_live_schedule,
+    load_todays_games, fetch_live_schedule, load_stat_tier_thresholds,
 )
 from components.headshot import headshot_html
 from utils.helpers import format_game_time
@@ -55,12 +55,22 @@ _HITTER_STAT_LABELS = {
 # Display order for stat leaderboards
 _STAT_ORDER = ["K", "H", "HR", "TB", "HRR", "BB", "R", "RBI", "Outs"]
 
-_CONFIDENCE_BUCKETS = {
-    "All": 0.0,
-    "Super High (75%+)": 0.75,
-    "High (63%+)": 0.63,
-    "Medium (55%+)": 0.55,
-    "Low (<55%)": -1.0,
+_CONFIDENCE_TIER_ORDER = ["Lock", "Strong", "Lean", "Pass"]
+
+_TIER_COLORS = {
+    "Lock":   SAGE,
+    "Strong": GOLD,
+    "Lean":   SLATE,
+    "Pass":   EMBER,
+}
+
+# Filter dropdown options -- maps label -> set of tiers to include.
+_TIER_FILTER_OPTIONS: dict[str, tuple[str, ...] | None] = {
+    "All tiers":  None,
+    "Lock only":  ("Lock",),
+    "Strong+":    ("Lock", "Strong"),
+    "Lean+":      ("Lock", "Strong", "Lean"),
+    "Pass only":  ("Pass",),
 }
 
 _TIER_OPTIONS = {
@@ -129,6 +139,31 @@ def _p_color(model_p: float) -> str:
     if model_p >= 0.63:
         return GOLD
     return SLATE
+
+
+def _confidence_tier(
+    thresholds: dict,
+    player_type: str,
+    stat: str,
+    model_p: float,
+) -> str:
+    """Return Lock / Strong / Lean / Pass for a (stat, model_p) pair.
+
+    Uses per-stat calibration thresholds built by build_prop_calibration.py.
+    A pick qualifies for a tier if its confidence (= max(p, 1-p)) meets the
+    stat's calibrated threshold for that tier. Unknown stats or stats whose
+    thresholds are all None default to Pass so users can see the model is
+    overconfident on that stat.
+    """
+    confidence = max(model_p, 1 - model_p)
+    lookup = thresholds.get("thresholds", {}).get(f"{player_type}_{stat}")
+    if not lookup:
+        return "Pass"
+    for tier in ("Lock", "Strong", "Lean"):
+        thr = lookup.get(tier)
+        if thr is not None and confidence >= thr:
+            return tier
+    return "Pass"
 
 
 def _today_et() -> str:
@@ -220,6 +255,18 @@ def _build_all_picks(props: pd.DataFrame) -> pd.DataFrame:
         keep="first",
     )
 
+    # Per-stat calibrated confidence tier (Lock/Strong/Lean/Pass)
+    thresholds = load_stat_tier_thresholds()
+    combined["conf_tier"] = combined.apply(
+        lambda r: _confidence_tier(
+            thresholds,
+            r.get("player_type", ""),
+            r.get("stat", ""),
+            float(r["model_p"]),
+        ),
+        axis=1,
+    )
+
     return combined
 
 
@@ -264,13 +311,23 @@ def _render_stat_leaderboard(
         rank_class = "lb-rank lb-rank-top" if i <= 3 else "lb-rank"
         hs = headshot_html(pid, size=32)
 
-        # Tier badge
+        # Line-type badge (Market / Floor / Reach)
         tier = row.get("tier", "standard")
         tier_label, tier_color = _TIER_BADGE.get(tier, ("", SLATE))
         tier_html = (
             f'<span style="background:{tier_color}22; color:{tier_color}; '
             f'font-size:0.6rem; font-weight:700; padding:1px 4px; '
             f'border-radius:3px; white-space:nowrap;">{tier_label}</span>'
+        )
+
+        # Confidence tier badge (Lock / Strong / Lean / Pass, per-stat calibrated)
+        conf_tier = row.get("conf_tier", "Pass")
+        conf_color = _TIER_COLORS.get(conf_tier, SLATE)
+        conf_tier_html = (
+            f'<span style="background:{conf_color}22; color:{conf_color}; '
+            f'font-size:0.6rem; font-weight:700; padding:1px 4px; '
+            f'border-radius:3px; white-space:nowrap; margin-left:0.15rem;">'
+            f'{conf_tier}</span>'
         )
 
         # Edge info (market lines only)
@@ -302,6 +359,7 @@ def _render_stat_leaderboard(
             f'padding:0 0.2rem; margin-right:0.2rem;">{type_badge}</span>'
             f'<span class="lb-name" style="font-size:0.85rem;">{name}</span>'
             f'{matchup_html}'
+            f'{conf_tier_html}'
             f'{tier_html}'
             f'<span style="color:{CREAM}; font-size:0.75rem; '
             f'white-space:nowrap; margin-left:auto;">O {line_str}</span>'
@@ -483,7 +541,7 @@ def page_projected_performers() -> None:
         )
     with col_conf:
         conf_choice = st.selectbox(
-            "Confidence", list(_CONFIDENCE_BUCKETS.keys()),
+            "Confidence Tier", list(_TIER_FILTER_OPTIONS.keys()),
             index=0, key="lab_conf", label_visibility="collapsed",
         )
     with col_tier:
@@ -506,12 +564,10 @@ def page_projected_performers() -> None:
     elif type_choice == "Hitters":
         filtered = filtered[filtered["player_type"] != "pitcher"]
 
-    # Confidence filter
-    conf_threshold = _CONFIDENCE_BUCKETS[conf_choice]
-    if conf_threshold == -1.0:
-        filtered = filtered[filtered["model_p"] < 0.55]
-    elif conf_threshold > 0:
-        filtered = filtered[filtered["model_p"] >= conf_threshold]
+    # Confidence tier filter (per-stat calibrated)
+    tier_include = _TIER_FILTER_OPTIONS[conf_choice]
+    if tier_include is not None:
+        filtered = filtered[filtered["conf_tier"].isin(tier_include)]
 
     # Tier filter
     tier_key = _TIER_OPTIONS[tier_choice]
@@ -553,6 +609,18 @@ def page_projected_performers() -> None:
                 boards.append((s, h_picks.sort_values("model_p", ascending=False)))
         else:
             boards.append((s, s_picks.sort_values("model_p", ascending=False)))
+
+    # Sort each board by tier rank, then by model confidence
+    _tier_rank = {t: i for i, t in enumerate(_CONFIDENCE_TIER_ORDER)}
+    boards = [
+        (
+            s,
+            df.assign(_tier_rank=df["conf_tier"].map(_tier_rank).fillna(99))
+            .sort_values(["_tier_rank", "model_p"], ascending=[True, False])
+            .drop(columns="_tier_rank"),
+        )
+        for s, df in boards
+    ]
 
     # Render in rows of 3 with padding between columns
     for row_start in range(0, len(boards), 3):

@@ -834,15 +834,6 @@ def run_schedule_refresh(game_date: str) -> bool:
         sim_df.to_parquet(DASHBOARD_DIR / "todays_sims.parquet", index=False)
         logger.info("Saved game simulations for %d pitcher appearances", len(sim_df))
 
-        # Save raw sample arrays so the dashboard can render distributions
-        # without re-running Monte Carlo at render time.
-        if sim_sample_arrays:
-            np.savez_compressed(
-                DASHBOARD_DIR / "pitcher_game_sim_samples.npz",
-                **sim_sample_arrays,
-            )
-            logger.info("Saved pitcher game sim sample arrays (%d keys)", len(sim_sample_arrays))
-
         n_api = (sim_df["lineup_source"] == "api").sum()
         n_dc = (sim_df["lineup_source"] == "depth_chart").sum()
         n_none = (sim_df["lineup_source"] == "none").sum()
@@ -1143,7 +1134,6 @@ def run_batter_sims(game_date: str) -> None:
 
     logger.info("Running batter sims for %d lineup batters...", len(lineups))
     results = []
-    batter_sample_arrays: dict[str, np.ndarray] = {}
     skipped = 0
 
     for _, brow in lineups.iterrows():
@@ -1216,13 +1206,6 @@ def run_batter_sims(game_date: str) -> None:
             random_seed=42 + gpk + bid,
         )
 
-        # Stash raw sample arrays for dashboard render
-        _bsim_key = f"{gpk}_{bid}"
-        batter_sample_arrays[f"{_bsim_key}_k"] = sim_result.k_samples.astype(np.float32)
-        batter_sample_arrays[f"{_bsim_key}_bb"] = sim_result.bb_samples.astype(np.float32)
-        batter_sample_arrays[f"{_bsim_key}_h"] = sim_result.h_samples.astype(np.float32)
-        batter_sample_arrays[f"{_bsim_key}_hr"] = sim_result.hr_samples.astype(np.float32)
-
         summary = sim_result.summary()
 
         # Prop lines
@@ -1269,13 +1252,6 @@ def run_batter_sims(game_date: str) -> None:
         df.to_parquet(DASHBOARD_DIR / "todays_batter_sims.parquet", index=False)
         logger.info("Saved batter sims: %d batters (%d skipped, no samples)",
                      len(df), skipped)
-
-        if batter_sample_arrays:
-            np.savez_compressed(
-                DASHBOARD_DIR / "batter_game_sim_samples.npz",
-                **batter_sample_arrays,
-            )
-            logger.info("Saved batter game sim sample arrays (%d keys)", len(batter_sample_arrays))
     else:
         logger.warning("No batter sims produced (%d skipped)", skipped)
 
