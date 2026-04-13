@@ -45,6 +45,7 @@ from views.lineup_creator import page_lineup_creator  # noqa: E402
 from views.methodology import page_methodology  # noqa: E402
 from views.projected_performers import page_projected_performers  # noqa: E402
 from views.daily_preview import page_daily_preview  # noqa: E402
+from views.game import page_game  # noqa: E402
 
 # Apply dark matplotlib theme at import time
 apply_dark_mpl()
@@ -274,13 +275,14 @@ PAGES = {
     "Daily Preview": page_daily_preview,
     "Props Lab": page_projected_performers,
     "Methodology": page_methodology,
+    "Game Analysis": page_game,
 }
 
 PAGE_URL_MAP = {name.lower().replace(" ", "_"): name for name in PAGES}
 
 # Nav structure: standalone items + dropdown groups
 _NAV = [
-    ("Games", ["Schedule", "Daily Preview", "Props Lab"]),
+    ("Games", ["Schedule", "Game Analysis", "Daily Preview", "Props Lab"]),
     ("Players", [
         "Player Profile", "Player Rankings", "Stats",
         "Projections", "Breakout Candidates",

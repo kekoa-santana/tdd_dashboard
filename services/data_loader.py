@@ -170,6 +170,29 @@ def load_matchup_baselines() -> dict:
         return json.load(f)
 
 
+@st.cache_data(ttl=_DATA_TTL)
+def load_stat_tier_thresholds() -> dict:
+    """Per-(player_type, stat) confidence thresholds for Lock/Strong/Lean tiers.
+
+    Built by scripts/build_prop_calibration.py from the prop backtest log.
+    Structure:
+        {
+          "tier_targets": {"Lock": 0.65, "Strong": 0.58, "Lean": 0.53},
+          "min_n_per_bucket": int,
+          "thresholds": {
+            "batter_H": {"n_total": int, "Lock": None, "Strong": 0.62, "Lean": 0.50},
+            ...
+          }
+        }
+    Stats whose tier value is None did not clear that tier in backtest.
+    """
+    path = DASHBOARD_DIR / "stat_tier_thresholds.json"
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def load_counting(player_type: str) -> pd.DataFrame:
     # Prefer sim-based counting stats (correlated joint distributions)
     sim_path = DASHBOARD_DIR / f"{player_type}_counting_sim.parquet"
@@ -293,6 +316,14 @@ def load_todays_batter_sims() -> pd.DataFrame:
 @st.cache_data(ttl=_DATA_TTL)
 def load_game_props() -> pd.DataFrame:
     path = DASHBOARD_DIR / "game_props.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_game_predictions() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "todays_game_predictions.parquet"
     if not path.exists():
         return pd.DataFrame()
     return pd.read_parquet(path)

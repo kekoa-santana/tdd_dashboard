@@ -18,6 +18,19 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "dashboard"
 # Confidence thresholds to evaluate
 THRESHOLDS = [0.55, 0.58, 0.60, 0.62, 0.65, 0.68, 0.70, 0.75, 0.80]
 
+# Batter stats are over-only on PrizePicks (and Pick6).  Unders on these
+# stats inflate accuracy with picks that cannot actually be taken.
+_OVER_ONLY_STATS: set[tuple[str, str]] = {
+    ("batter", "H"),
+    ("batter", "HR"),
+    ("batter", "TB"),
+    ("batter", "R"),
+    ("batter", "RBI"),
+    ("batter", "BB"),
+    ("batter", "HRR"),
+    ("batter", "K"),
+}
+
 
 def load_props() -> pd.DataFrame:
     """Load DK + PP (standard only) props, deduplicated across sources."""
@@ -220,6 +233,18 @@ def main() -> None:
     if pushes > 0:
         print(f"Excluding {pushes} pushes")
         merged = merged[merged.actual != merged.line]
+
+    # Exclude under picks on batter stats (over-only on PrizePicks / Pick6)
+    is_restricted_under = (
+        (merged["p_over_at_line"] < 0.5)
+        & merged.apply(
+            lambda r: (r["player_type"], r["stat"]) in _OVER_ONLY_STATS, axis=1
+        )
+    )
+    n_restricted = is_restricted_under.sum()
+    if n_restricted:
+        merged = merged[~is_restricted_under]
+        print(f"Excluded {n_restricted} batter under picks (over-only stats)")
 
     print(f"Final evaluation set: {len(merged)} props")
     print(f"  Dates: {sorted(merged.game_date.unique())}")
