@@ -296,8 +296,8 @@ def build_matchup_scouting_bullets(
     that comes from ``score_matchup_advantage()`` in ``lib/matchup.py``.
 
     Color coding:
-      SAGE  -- detail favors the pitcher (high whiff, high chase, weak contact)
-      EMBER -- detail favors the hitter  (low whiff, hard contact, low chase)
+      EMBER -- detail favors the pitcher (high whiff, high chase, weak contact)
+      SAGE  -- detail favors the hitter  (low whiff, hard contact, low chase)
       GOLD  -- neutral / notable
     """
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE, LEAGUE_AVG_OVERALL
@@ -335,27 +335,50 @@ def build_matchup_scouting_bullets(
 
         h_row = v_df[v_df["pitch_type"] == pt]
         h_whiff = np.nan
+        h_swings = 0
         if len(h_row) > 0 and "swings" in h_row.columns and "whiffs" in h_row.columns:
             sw = h_row["swings"].iloc[0]
             wh = h_row["whiffs"].iloc[0]
-            h_whiff = wh / sw if pd.notna(sw) and sw > 0 else np.nan
+            if pd.notna(sw) and sw > 0:
+                h_whiff = wh / sw
+                h_swings = int(sw)
 
         s_row = s_df[s_df["pitch_type"] == pt] if not s_df.empty else pd.DataFrame()
         h_xwoba = np.nan
+        h_bip = 0
         if len(s_row) > 0 and "xwoba_contact" in s_row.columns:
             h_xwoba = s_row["xwoba_contact"].iloc[0]
+            h_bip = int(s_row["bip"].iloc[0]) if "bip" in s_row.columns and pd.notna(s_row["bip"].iloc[0]) else 0
         elif len(h_row) > 0 and "xwoba_contact" in h_row.columns:
             h_xwoba = h_row["xwoba_contact"].iloc[0]
+            h_bip = int(h_row["bip"].iloc[0]) if "bip" in h_row.columns and pd.notna(h_row["bip"].iloc[0]) else 0
 
         h_chase = np.nan
+        h_oz = 0
         if len(h_row) > 0 and "chase_swings" in h_row.columns and "out_of_zone_pitches" in h_row.columns:
             cs = h_row["chase_swings"].iloc[0]
             oz = h_row["out_of_zone_pitches"].iloc[0]
-            h_chase = cs / oz if pd.notna(oz) and oz > 0 else np.nan
+            if pd.notna(oz) and oz > 0:
+                h_chase = cs / oz
+                h_oz = int(oz)
 
         h_hh = np.nan
+        h_hh_bip = 0
         if len(s_row) > 0 and "hard_hit_rate" in s_row.columns:
             h_hh = s_row["hard_hit_rate"].iloc[0]
+            h_hh_bip = int(s_row["bip"].iloc[0]) if "bip" in s_row.columns and pd.notna(s_row["bip"].iloc[0]) else 0
+
+        # Sample size annotation -- shown when sample is modest
+        def _n_tag(n: int, unit: str = "pitches") -> str:
+            if n >= 100:
+                return ""
+            return (
+                f' <span style="opacity:0.5; font-size:0.6rem;">'
+                f'(only {n} {unit})</span>'
+            )
+
+        # Minimum BIP to trust contact quality stats (matches edge regression)
+        MIN_BIP = 30
 
         # Collect notable facts (color, text) -- only include if meaningfully
         # above or below league average
@@ -364,33 +387,33 @@ def build_matchup_scouting_bullets(
 
         if pd.notna(p_whiff):
             if p_whiff > lg_whiff * 1.15:
-                pitcher_facts.append((SAGE, f"{p_whiff*100:.0f}% whiff rate"))
+                pitcher_facts.append((EMBER, f"{p_whiff*100:.0f}% whiff rate"))
             elif p_whiff < lg_whiff * 0.80:
-                pitcher_facts.append((EMBER, f"low {p_whiff*100:.0f}% whiff rate"))
+                pitcher_facts.append((SAGE, f"low {p_whiff*100:.0f}% whiff rate"))
 
-        if pd.notna(h_whiff):
+        if pd.notna(h_whiff) and h_swings >= 10:
             if h_whiff > lg_whiff * 1.20:
-                hitter_facts.append((SAGE, f"hitter whiffs {h_whiff*100:.0f}%"))
+                hitter_facts.append((EMBER, f"hitter whiffs {h_whiff*100:.0f}%{_n_tag(h_swings, 'swings')}"))
             elif h_whiff < lg_whiff * 0.75:
-                hitter_facts.append((EMBER, f"hitter rarely whiffs ({h_whiff*100:.0f}%)"))
+                hitter_facts.append((SAGE, f"hitter rarely whiffs ({h_whiff*100:.0f}%){_n_tag(h_swings, 'swings')}"))
 
-        if pd.notna(h_chase):
+        if pd.notna(h_chase) and h_oz >= 10:
             if h_chase > lg_chase * 1.20:
-                hitter_facts.append((SAGE, f"chases {h_chase*100:.0f}%"))
+                hitter_facts.append((EMBER, f"chases {h_chase*100:.0f}%{_n_tag(h_oz, 'pitches')}"))
             elif h_chase < lg_chase * 0.75:
-                hitter_facts.append((EMBER, f"disciplined ({h_chase*100:.0f}% chase)"))
+                hitter_facts.append((SAGE, f"disciplined ({h_chase*100:.0f}% chase){_n_tag(h_oz, 'pitches')}"))
 
-        if pd.notna(h_xwoba):
+        if pd.notna(h_xwoba) and h_bip >= MIN_BIP:
             if h_xwoba >= 0.380:
-                hitter_facts.append((EMBER, f"does damage on contact (.{int(h_xwoba*1000):03d} xwOBA)"))
+                hitter_facts.append((SAGE, f"does damage on contact (.{int(h_xwoba*1000):03d} xwOBA){_n_tag(h_bip, 'BIP')}"))
             elif h_xwoba <= 0.270:
-                hitter_facts.append((SAGE, f"weak contact (.{int(h_xwoba*1000):03d} xwOBA)"))
+                hitter_facts.append((EMBER, f"weak contact (.{int(h_xwoba*1000):03d} xwOBA){_n_tag(h_bip, 'BIP')}"))
 
-        if pd.notna(h_hh):
+        if pd.notna(h_hh) and h_hh_bip >= MIN_BIP:
             if h_hh > 0.42:
-                hitter_facts.append((EMBER, f"{h_hh*100:.0f}% hard hit"))
+                hitter_facts.append((SAGE, f"{h_hh*100:.0f}% hard hit{_n_tag(h_hh_bip, 'BIP')}"))
             elif h_hh < 0.25:
-                hitter_facts.append((SAGE, f"soft contact ({h_hh*100:.0f}% hard hit)"))
+                hitter_facts.append((EMBER, f"soft contact ({h_hh*100:.0f}% hard hit){_n_tag(h_hh_bip, 'BIP')}"))
 
         all_facts = pitcher_facts + hitter_facts
         if all_facts:
@@ -443,8 +466,8 @@ def build_matchup_scouting_bullets(
 def render_scouting_html(report) -> None:
     """Render a PitcherReport's scouting bullets as styled HTML."""
     sections = [
-        ("ADVANTAGES", SAGE, report.advantages),
-        ("STRUGGLES", EMBER, report.struggles),
+        ("ADVANTAGES", EMBER, report.advantages),
+        ("STRUGGLES", SAGE, report.struggles),
         ("BATTERS TO WATCH", GOLD, report.key_batters),
         ("BATTERS WHO WILL STRUGGLE", SLATE, report.struggling_batters),
         ("BULLPEN", SLATE, report.bullpen_notes),

@@ -179,12 +179,16 @@ def check_roster_moves(game_date: str) -> bool:
     # Load state; reset if new day
     known_ids: set[int] = set()
     if state_path.exists():
-        with open(state_path) as f:
-            state = json.load(f)
+        try:
+            with open(state_path) as f:
+                state = json.load(f)
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning("Corrupt roster_move_state.json (%s); resetting", e)
+            state = {}
         if state.get("game_date") == game_date:
             known_ids = {int(x) for x in state.get("known_transaction_ids", [])}
         else:
-            logger.info("New game date %s — resetting roster move state", game_date)
+            logger.info("New game date %s, resetting roster move state", game_date)
 
     # Fetch today's transactions
     txns = fetch_recent_transactions(game_date)

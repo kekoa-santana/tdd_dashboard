@@ -294,7 +294,7 @@ def page_matchup_explorer() -> None:
         "hitter": "Hitter Advantage",
         "neutral": "Neutral Matchup",
     }[advantage_result["advantage"]]
-    edge_color = {"pitcher": SAGE, "hitter": EMBER, "neutral": SLATE}[advantage_result["advantage"]]
+    edge_color = {"pitcher": EMBER, "hitter": SAGE, "neutral": SLATE}[advantage_result["advantage"]]
 
     pitcher_label = "LHP" if pitcher_hand == "L" else "RHP"
     hitter_label = "LHH" if hitter_hand == "L" else "RHH"
@@ -461,10 +461,10 @@ def page_matchup_explorer() -> None:
                     edge_val = (p_whiff - league_w) + (h_whiff - league_w)
 
                 if edge_val > 0.02:
-                    edge_color_cell = SAGE
+                    edge_color_cell = EMBER
                     edge_sym = "+"
                 elif edge_val < -0.02:
-                    edge_color_cell = EMBER
+                    edge_color_cell = SAGE
                     edge_sym = "-"
                 else:
                     edge_color_cell = SLATE
@@ -713,8 +713,8 @@ def page_matchup_explorer() -> None:
                 # Higher K% → ember (pitcher advantage)
                 return EMBER if t > 0.66 else SAGE if t < 0.33 else SLATE
             else:
-                # Higher BB%/HR% → ember (hitter advantage)
-                return EMBER if t > 0.66 else SAGE if t < 0.33 else SLATE
+                # Higher BB%/HR% → sage (hitter advantage)
+                return SAGE if t > 0.66 else EMBER if t < 0.33 else SLATE
 
         # Build HTML table
         _hdr = "".join(
