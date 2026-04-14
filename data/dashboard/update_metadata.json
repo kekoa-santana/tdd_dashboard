@@ -1,9 +1,16 @@
 {
-  "last_updated": "2026-04-14T07:28:20.460330",
+  "last_updated": "2026-04-14T14:22:51.456335",
   "game_date": "2026-04-14",
   "season": 2026,
   "hitters_updated": 484,
   "pitchers_updated": 584,
-  "k_samples_count": 705,
-  "last_schedule_refresh": "2026-04-14T11:20:08.344239"
+  "pitcher_k_samples_count": 705,
+  "pitcher_bb_samples_count": 621,
+  "pitcher_hr_samples_count": 621,
+  "hitter_k_samples_count": 509,
+  "hitter_bb_samples_count": 509,
+  "hitter_hr_samples_count": 561,
+  "hitter_trad_count": 422,
+  "pitcher_trad_count": 467,
+  "weekly_refresh": false
 }
