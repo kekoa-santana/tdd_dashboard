@@ -12,5 +12,6 @@
   "hitter_hr_samples_count": 561,
   "hitter_trad_count": 422,
   "pitcher_trad_count": 467,
-  "weekly_refresh": false
+  "weekly_refresh": false,
+  "last_schedule_refresh": "2026-04-14T17:41:41.937023"
 }
