@@ -98,65 +98,6 @@ class FantasyResult:
             "q90": float(np.percentile(self.espn_points, 90)),
         }
 
-    def dk_over_probs(
-        self, lines: list[float] | None = None,
-    ) -> pd.DataFrame:
-        """P(DK points over X) for given lines."""
-        if lines is None:
-            lines = [5, 10, 15, 20, 25, 30]
-        records = []
-        for line in lines:
-            records.append({
-                "line": line,
-                "p_over": float(np.mean(self.dk_points > line)),
-            })
-        return pd.DataFrame(records)
-
-
-def compute_batter_fantasy(
-    result: BatterSimulationResult,
-) -> FantasyResult:
-    """Compute fantasy point distributions for a batter game simulation.
-
-    Parameters
-    ----------
-    result : BatterSimulationResult
-        Output of simulate_batter_game().
-
-    Returns
-    -------
-    FantasyResult
-        DK and ESPN point distributions.
-    """
-    dk = (
-        DK_BAT_SINGLE * result.single_samples
-        + DK_BAT_DOUBLE * result.double_samples
-        + DK_BAT_TRIPLE * result.triple_samples
-        + DK_BAT_HR * result.hr_samples
-        + DK_BAT_RBI * result.rbi_samples
-        + DK_BAT_R * result.r_samples
-        + DK_BAT_BB * result.bb_samples
-        + DK_BAT_HBP * result.hbp_samples
-    ).astype(float)
-
-    espn = (
-        ESPN_BAT_SINGLE * result.single_samples
-        + ESPN_BAT_DOUBLE * result.double_samples
-        + ESPN_BAT_TRIPLE * result.triple_samples
-        + ESPN_BAT_HR * result.hr_samples
-        + ESPN_BAT_RBI * result.rbi_samples
-        + ESPN_BAT_R * result.r_samples
-        + ESPN_BAT_BB * result.bb_samples
-        + ESPN_BAT_HBP * result.hbp_samples
-        + ESPN_BAT_K * result.k_samples
-    ).astype(float)
-
-    return FantasyResult(
-        dk_points=dk,
-        espn_points=espn,
-        n_sims=result.n_sims,
-    )
-
 
 def compute_pitcher_fantasy(
     result: SimulationResult,
@@ -210,4 +151,126 @@ def compute_pitcher_fantasy(
         dk_points=dk,
         espn_points=espn,
         n_sims=result.n_sims,
+    )
+
+
+# -----------------------------------------------------------------------
+# Season-level scoring (ESPN saves/blown saves from DB: +2 SV, -2 BS)
+# -----------------------------------------------------------------------
+ESPN_PIT_SV = 2.0    # verified from fantasy.espn_pitcher_game_scores
+ESPN_PIT_BS = -2.0   # verified from fantasy.espn_pitcher_game_scores
+
+
+def compute_season_pitcher_fantasy(
+    k: np.ndarray,
+    bb: np.ndarray,
+    h: np.ndarray,
+    hr: np.ndarray,
+    hbp: np.ndarray,
+    outs: np.ndarray,
+    runs: np.ndarray,
+    sv: np.ndarray,
+    hld: np.ndarray,
+) -> FantasyResult:
+    """Compute season-level fantasy points from counting stat arrays.
+
+    All arrays shape (n_seasons,). DK has no save scoring (confirmed from
+    DB schema — dk_pitcher_game_scores has no SV column). ESPN adds save
+    and blown save points.
+
+    Parameters
+    ----------
+    k, bb, h, hr, hbp, outs, runs, sv, hld : np.ndarray
+        Season counting stat totals.
+
+    Returns
+    -------
+    FantasyResult
+        Season-level DK and ESPN point distributions.
+    """
+    ip = outs.astype(float) / 3.0
+    er = runs.astype(float) * 0.92  # league-average earned run fraction
+
+    # DK: no save scoring — closer DK value comes from stuff
+    dk = (
+        DK_PIT_IP * ip * 3.0  # 0.75 per out = 2.25 per IP, scored per out
+        + DK_PIT_K * k
+        + DK_PIT_ER * er
+        + DK_PIT_H * h
+        + DK_PIT_BB * bb
+        + DK_PIT_HBP * hbp
+    ).astype(float)
+
+    # ESPN: includes save points
+    espn = (
+        ESPN_PIT_IP * ip
+        + ESPN_PIT_K * k
+        + ESPN_PIT_ER * er
+        + ESPN_PIT_H * h
+        + ESPN_PIT_BB * bb
+        + ESPN_PIT_SV * sv
+    ).astype(float)
+
+    return FantasyResult(
+        dk_points=dk,
+        espn_points=espn,
+        n_sims=len(k),
+    )
+
+
+def compute_season_batter_fantasy(
+    k: np.ndarray,
+    bb: np.ndarray,
+    single: np.ndarray,
+    double: np.ndarray,
+    triple: np.ndarray,
+    hr: np.ndarray,
+    rbi: np.ndarray,
+    r: np.ndarray,
+    hbp: np.ndarray,
+    sb: np.ndarray,
+) -> FantasyResult:
+    """Compute season-level batter fantasy points from counting stat arrays.
+
+    All arrays shape (n_seasons,).
+
+    Parameters
+    ----------
+    k, bb, single, double, triple, hr, rbi, r, hbp, sb : np.ndarray
+        Season counting stat totals.
+
+    Returns
+    -------
+    FantasyResult
+        Season-level DK and ESPN point distributions.
+    """
+    dk = (
+        DK_BAT_SINGLE * single
+        + DK_BAT_DOUBLE * double
+        + DK_BAT_TRIPLE * triple
+        + DK_BAT_HR * hr
+        + DK_BAT_RBI * rbi
+        + DK_BAT_R * r
+        + DK_BAT_BB * bb
+        + DK_BAT_HBP * hbp
+        + DK_BAT_SB * sb
+    ).astype(float)
+
+    espn = (
+        ESPN_BAT_SINGLE * single
+        + ESPN_BAT_DOUBLE * double
+        + ESPN_BAT_TRIPLE * triple
+        + ESPN_BAT_HR * hr
+        + ESPN_BAT_RBI * rbi
+        + ESPN_BAT_R * r
+        + ESPN_BAT_BB * bb
+        + ESPN_BAT_HBP * hbp
+        + ESPN_BAT_SB * sb
+        + ESPN_BAT_K * k
+    ).astype(float)
+
+    return FantasyResult(
+        dk_points=dk,
+        espn_points=espn,
+        n_sims=len(k),
     )

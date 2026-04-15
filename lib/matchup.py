@@ -17,11 +17,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE, LEAGUE_AVG_OVERALL, PITCH_TO_FAMILY
-
-# Clipping bounds for logit to avoid infinities
-CLIP_LO: float = 1e-6
-CLIP_HI: float = 1 - 1e-6
+from lib.constants import CLIP_LO, CLIP_HI, LEAGUE_AVG_BY_PITCH_TYPE, LEAGUE_AVG_OVERALL, PITCH_TO_FAMILY
 
 logger = logging.getLogger(__name__)
 
@@ -1042,9 +1038,19 @@ def score_matchup_for_stat(
             pitcher_id, batter_id, pitcher_arsenal, hitter_vuln, baselines_pt
         )
     elif stat == "hr":
-        result = score_matchup_hr(
-            pitcher_id, batter_id, pitcher_arsenal, hitter_vuln, baselines_pt
-        )
+        # Path B (2026-04-10): HR matchup lifts disabled at the source. Raw
+        # per-pair profile math has reliability ~0.62 and a systematic logit
+        # mean bias of -0.43 from low-denominator pitch types; dampening to
+        # 0.20 left noise plus a pitcher-favoring drift. See
+        # memory/layer2_bvp_diagnostic_2026_04_10.md. Reliability=1.0 so the
+        # simulator's (1-reliability) noise term also collapses to zero.
+        return {
+            "pitcher_id": pitcher_id,
+            "batter_id": batter_id,
+            "matchup_hr_logit_lift": 0.0,
+            "n_pitch_types": 0,
+            "avg_reliability": 1.0,
+        }
     else:
         # No matchup adjustment for other stats (hits, outs, etc.)
         return {
@@ -1070,8 +1076,7 @@ def score_matchup_for_stat(
 # Unified matchup advantage
 # ---------------------------------------------------------------------------
 
-# Repo root is parent of lib/ (not grandparent — parents[2] pointed outside tdd-dashboard).
-_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _load_matchup_config() -> dict[str, Any]:
@@ -1098,14 +1103,9 @@ _MATCHUP_CFG_DEFAULTS: dict[str, Any] = {
     "platoon_reliability_pa": 200,
 }
 
-_MATCHUP_MERGED: dict[str, Any] | None = None
-
 
 def _get_matchup_config() -> dict[str, Any]:
-    """Merge YAML config with defaults (singleton; YAML read at most once)."""
-    global _MATCHUP_MERGED
-    if _MATCHUP_MERGED is not None:
-        return _MATCHUP_MERGED
+    """Merge YAML config with defaults."""
     cfg = {**_MATCHUP_CFG_DEFAULTS}
     try:
         loaded = _load_matchup_config()
@@ -1117,7 +1117,6 @@ def _get_matchup_config() -> dict[str, Any]:
             cfg["platoon_reliability_pa"] = loaded["platoon_reliability_pa"]
     except Exception:
         logger.warning("Could not load matchup_advantage config; using defaults")
-    _MATCHUP_MERGED = cfg
     return cfg
 
 
@@ -1166,6 +1165,9 @@ def _compute_platoon_lift(
     # Determine same/opposite side for league baseline
     # We need batter_stand — infer from which hands have data
     # If batter has data vs both hands, check which side of pitcher_hand
+    other_hand = "L" if pitcher_hand == "R" else "R"
+    other_data = batter_platoon_splits.get(other_hand)
+
     # Heuristic: if batter K% is higher vs this hand → likely same-side
     # But more reliable: compare to overall
     if k_vs_hand > overall_k:
@@ -1469,6 +1471,7 @@ def score_matchup_advantage(
     pitcher_hand: str | None = None,
     batter_platoon_splits: dict | None = None,
     pitcher_gb_pct: float | None = None,
+    batter_gb_rate: float | None = None,
     batter_fb_rate: float | None = None,
     pitcher_glicko_mu: float | None = None,
     batter_glicko_mu: float | None = None,
@@ -1502,6 +1505,8 @@ def score_matchup_advantage(
            "overall_k_rate", "overall_bb_rate"}``.
     pitcher_gb_pct : float | None
         Pitcher ground-ball percentage.
+    batter_gb_rate : float | None
+        Batter ground-ball rate.
     batter_fb_rate : float | None
         Batter fly-ball rate.
     pitcher_glicko_mu : float | None
@@ -1615,6 +1620,7 @@ def score_matchup_advantage(
     # ------------------------------------------------------------------
     # 8. Tier / advantage / reason
     # ------------------------------------------------------------------
+    strong_t = tiers.get("strong", 0.30)
     moderate_t = tiers.get("moderate", 0.12)
 
     if edge_score > moderate_t:

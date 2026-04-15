@@ -13,13 +13,12 @@ from services.data_loader import (
     load_update_metadata, load_pitcher_arsenal, load_hitter_vulnerability,
     load_hitter_strength, load_projections, load_hitter_archetypes,
     load_pitcher_archetypes, load_bf_priors,
-    load_pitcher_game_sim_samples, load_batter_game_sim_samples,
     fetch_live_schedule, fetch_live_lineups, backfill_missing_lineups,
 )
 from components.team_logo import team_logo_html
 from components.headshot import headshot_html
 from components.grades import pitcher_grades_html, hitter_grades_html
-from components.sim_chart import render_player_sim, PITCHER_STAT_META, BATTER_STAT_META
+from components.sim_chart import render_player_sim_from_props, PITCHER_STAT_META, BATTER_STAT_META
 from components.scouting import render_scouting_html, compute_matchup_xwoba_edge
 from lib.fantasy_report import load_report_data, get_pitcher_scouting, ReportData
 from utils.helpers import format_ip, format_game_time
@@ -154,7 +153,7 @@ def _render_game_header(
 def _render_pitcher_duel(
     game: pd.Series,
     lookups: dict,
-    pitcher_sim_samples,
+    game_props_df: pd.DataFrame,
 ) -> None:
     """Side-by-side starting pitcher comparison."""
     proj = lookups["proj"]
@@ -207,12 +206,15 @@ def _render_pitcher_duel(
                     unsafe_allow_html=True,
                 )
 
-            # Sim distribution
-            if pid and pitcher_sim_samples is not None:
-                samples = pitcher_sim_samples.get(gpk, pid)
-                if samples is not None and "k" in samples:
-                    render_player_sim(
-                        samples, PITCHER_STAT_META,
+            # Sim distribution — read from game_props (same source as Props Lab)
+            if pid and not game_props_df.empty and "player_id" in game_props_df.columns:
+                _p_rows = game_props_df[
+                    (game_props_df["player_id"] == pid)
+                    & (game_props_df.get("player_type", "pitcher") == "pitcher")
+                ]
+                if not _p_rows.empty:
+                    render_player_sim_from_props(
+                        _p_rows, PITCHER_STAT_META,
                         ["K", "BB", "H", "HR", "Outs"],
                         f"gp_p_{side}_{gpk}",
                     )
@@ -329,8 +331,6 @@ def _render_lineup_matchups(
     lineups: pd.DataFrame,
     lookups: dict,
     batter_sims: pd.DataFrame,
-    pitcher_sim_samples,
-    batter_sim_samples,
 ) -> None:
     """Full lineup matchup view, reusing schedule.py's side-by-side renderer."""
     from views.schedule import (
@@ -408,8 +408,6 @@ def _render_lineup_matchups(
         str_df=str_df,
         bf_priors=bf_priors,
         batter_sims_df=batter_sims,
-        pitcher_sim_samples=pitcher_sim_samples,
-        batter_sim_samples=batter_sim_samples,
     )
 
 
@@ -522,8 +520,14 @@ def page_game() -> None:
 
     # Load sim data (only available for today's games)
     batter_sims = load_todays_batter_sims() if is_today_game else pd.DataFrame()
-    pitcher_sim_samples = load_pitcher_game_sim_samples() if is_today_game else None
-    batter_sim_samples = load_batter_game_sim_samples() if is_today_game else None
+    if is_today_game:
+        from services.data_loader import load_game_props
+        _gp_all = load_game_props()
+        game_props_df = (
+            _gp_all[_gp_all["game_pk"] == gpk] if not _gp_all.empty else pd.DataFrame()
+        )
+    else:
+        game_props_df = pd.DataFrame()
 
     # Load lineups
     if is_today_game:
@@ -554,7 +558,7 @@ def page_game() -> None:
         '<div class="section-subheader" style="margin-top:1.5rem;">Starting Pitchers</div>',
         unsafe_allow_html=True,
     )
-    _render_pitcher_duel(game, lookups, pitcher_sim_samples)
+    _render_pitcher_duel(game, lookups, game_props_df)
 
     # --- Section 3: Key Matchups ---
     if is_today_game and not batter_sims.empty:
@@ -569,7 +573,6 @@ def page_game() -> None:
         )
         _render_lineup_matchups(
             game, lineups, lookups, batter_sims,
-            pitcher_sim_samples, batter_sim_samples,
         )
     else:
         st.markdown(

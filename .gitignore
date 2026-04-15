@@ -39,3 +39,6 @@ SYNC_GUIDE.md
 reports/
 
 test.ipynb
+
+# Per-date sim sample archive (local-only, used for long-term accuracy validation)
+data/dashboard/history/

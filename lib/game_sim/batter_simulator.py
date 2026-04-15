@@ -12,19 +12,28 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import pandas as pd
-from scipy.special import expit, logit
+from scipy.special import expit
 
+from lib.game_sim.bip_model import (
+    BIP_DOUBLE,
+    BIP_SINGLE,
+    BIP_TRIPLE,
+    BIPOutcomeModel,
+)
 from lib.game_sim.pa_outcome_model import (
     PA_DOUBLE,
     PA_HBP,
     PA_HOME_RUN,
+    PA_OUT,
     PA_SINGLE,
     PA_STRIKEOUT,
     PA_TRIPLE,
     PA_WALK,
+    GameContext,
     PAOutcomeModel,
 )
 from lib.game_sim.batter_pa_model import (
@@ -32,47 +41,24 @@ from lib.game_sim.batter_pa_model import (
     split_pa_starter_reliever,
 )
 from lib.bf_model import draw_bf_samples
+from lib.game_sim._sim_utils import (
+    safe_logit,
+    resample_posterior,
+    compute_pitcher_quality_lifts,
+)
+from lib.constants import (
+    SIM_LEAGUE_K_RATE,
+    SIM_LEAGUE_BB_RATE,
+    SIM_LEAGUE_HR_RATE,
+    BULLPEN_K_RATE,
+    BULLPEN_BB_RATE,
+    BULLPEN_HR_RATE,
+)
 
 logger = logging.getLogger(__name__)
 
-_CLIP_LO = 1e-6
-_CLIP_HI = 1 - 1e-6
-
 # Max PAs a batter can get in a game
 MAX_BATTER_PA = 7
-
-# League average rates (2022-2025) for logit centering
-LEAGUE_K_RATE = 0.226
-LEAGUE_BB_RATE = 0.082
-LEAGUE_HR_RATE = 0.031
-
-# ---------------------------------------------------------------------------
-# League-average TTO logit lifts (from batter's perspective).
-# Mirrors _LEAGUE_TTO_LOGIT_LIFTS in game_k_model.py.
-# TTO1: pitcher is sharper (higher K/BB, lower HR)
-# TTO2/3: pitcher fatigues (lower K/BB, higher HR)
-# Lift = logit(tto_rate) - logit(overall_rate)
-# ---------------------------------------------------------------------------
-_TTO_K_LIFTS = np.array([
-    logit(0.23782) - logit(0.22557),   # TTO1: +0.066
-    logit(0.20952) - logit(0.22557),   # TTO2: -0.085
-    logit(0.19421) - logit(0.22557),   # TTO3: -0.171
-])
-_TTO_BB_LIFTS = np.array([
-    logit(0.08483) - logit(0.08115),   # TTO1: +0.047
-    logit(0.07479) - logit(0.08115),   # TTO2: -0.082
-    logit(0.07470) - logit(0.08115),   # TTO3: -0.083
-])
-_TTO_HR_LIFTS = np.array([
-    logit(0.02979) - logit(0.03162),   # TTO1: -0.062
-    logit(0.03385) - logit(0.03162),   # TTO2: +0.072
-    logit(0.03658) - logit(0.03162),   # TTO3: +0.160
-])
-_BF_PER_TTO = 9
-
-
-def _safe_logit(p: float | np.ndarray) -> float | np.ndarray:
-    return logit(np.clip(p, _CLIP_LO, _CLIP_HI))
 
 
 @dataclass
@@ -98,12 +84,17 @@ class BatterSimulationResult:
     pa_vs_reliever_samples: np.ndarray
     n_sims: int = 0
 
+    @property
+    def hrr_samples(self) -> np.ndarray:
+        """Hits + Runs + RBIs combined samples."""
+        return self.h_samples + self.r_samples + self.rbi_samples
+
     def summary(self) -> dict[str, dict[str, float]]:
         """Compute summary statistics for all stats."""
         stats = {}
         for name in [
             "k", "bb", "h", "hr", "single", "double", "triple",
-            "tb", "r", "rbi", "hbp", "pa",
+            "tb", "r", "rbi", "hbp", "pa", "hrr",
         ]:
             samples = getattr(self, f"{name}_samples")
             stats[name] = {
@@ -155,26 +146,29 @@ def simulate_batter_game(
     matchup_k_lift: float = 0.0,
     matchup_bb_lift: float = 0.0,
     matchup_hr_lift: float = 0.0,
-    bullpen_k_rate: float = 0.253,
-    bullpen_bb_rate: float = 0.084,
-    bullpen_hr_rate: float = 0.024,
+    bullpen_k_rate: float = BULLPEN_K_RATE,
+    bullpen_bb_rate: float = BULLPEN_BB_RATE,
+    bullpen_hr_rate: float = BULLPEN_HR_RATE,
+    bullpen_matchup_k_lift: float = 0.0,
+    bullpen_matchup_bb_lift: float = 0.0,
+    bullpen_matchup_hr_lift: float = 0.0,
     batter_babip_adj: float = 0.0,
     umpire_k_lift: float = 0.0,
     umpire_bb_lift: float = 0.0,
+    park_k_lift: float = 0.0,
+    park_bb_lift: float = 0.0,
     park_hr_lift: float = 0.0,
+    park_h_babip_adj: float = 0.0,
     weather_k_lift: float = 0.0,
-    tto_k_lifts: np.ndarray | None = None,
-    tto_bb_lifts: np.ndarray | None = None,
-    tto_hr_lifts: np.ndarray | None = None,
-    n_sims: int = 10_000,
+    form_k_lift: float = 0.0,
+    form_bb_lift: float = 0.0,
+    form_hr_lift: float = 0.0,
+    game_context: GameContext | None = None,
+    batter_bip_probs: np.ndarray | None = None,
+    n_sims: int = 50_000,
     random_seed: int = 42,
 ) -> BatterSimulationResult:
     """Run vectorized Monte Carlo batter game simulation.
-
-    Applies times-through-order (TTO) adjustments to starter PAs:
-    the pitcher is sharper the first time through (higher K, lower HR)
-    and fatigues on subsequent passes (lower K, higher HR). TTO lifts
-    default to league-average constants when not provided.
 
     Parameters
     ----------
@@ -210,17 +204,24 @@ def simulate_batter_game(
         Opposing team bullpen aggregate HR rate.
     batter_babip_adj : float
         Batter BABIP adjustment for BIP outcomes.
-    umpire_k_lift, umpire_bb_lift, park_hr_lift, weather_k_lift : float
-        Context adjustments.
-    tto_k_lifts : np.ndarray or None
-        Shape (3,) logit lifts for K by TTO block (1st, 2nd, 3rd pass).
-        None uses league-average TTO constants.
-    tto_bb_lifts : np.ndarray or None
-        Shape (3,) logit lifts for BB by TTO block.
-        None uses league-average TTO constants.
-    tto_hr_lifts : np.ndarray or None
-        Shape (3,) logit lifts for HR by TTO block.
-        None uses league-average TTO constants.
+    umpire_k_lift, umpire_bb_lift : float
+        Umpire tendency adjustments on logit scale.
+    park_k_lift, park_bb_lift, park_hr_lift : float
+        Park factor adjustments on logit scale.
+    park_h_babip_adj : float
+        Park factor BABIP adjustment for hits.
+    weather_k_lift : float
+        Weather K adjustment on logit scale.
+    form_k_lift : float
+        Batter rolling form K% logit lift (from form_model).
+    form_bb_lift : float
+        Batter rolling form BB% logit lift.
+    form_hr_lift : float
+        Batter rolling form HR logit lift (includes HR/PA accel + hard-hit).
+    game_context : GameContext, optional
+        Per-game environmental lifts. When provided, its fields supply
+        defaults for any environmental lift parameter left at 0.0.
+        Explicit keyword arguments always take priority over the context.
     n_sims : int
         Number of simulations.
     random_seed : int
@@ -231,24 +232,30 @@ def simulate_batter_game(
     BatterSimulationResult
         Joint distributions over batter counting stats.
     """
+    # Resolve environmental lifts: explicit kwargs beat GameContext
+    if game_context is not None:
+        if umpire_k_lift == 0.0:
+            umpire_k_lift = game_context.umpire_k_lift
+        if umpire_bb_lift == 0.0:
+            umpire_bb_lift = game_context.umpire_bb_lift
+        if park_k_lift == 0.0:
+            park_k_lift = game_context.park_k_lift
+        if park_bb_lift == 0.0:
+            park_bb_lift = game_context.park_bb_lift
+        if park_hr_lift == 0.0:
+            park_hr_lift = game_context.park_hr_lift
+        if park_h_babip_adj == 0.0:
+            park_h_babip_adj = game_context.park_h_babip_adj
+        if weather_k_lift == 0.0:
+            weather_k_lift = game_context.weather_k_lift
+
     rng = np.random.default_rng(random_seed)
     pa_model = PAOutcomeModel()
 
     # Resample batter posteriors to n_sims
-    def _resample(arr: np.ndarray) -> np.ndarray:
-        if len(arr) == n_sims:
-            return arr.copy()
-        idx = rng.choice(len(arr), size=n_sims, replace=True)
-        return arr[idx]
-
-    batter_k = _resample(batter_k_rate_samples)
-    batter_bb = _resample(batter_bb_rate_samples)
-    batter_hr = _resample(batter_hr_rate_samples)
-
-    # Resolve TTO lifts: use caller-provided or league-average defaults
-    eff_tto_k = tto_k_lifts if tto_k_lifts is not None else _TTO_K_LIFTS
-    eff_tto_bb = tto_bb_lifts if tto_bb_lifts is not None else _TTO_BB_LIFTS
-    eff_tto_hr = tto_hr_lifts if tto_hr_lifts is not None else _TTO_HR_LIFTS
+    batter_k = resample_posterior(batter_k_rate_samples, n_sims, rng)
+    batter_bb = resample_posterior(batter_bb_rate_samples, n_sims, rng)
+    batter_hr = resample_posterior(batter_hr_rate_samples, n_sims, rng)
 
     # --- 1. Draw total PAs and starter BF ---
     total_pa = draw_total_pa(batting_order, rng, n_sims)
@@ -257,7 +264,7 @@ def simulate_batter_game(
         mu_bf=starter_bf_mu,
         sigma_bf=starter_bf_sigma,
         n_draws=n_sims,
-        bf_min=3,
+        bf_min=9,
         bf_max=35,
         rng=rng,
     )
@@ -269,13 +276,15 @@ def simulate_batter_game(
 
     # --- 2. Compute per-PA rates ---
     # Pitcher quality lift: how far is the starter/reliever from league avg?
-    starter_k_lift = _safe_logit(starter_k_rate) - _safe_logit(LEAGUE_K_RATE)
-    starter_bb_lift = _safe_logit(starter_bb_rate) - _safe_logit(LEAGUE_BB_RATE)
-    starter_hr_lift = _safe_logit(starter_hr_rate) - _safe_logit(LEAGUE_HR_RATE)
+    starter_k_lift, starter_bb_lift, starter_hr_lift = compute_pitcher_quality_lifts(
+        starter_k_rate, starter_bb_rate, starter_hr_rate,
+        SIM_LEAGUE_K_RATE, SIM_LEAGUE_BB_RATE, SIM_LEAGUE_HR_RATE,
+    )
 
-    bullpen_k_lift = _safe_logit(bullpen_k_rate) - _safe_logit(LEAGUE_K_RATE)
-    bullpen_bb_lift = _safe_logit(bullpen_bb_rate) - _safe_logit(LEAGUE_BB_RATE)
-    bullpen_hr_lift = _safe_logit(bullpen_hr_rate) - _safe_logit(LEAGUE_HR_RATE)
+    bullpen_k_lift, bullpen_bb_lift, bullpen_hr_lift = compute_pitcher_quality_lifts(
+        bullpen_k_rate, bullpen_bb_rate, bullpen_hr_rate,
+        SIM_LEAGUE_K_RATE, SIM_LEAGUE_BB_RATE, SIM_LEAGUE_HR_RATE,
+    )
 
     # --- 3. Accumulators ---
     k_total = np.zeros(n_sims, dtype=np.int32)
@@ -301,47 +310,44 @@ def simulate_batter_game(
         global_pos = batting_order + 9 * pa_num
         vs_starter = active & (global_pos <= starter_bf)
 
-        # Determine TTO block for this PA (scalar since global_pos is scalar)
-        # global_pos 1-9: TTO1, 10-18: TTO2, 19+: TTO3
-        tto_block = min((global_pos - 1) // _BF_PER_TTO, 2)
-        tto_k = eff_tto_k[tto_block]
-        tto_bb = eff_tto_bb[tto_block]
-        tto_hr = eff_tto_hr[tto_block]
-
         # Build rates: use batter posteriors as base,
-        # add pitcher quality lift + matchup lift + TTO lift
-        k_logit_base = _safe_logit(batter_k[active])
-        bb_logit_base = _safe_logit(batter_bb[active])
-        hr_logit_base = _safe_logit(batter_hr[active])
+        # add pitcher quality lift + matchup lift
+        k_logit_base = safe_logit(batter_k[active])
+        bb_logit_base = safe_logit(batter_bb[active])
+        hr_logit_base = safe_logit(batter_hr[active])
 
-        # Pitcher quality + matchup + TTO lifts (TTO only for starter PAs)
+        # Pitcher quality + matchup lifts
         vs_starter_active = vs_starter[active]
 
         k_pitcher_lift = np.where(
             vs_starter_active,
-            starter_k_lift + matchup_k_lift + tto_k,
-            bullpen_k_lift,
+            starter_k_lift + matchup_k_lift,
+            bullpen_k_lift,  # K matchup lift skipped — adds noise for relievers
         )
         bb_pitcher_lift = np.where(
             vs_starter_active,
-            starter_bb_lift + matchup_bb_lift + tto_bb,
-            bullpen_bb_lift,
+            starter_bb_lift + matchup_bb_lift,
+            bullpen_bb_lift,  # BB matchup lift skipped — adds noise for relievers
         )
         hr_pitcher_lift = np.where(
             vs_starter_active,
-            starter_hr_lift + matchup_hr_lift + tto_hr,
-            bullpen_hr_lift,
+            starter_hr_lift + matchup_hr_lift,
+            bullpen_hr_lift + bullpen_matchup_hr_lift,
         )
 
-        # Final adjusted rates
+        # Final adjusted rates (including rolling form lifts)
         k_rate_adj = expit(
-            k_logit_base + k_pitcher_lift + umpire_k_lift + weather_k_lift
+            k_logit_base + k_pitcher_lift
+            + umpire_k_lift + park_k_lift + weather_k_lift
+            + form_k_lift
         )
         bb_rate_adj = expit(
-            bb_logit_base + bb_pitcher_lift + umpire_bb_lift
+            bb_logit_base + bb_pitcher_lift + umpire_bb_lift + park_bb_lift
+            + form_bb_lift
         )
         hr_rate_adj = expit(
             hr_logit_base + hr_pitcher_lift + park_hr_lift
+            + form_hr_lift
         )
 
         # Draw outcomes
@@ -350,9 +356,16 @@ def simulate_batter_game(
             pitcher_bb_rate=bb_rate_adj,
             pitcher_hr_rate=hr_rate_adj,
         )
+        # Per-sim batter BIP probability array (tile the single (4,) vector)
+        batter_bip_arr = None
+        if batter_bip_probs is not None:
+            batter_bip_arr = np.broadcast_to(
+                np.asarray(batter_bip_probs, dtype=np.float64), (n_active, 4),
+            )
         outcomes = pa_model.draw_outcomes(
             probs=probs, rng=rng, n_draws=n_active,
-            babip_adj=batter_babip_adj,
+            babip_adj=batter_babip_adj + park_h_babip_adj,
+            batter_bip_probs=batter_bip_arr,
         )
 
         # Accumulate
@@ -367,24 +380,28 @@ def simulate_batter_game(
         is_hit = np.isin(outcomes, [PA_SINGLE, PA_DOUBLE, PA_TRIPLE, PA_HOME_RUN])
         h_total[active] += is_hit.astype(np.int32)
 
-        # Simplified R/RBI: HR always scores batter (R+1, RBI+1)
-        # Other hits sometimes score runners — use population averages
+        # R/RBI scoring (calibrated to 2019-2025 league averages)
+        # HR: batter always scores + drives in ~0.4 runners on avg
         is_hr = (outcomes == PA_HOME_RUN)
         r_total[active] += is_hr.astype(np.int32)
         rbi_total[active] += is_hr.astype(np.int32)
+        # HR extra RBI: ~40% chance of driving in an additional runner
+        rbi_total[active] += (is_hr & (rng.random(n_active) < 0.40)).astype(np.int32)
 
-        # Non-HR hits: ~15% chance of scoring a run, ~30% chance of RBI
+        # Non-HR hits: calibrated from actual R/PA and RBI/PA rates
         non_hr_hit = is_hit & ~is_hr
         n_non_hr = non_hr_hit.sum()
         if n_non_hr > 0:
-            r_total[active] += (non_hr_hit & (rng.random(n_active) < 0.15)).astype(np.int32)
-            rbi_total[active] += (non_hr_hit & (rng.random(n_active) < 0.30)).astype(np.int32)
+            r_total[active] += (non_hr_hit & (rng.random(n_active) < 0.36)).astype(np.int32)
+            rbi_total[active] += (non_hr_hit & (rng.random(n_active) < 0.35)).astype(np.int32)
 
-        # BB/HBP: ~10% chance of eventually scoring
+        # BB/HBP: ~18% chance of eventually scoring
         on_base_no_hit = np.isin(outcomes, [PA_WALK, PA_HBP])
         n_ob = on_base_no_hit.sum()
         if n_ob > 0:
-            r_total[active] += (on_base_no_hit & (rng.random(n_active) < 0.10)).astype(np.int32)
+            r_total[active] += (on_base_no_hit & (rng.random(n_active) < 0.18)).astype(np.int32)
+            # RBI on BB/HBP (bases loaded walk): ~3%
+            rbi_total[active] += (on_base_no_hit & (rng.random(n_active) < 0.03)).astype(np.int32)
 
     # Compute total bases
     tb_total = (

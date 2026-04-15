@@ -335,6 +335,8 @@ def run_schedule_refresh(game_date: str) -> bool:
     import pandas as pd
     from lib.schedule import fetch_todays_schedule, fetch_all_lineups
     from lib.game_sim.simulator import simulate_game
+    from lib.game_sim.pa_outcome_model import GameContext
+    from lib.game_sim.bullpen_model import TeamBullpenProfile
     from lib.game_sim.exit_model import ExitModel
     from lib.game_sim.tto_model import build_all_tto_lifts
     from lib.game_sim.pitch_count_model import build_pitch_count_features
@@ -527,6 +529,44 @@ def run_schedule_refresh(game_date: str) -> bool:
                     float(r["k_rate"]), float(r["bb_rate"]), float(r["hr_rate"]),
                 )
         logger.info("Loaded team bullpen rates for %d teams", len(bullpen_rates_lookup))
+
+    # Two-tier bullpen profiles (CL/SU high-leverage vs MR low-leverage).
+    # Used to deploy different rates in close games vs blowouts.
+    bullpen_profile_path = DASHBOARD_DIR / "team_bullpen_profiles.parquet"
+    bullpen_profile_lookup: dict[int, TeamBullpenProfile] = {}
+    if bullpen_profile_path.exists():
+        _bpr = pd.read_parquet(bullpen_profile_path)
+        for _, r in _bpr.iterrows():
+            bullpen_profile_lookup[int(r["team_id"])] = TeamBullpenProfile(
+                team_id=int(r["team_id"]),
+                high_lev_k_rate=float(r["high_lev_k_rate"]),
+                high_lev_bb_rate=float(r["high_lev_bb_rate"]),
+                high_lev_hr_rate=float(r["high_lev_hr_rate"]),
+                high_lev_bf=int(r.get("high_lev_bf", 0)),
+                low_lev_k_rate=float(r["low_lev_k_rate"]),
+                low_lev_bb_rate=float(r["low_lev_bb_rate"]),
+                low_lev_hr_rate=float(r["low_lev_hr_rate"]),
+                low_lev_bf=int(r.get("low_lev_bf", 0)),
+            )
+        logger.info(
+            "Loaded team bullpen tier profiles for %d teams",
+            len(bullpen_profile_lookup),
+        )
+
+    # Per-batter BIP probability profiles (batter-specific out/1B/2B/3B).
+    import numpy as np
+    _LEAGUE_BIP_PROBS = np.array([0.700, 0.222, 0.065, 0.005])
+    batter_bip_path = DASHBOARD_DIR / "batter_bip_profiles.parquet"
+    batter_bip_lookup: dict[int, np.ndarray] = {}
+    if batter_bip_path.exists():
+        _bbp = pd.read_parquet(batter_bip_path)
+        _bbp = _bbp.sort_values("season").groupby("batter_id").last().reset_index()
+        for _, r in _bbp.iterrows():
+            batter_bip_lookup[int(r["batter_id"])] = np.array([
+                float(r["p_out"]), float(r["p_single"]),
+                float(r["p_double"]), float(r["p_triple"]),
+            ])
+        logger.info("Loaded BIP profiles for %d batters", len(batter_bip_lookup))
 
     # --- Load depth chart fallback for pre-lineup sims ---
     dc_path = DASHBOARD_DIR / "probable_starters_by_hand.parquet"
@@ -722,6 +762,15 @@ def run_schedule_refresh(game_date: str) -> bool:
                     "bullpen_hr_rate": bp_rates[2],
                 }
 
+            # Two-tier bullpen profile + per-batter BIP array for the lineup
+            team_bullpen_profile = bullpen_profile_lookup.get(
+                int(pitching_team_id) if pd.notna(pitching_team_id) else -1,
+            )
+            lineup_bip_probs_arr = np.stack([
+                batter_bip_lookup.get(int(bid), _LEAGUE_BIP_PROBS)
+                for bid in (lineup_batter_ids + [0] * 9)[:9]
+            ], axis=0).astype(np.float64) if lineup_batter_ids else None
+
             # Run PA-by-PA simulation
             result = simulate_game(
                 pitcher_k_rate_samples=k_samp,
@@ -733,8 +782,12 @@ def run_schedule_refresh(game_date: str) -> bool:
                 batter_ppa_adjs=batter_ppa_adjs,
                 exit_model=exit_model,
                 pitcher_avg_pitches=avg_pitches,
-                umpire_k_lift=ump_k_lift,
-                weather_k_lift=wx_k_lift,
+                game_context=GameContext(
+                    umpire_k_lift=ump_k_lift,
+                    weather_k_lift=wx_k_lift,
+                ),
+                bullpen_profile=team_bullpen_profile,
+                lineup_bip_probs=lineup_bip_probs_arr,
                 **bp_kwargs,
                 n_sims=10_000,
                 random_seed=42 + gpk + (0 if side == "away" else 1),
@@ -1104,6 +1157,21 @@ def run_batter_sims(game_date: str) -> None:
                 "hr_rate": float(r.get("bullpen_hr_rate", 0.024)),
             }
 
+    # Per-batter BIP probabilities (out / 1B / 2B / 3B). Passed into
+    # simulate_batter_game so hit quality routes through each hitter's
+    # own distribution instead of league-average splits.
+    batter_bip_path = DASHBOARD_DIR / "batter_bip_profiles.parquet"
+    batter_bip_lookup: dict[int, np.ndarray] = {}
+    if batter_bip_path.exists():
+        _bbp = pd.read_parquet(batter_bip_path)
+        _bbp = _bbp.sort_values("season").groupby("batter_id").last().reset_index()
+        for _, r in _bbp.iterrows():
+            batter_bip_lookup[int(r["batter_id"])] = np.array([
+                float(r["p_out"]), float(r["p_single"]),
+                float(r["p_double"]), float(r["p_triple"]),
+            ])
+        logger.info("Loaded BIP profiles for %d batters", len(batter_bip_lookup))
+
     # Fallback sample generator
     _rng = np.random.default_rng(77)
 
@@ -1206,6 +1274,7 @@ def run_batter_sims(game_date: str) -> None:
             bullpen_k_rate=bp_rates.get("k_rate", 0.253),
             bullpen_bb_rate=bp_rates.get("bb_rate", 0.084),
             bullpen_hr_rate=bp_rates.get("hr_rate", 0.024),
+            batter_bip_probs=batter_bip_lookup.get(int(bid)),
             n_sims=10_000,
             random_seed=42 + gpk + bid,
         )

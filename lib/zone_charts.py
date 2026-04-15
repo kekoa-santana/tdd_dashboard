@@ -15,8 +15,8 @@ import matplotlib.colors as mcolors
 import numpy as np
 import pandas as pd
 
-from lib.utils.constants import ZONE_BOUNDARIES, ZONE_GRID
-from lib.viz.theme import GOLD, EMBER, SAGE, SLATE, CREAM, DARK, add_watermark
+from lib.constants import ZONE_BOUNDARIES, ZONE_GRID
+from lib.theme import GOLD, EMBER, SAGE, SLATE, CREAM, DARK, add_watermark
 
 # Grid geometry
 _N = ZONE_GRID["n_rows"]  # 5
@@ -164,7 +164,7 @@ def plot_pitcher_location_heatmap(
         grid = _build_grid(pt_df, "pct")
 
         # Draw heatmap
-        ax.pcolormesh(
+        im = ax.pcolormesh(
             _X_EDGES, _Z_EDGES, grid,
             cmap=cmap, vmin=0, vmax=max(0.12, np.nanmax(grid)),
             shading="flat", zorder=2,
@@ -304,7 +304,7 @@ def plot_hitter_zone_grid(
 
     # Draw heatmap
     norm = mcolors.TwoSlopeNorm(vcenter=center, vmin=vmin, vmax=vmax)
-    ax.pcolormesh(
+    im = ax.pcolormesh(
         _X_EDGES, _Z_EDGES, grid,
         cmap=cmap, norm=norm, shading="flat", zorder=2,
     )
