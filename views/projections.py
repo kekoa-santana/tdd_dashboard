@@ -395,7 +395,7 @@ def page_projections() -> None:
             [5, 10, 15], 
             index=1, 
             key="proj_n",
-            label_visibility="collapsed"
+            jel_visibility="collapsed"
         )
     with filter_cols[3]:
         # Add a tiny bit of margin so the checkbox vertically aligns with the text
