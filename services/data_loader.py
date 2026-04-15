@@ -345,6 +345,44 @@ def load_pp_props() -> pd.DataFrame:
     return pd.read_parquet(path)
 
 
+def dedupe_pp_against_dk(
+    dk: pd.DataFrame, pp: pd.DataFrame,
+) -> pd.DataFrame:
+    """Drop PP rows whose line values duplicate a DK market line.
+
+    When DraftKings offers a market line at the same value as a PrizePicks
+    standard / goblin / demon, the PP row carries no additional information
+    (DK has vig-bearing odds, edge, etc.) so we keep only the DK row. PP
+    rows with line values that DK does not offer are retained unchanged.
+
+    Matching is done on ``player_id + stat + line`` and, when ``game_date``
+    is available on both sides, also ``game_date``.
+
+    Parameters
+    ----------
+    dk, pp : pd.DataFrame
+        Book lines. ``pp`` may be returned empty if all values match DK.
+    """
+    if pp.empty or dk.empty:
+        return pp
+
+    use_date = "game_date" in dk.columns and "game_date" in pp.columns
+    key_cols = ["player_id", "stat", "line"]
+    if use_date:
+        key_cols.append("game_date")
+
+    pp_work = pp.copy()
+    dk_work = dk[key_cols].copy()
+    # Normalize numeric line values for equality comparison
+    dk_work["line"] = pd.to_numeric(dk_work["line"], errors="coerce")
+    pp_work["line"] = pd.to_numeric(pp_work["line"], errors="coerce")
+    # Mark PP rows that match a DK key
+    marker = dk_work.drop_duplicates(subset=key_cols).assign(_dk_match=True)
+    merged = pp_work.merge(marker, on=key_cols, how="left")
+    kept = merged[merged["_dk_match"].isna()].drop(columns=["_dk_match"])
+    return kept
+
+
 @st.cache_data(ttl=_DATA_TTL)
 def load_pitcher_sim_log() -> pd.DataFrame:
     path = DASHBOARD_DIR / "pitcher_sim_log.parquet"

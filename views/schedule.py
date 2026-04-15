@@ -880,7 +880,7 @@ def _render_game_drilldown(
 from components.sim_chart import (
     PITCHER_STAT_META as _PITCHER_STAT_META,
     BATTER_STAT_META as _BATTER_STAT_META,
-    render_player_sim as _render_player_sim,
+    render_player_sim_from_props as _render_player_sim_from_props,
 )
 
 
@@ -952,6 +952,7 @@ def _render_matchup_tab(
     Monte Carlo or matchup scoring runs at render time.
     """
     from components.scouting import build_matchup_scouting_bullets, compute_matchup_xwoba_edge
+    from services.data_loader import load_game_props
 
     if pos_lookup is None:
         pos_lookup = {}
@@ -959,6 +960,11 @@ def _render_matchup_tab(
         bf_priors = pd.DataFrame()
     if batter_sims_df is None:
         batter_sims_df = pd.DataFrame()
+
+    _gp_all = load_game_props()
+    game_df = (
+        _gp_all[_gp_all["game_pk"] == gpk] if not _gp_all.empty else pd.DataFrame()
+    )
 
     for side_info in sides:
         pitcher_name = side_info["pitcher_name"]
@@ -1036,18 +1042,19 @@ def _render_matchup_tab(
                 if _p_detail_parts:
                     st.markdown(" ".join(_p_detail_parts), unsafe_allow_html=True)
 
-                # Pitcher game sim — prefer precomputed samples
-                _p_samples: dict[str, np.ndarray] | None = None
-                if pitcher_sim_samples is not None:
-                    _p_samples = pitcher_sim_samples.get(gpk, pid)
-
-                if _p_samples is not None and "k" in _p_samples:
-                    _render_player_sim(
-                        _p_samples,
-                        _PITCHER_STAT_META,
-                        ["K", "BB", "H", "HR", "Outs"],
-                        f"p{pid}_{gpk}",
-                    )
+                # Pitcher game sim — read from game_props (same source as Props Lab)
+                if not game_df.empty and "player_id" in game_df.columns:
+                    _p_rows = game_df[
+                        (game_df["player_id"] == pid)
+                        & (game_df.get("player_type", "pitcher") == "pitcher")
+                    ]
+                    if not _p_rows.empty:
+                        _render_player_sim_from_props(
+                            _p_rows,
+                            _PITCHER_STAT_META,
+                            ["K", "BB", "H", "HR", "Outs"],
+                            f"p{pid}_{gpk}",
+                        )
 
         _display_limit = len(display_lu) if _is_roster_lineup else 9
         for _, brow in display_lu.head(_display_limit).iterrows():
@@ -1185,18 +1192,19 @@ def _render_matchup_tab(
                 if detail_parts:
                     st.markdown("".join(detail_parts), unsafe_allow_html=True)
 
-                # Batter game sim — prefer precomputed samples
-                _b_precomp: dict[str, np.ndarray] | None = None
-                if bid and batter_sim_samples is not None:
-                    _b_precomp = batter_sim_samples.get(gpk, bid)
-
-                if _b_precomp is not None and "k" in _b_precomp:
-                    _render_player_sim(
-                        _b_precomp,
-                        _BATTER_STAT_META,
-                        ["H", "HR", "K", "BB"],
-                        f"b{bid}_{gpk}",
-                    )
+                # Batter game sim — read from game_props (same source as Props Lab)
+                if bid and not game_df.empty and "player_id" in game_df.columns:
+                    _b_rows = game_df[
+                        (game_df["player_id"] == bid)
+                        & (game_df.get("player_type", "batter") == "batter")
+                    ]
+                    if not _b_rows.empty:
+                        _render_player_sim_from_props(
+                            _b_rows,
+                            _BATTER_STAT_META,
+                            ["H", "HR", "K", "BB"],
+                            f"b{bid}_{gpk}",
+                        )
 
         # Avg K matchup — from precomputed pitcher sims
         if n_scored > 0:

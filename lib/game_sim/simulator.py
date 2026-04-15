@@ -11,12 +11,17 @@ a single simulation run.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 import pandas as pd
+from scipy.special import expit, logit
 
+from dataclasses import replace as _dc_replace
+
+from lib.game_sim.bip_model import BIPOutcomeModel
+from lib.game_sim.bullpen_model import TeamBullpenProfile
 from lib.game_sim.exit_model import ExitModel
 from lib.game_sim.pa_outcome_model import (
     PA_DOUBLE,
@@ -27,140 +32,207 @@ from lib.game_sim.pa_outcome_model import (
     PA_STRIKEOUT,
     PA_TRIPLE,
     PA_WALK,
+    GameContext,
     PAOutcomeModel,
     compute_fatigue_adjustments,
 )
 from lib.game_sim.pitch_count_model import PitchCountModel
-from lib.game_sim.tto_model import BF_PER_TTO
-
-# League-average bullpen fallback rates (used when a team has no entry in
-# team_bullpen_rates.parquet). Mirrors src.utils.constants in player_profiles.
-_LEAGUE_BULLPEN_K_RATE = 0.253
-_LEAGUE_BULLPEN_BB_RATE = 0.084
-_LEAGUE_BULLPEN_HR_RATE = 0.024
-
-# Safety cap on bullpen tail PAs.
-_MAX_BULLPEN_PA = 80
-
-# Runner advancement probabilities (league-average, see CLAUDE discussion
-# 2026-04-10).
-_SAC_FLY_PROB_0OUT = 0.50
-_SAC_FLY_PROB_1OUT = 0.30
-_R2_SCORES_ON_SINGLE = 0.60
-_R1_SCORES_ON_DOUBLE = 0.40
-
-
-def _advance_runners(
-    outcomes: np.ndarray,
-    r1: np.ndarray,
-    r2: np.ndarray,
-    r3: np.ndarray,
-    inning_outs: np.ndarray,
-    rng: np.random.Generator,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Apply PA outcomes to base state and return runs + new base occupancy.
-
-    See ``player_profiles/src/models/game_sim/simulator.py`` for the full
-    docstring. Advancement rules (approved 2026-04-10):
-    - K / non-K out: no movement, except R3 scores on non-K out with prob
-      0.50 (0 outs) / 0.30 (1 out) / 0.0 (2 outs) for sac fly modeling.
-    - Walk/HBP: forced advancement only.
-    - Single: batter→1B, R3 scores, R2 scores 60% else→3B, R1→2B.
-    - Double: batter→2B, R3 scores, R2 scores, R1 scores 40% else→3B.
-    - Triple: all on base score, batter→3B.
-    - HR: clears bases, all score.
-    """
-    n = outcomes.shape[0]
-    runs = np.zeros(n, dtype=np.int32)
-    new_r1 = r1.copy()
-    new_r2 = r2.copy()
-    new_r3 = r3.copy()
-
-    # Non-K out: sac fly with runner on 3B
-    out_mask = outcomes == PA_OUT
-    sf_prob = np.where(
-        out_mask & (r3 == 1) & (inning_outs == 0),
-        _SAC_FLY_PROB_0OUT,
-        np.where(
-            out_mask & (r3 == 1) & (inning_outs == 1),
-            _SAC_FLY_PROB_1OUT,
-            0.0,
-        ),
-    )
-    sf_draw = rng.random(n) < sf_prob
-    runs += sf_draw.astype(np.int32)
-    new_r3 = np.where(sf_draw, 0, new_r3)
-
-    # Walk / HBP: forced advancement
-    walk_mask = (outcomes == PA_WALK) | (outcomes == PA_HBP)
-    bases_loaded_walk = walk_mask & (r1 == 1) & (r2 == 1) & (r3 == 1)
-    runs += bases_loaded_walk.astype(np.int32)
-    walk_push_r3 = walk_mask & (r1 == 1) & (r2 == 1)
-    walk_push_r2 = walk_mask & (r1 == 1)
-    new_r3 = np.where(walk_push_r3, 1, new_r3)
-    new_r2 = np.where(walk_push_r2, 1, new_r2)
-    new_r1 = np.where(walk_mask, 1, new_r1)
-
-    # Single
-    single_mask = outcomes == PA_SINGLE
-    runs += (single_mask & (r3 == 1)).astype(np.int32)
-
-    r2_on_single = single_mask & (r2 == 1)
-    r2_score_draw = rng.random(n) < _R2_SCORES_ON_SINGLE
-    runs += (r2_on_single & r2_score_draw).astype(np.int32)
-    r2_holds_at_3_single = r2_on_single & ~r2_score_draw
-
-    r1_on_single = single_mask & (r1 == 1)
-
-    new_r3 = np.where(single_mask, r2_holds_at_3_single.astype(np.int32), new_r3)
-    new_r2 = np.where(single_mask, r1_on_single.astype(np.int32), new_r2)
-    new_r1 = np.where(single_mask, 1, new_r1)
-
-    # Double
-    double_mask = outcomes == PA_DOUBLE
-    runs += (double_mask & (r3 == 1)).astype(np.int32)
-    runs += (double_mask & (r2 == 1)).astype(np.int32)
-
-    r1_on_double = double_mask & (r1 == 1)
-    r1_score_draw = rng.random(n) < _R1_SCORES_ON_DOUBLE
-    runs += (r1_on_double & r1_score_draw).astype(np.int32)
-    r1_holds_at_3_double = r1_on_double & ~r1_score_draw
-
-    new_r3 = np.where(double_mask, r1_holds_at_3_double.astype(np.int32), new_r3)
-    new_r2 = np.where(double_mask, 1, new_r2)
-    new_r1 = np.where(double_mask, 0, new_r1)
-
-    # Triple
-    triple_mask = outcomes == PA_TRIPLE
-    runs += (triple_mask & (r3 == 1)).astype(np.int32)
-    runs += (triple_mask & (r2 == 1)).astype(np.int32)
-    runs += (triple_mask & (r1 == 1)).astype(np.int32)
-    new_r3 = np.where(triple_mask, 1, new_r3)
-    new_r2 = np.where(triple_mask, 0, new_r2)
-    new_r1 = np.where(triple_mask, 0, new_r1)
-
-    # Home run
-    hr_mask = outcomes == PA_HOME_RUN
-    hr_runs = (
-        hr_mask.astype(np.int32)
-        + (hr_mask & (r1 == 1)).astype(np.int32)
-        + (hr_mask & (r2 == 1)).astype(np.int32)
-        + (hr_mask & (r3 == 1)).astype(np.int32)
-    )
-    runs += hr_runs
-    new_r3 = np.where(hr_mask, 0, new_r3)
-    new_r2 = np.where(hr_mask, 0, new_r2)
-    new_r1 = np.where(hr_mask, 0, new_r1)
-
-    return runs, new_r1, new_r2, new_r3
+from lib.game_sim.tto_model import BF_PER_TTO, get_tto_for_bf
+from lib.game_sim._sim_utils import resample_posterior, MATCHUP_DAMPEN
+from lib.constants import (
+    CLIP_LO,
+    CLIP_HI,
+    BULLPEN_K_RATE,
+    BULLPEN_BB_RATE,
+    BULLPEN_HR_RATE,
+)
 
 logger = logging.getLogger(__name__)
 
-_CLIP_LO = 1e-6
-_CLIP_HI = 1 - 1e-6
-
 # Maximum PA per game (safety valve)
 MAX_PA_PER_GAME = 45
+
+# Default exit model calibration offset (logit scale).
+# The exit model over-predicts exit probability, pulling pitchers ~1.4 BF early.
+# This offset reduces exit probability to match observed BF distribution.
+_DEFAULT_EXIT_CALIBRATION_OFFSET = -0.35
+
+# Stamina offset parameters.
+# Workhorses (high avg IP) get more negative offset → stay longer.
+# Short-leash pitchers get less negative / positive offset → exit sooner.
+# Scale chosen so output IP spread matches observed 2025 distribution
+# (real std ≈ 0.49 IP across starters, 3.7–6.4 range).
+_STAMINA_POP_MEAN_IP = 5.22  # 2022-2025 population mean IP for starters (10+ starts, BF >= 9)
+_STAMINA_POP_STD_IP = 0.50   # 2022-2025 population std
+_STAMINA_LOGIT_SCALE = 0.45  # logit shift per z-score of avg IP
+
+# BF prior bridge: population BF mean for z-scoring
+# Revalidated 2022-2025 with BF >= 9 filter (excludes openers/bullpen games)
+_POP_BF_MU = 22.4
+_POP_BF_STD = 1.8   # Between-pitcher std of mean BF (not within-game)
+_BF_LOGIT_SCALE = 0.25  # logit shift per z-score of pitcher BF mean (tuned from 0.35 to recenter BF bias)
+
+# Bullpen state adjustment parameters
+_BULLPEN_WORKLOAD_POP_MEAN = 5.0   # Mean relief IP over trailing 3 days
+_BULLPEN_WORKLOAD_POP_STD = 2.5    # Std of trailing 3-day bullpen IP
+_BULLPEN_LOGIT_SCALE = -0.12       # Negative → taxed bullpen keeps starter in longer
+
+# Lineup patience adjustment parameters
+_LINEUP_PPA_POP_MEAN = 0.0   # Population mean lineup aggregate P/PA adj
+_LINEUP_PPA_SENSITIVITY = 0.10  # Exit offset per unit of lineup P/PA aggregate
+
+
+def compute_stamina_offset(
+    pitcher_avg_ip: float,
+    base_offset: float = _DEFAULT_EXIT_CALIBRATION_OFFSET,
+) -> float:
+    """Compute per-pitcher exit calibration offset based on stamina.
+
+    Workhorses (high avg IP) get a more negative offset (lower exit prob),
+    short-leash pitchers get a less negative offset (higher exit prob).
+
+    Parameters
+    ----------
+    pitcher_avg_ip : float
+        Pitcher's historical average innings pitched per start.
+    base_offset : float
+        Population-level calibration offset (logit scale).
+
+    Returns
+    -------
+    float
+        Per-pitcher exit calibration offset (logit scale).
+    """
+    z = (pitcher_avg_ip - _STAMINA_POP_MEAN_IP) / _STAMINA_POP_STD_IP
+    # Negative direction: higher avg IP → more negative offset → stays longer
+    return base_offset - _STAMINA_LOGIT_SCALE * z
+
+
+def compute_bf_calibration_offset(
+    mu_bf: float,
+    base_offset: float = _DEFAULT_EXIT_CALIBRATION_OFFSET,
+) -> float:
+    """Compute exit offset anchored to pitcher's known BF distribution.
+
+    Uses the bf_model prior (empirical Bayes from historical starts) to
+    set the exit calibration so the simulator targets the correct BF mean.
+    Replaces compute_stamina_offset when bf_model priors are available.
+
+    Parameters
+    ----------
+    mu_bf : float
+        Pitcher's shrinkage-estimated mean BF per start (from bf_model).
+    base_offset : float
+        Population-level calibration offset (logit scale).
+
+    Returns
+    -------
+    float
+        Per-pitcher exit calibration offset (logit scale).
+    """
+    z = (mu_bf - _POP_BF_MU) / _POP_BF_STD
+    # Higher BF mean → more negative offset → stays longer
+    return base_offset - _BF_LOGIT_SCALE * z
+
+
+def compute_bullpen_workload_offset(
+    bullpen_trailing_ip: float,
+) -> float:
+    """Compute exit offset adjustment for bullpen fatigue state.
+
+    When the bullpen is taxed (high recent IP), managers let starters
+    go deeper. When the bullpen is fresh, managers pull starters earlier.
+
+    Parameters
+    ----------
+    bullpen_trailing_ip : float
+        Team's total bullpen IP over the trailing 3 days.
+
+    Returns
+    -------
+    float
+        Additive exit calibration offset (logit scale).
+        Negative values reduce exit probability (starter stays longer).
+    """
+    z = (bullpen_trailing_ip - _BULLPEN_WORKLOAD_POP_MEAN) / _BULLPEN_WORKLOAD_POP_STD
+    # Positive z = taxed bullpen → negative offset → starter stays longer
+    return _BULLPEN_LOGIT_SCALE * z
+
+
+def compute_lineup_patience_offset(
+    lineup_ppa_aggregate: float,
+) -> float:
+    """Compute exit offset for opposing lineup patience.
+
+    Patient lineups (high aggregate P/PA adjustment) drive up pitch counts
+    faster, leading to earlier pitcher exits independent of outcome rates.
+
+    Parameters
+    ----------
+    lineup_ppa_aggregate : float
+        Mean of the 9 batter P/PA adjustments for the opposing lineup.
+
+    Returns
+    -------
+    float
+        Additive exit calibration offset (logit scale).
+        Positive values increase exit probability (pitcher pulled earlier).
+    """
+    return _LINEUP_PPA_SENSITIVITY * lineup_ppa_aggregate
+
+
+def compute_exit_offset(
+    *,
+    mu_bf: float | None = None,
+    pitcher_avg_ip: float | None = None,
+    bullpen_trailing_ip: float | None = None,
+    lineup_ppa_aggregate: float | None = None,
+    base_offset: float = _DEFAULT_EXIT_CALIBRATION_OFFSET,
+) -> float:
+    """Unified exit calibration offset combining all BF-related signals.
+
+    Priority for pitcher stamina:
+    1. mu_bf from bf_model prior (if available) — best signal
+    2. pitcher_avg_ip stamina offset (fallback)
+
+    Additional additive adjustments:
+    - Bullpen workload state
+    - Opposing lineup patience
+
+    Parameters
+    ----------
+    mu_bf : float, optional
+        Pitcher's shrinkage BF mean from bf_model.
+    pitcher_avg_ip : float, optional
+        Pitcher's avg IP per start (fallback for stamina).
+    bullpen_trailing_ip : float, optional
+        Team bullpen IP over trailing 3 days.
+    lineup_ppa_aggregate : float, optional
+        Mean lineup P/PA adjustment for opposing batters.
+    base_offset : float
+        Population-level calibration offset.
+
+    Returns
+    -------
+    float
+        Combined exit calibration offset (logit scale).
+    """
+    # Core pitcher-specific offset: prefer BF prior, fall back to avg IP
+    if mu_bf is not None:
+        offset = compute_bf_calibration_offset(mu_bf, base_offset)
+    elif pitcher_avg_ip is not None:
+        offset = compute_stamina_offset(pitcher_avg_ip, base_offset)
+    else:
+        offset = base_offset
+
+    # Additive adjustments
+    if bullpen_trailing_ip is not None:
+        offset += compute_bullpen_workload_offset(bullpen_trailing_ip)
+
+    if lineup_ppa_aggregate is not None:
+        offset += compute_lineup_patience_offset(lineup_ppa_aggregate)
+
+    return offset
 
 
 @dataclass
@@ -169,10 +241,13 @@ class SimulationResult:
 
     All arrays have shape (n_sims,) — one value per simulated game.
 
-    Starter counting stats (k/bb/h/hr/hbp/bf/pitch_count/outs) back pitcher
-    prop probabilities. ``runs_samples`` is the full-game run total
-    (starter + bullpen); ``starter_runs_samples`` / ``bullpen_runs_samples``
-    are diagnostic components that sum to ``runs_samples``.
+    Counting stats (k/bb/h/hr/hbp/bf/pitch_count/outs) reflect the
+    **starter only** and back pitcher prop probabilities.
+
+    ``runs_samples`` is the **full game** runs allowed by the pitching
+    team (starter innings + bullpen tail). For diagnostics, the
+    component arrays ``starter_runs_samples`` and ``bullpen_runs_samples``
+    are also exposed and always sum to ``runs_samples``.
     """
 
     k_samples: np.ndarray
@@ -256,6 +331,177 @@ class SimulationResult:
         return full_innings + partial / 10.0  # Baseball IP notation
 
 
+# Safety cap on bullpen tail PAs. A full game has 27 outs; after a typical
+# starter exit there are ~11 outs left → ~13 bullpen PAs. 80 leaves huge
+# headroom for blow-up innings without runaway loops.
+_MAX_BULLPEN_PA = 80
+
+# Runner advancement probabilities (league-average, see CLAUDE discussion
+# 2026-04-10). These recover the ~30% run under-estimate that the count-only
+# runner model was producing.
+_SAC_FLY_PROB_0OUT = 0.55  # R3 scores on non-K out with 0 outs
+_SAC_FLY_PROB_1OUT = 0.35  # R3 scores on non-K out with 1 out
+_R2_SCORES_ON_SINGLE = 0.65             # empirical league ~0.65-0.70
+_R1_SCORES_ON_DOUBLE = 0.40
+_R1_TO_3B_ON_SINGLE = 0.27              # first-to-third when 2B is empty
+_R2_TO_3B_ON_NONK_OUT_0OUT = 0.25       # productive out to right side
+_R2_TO_3B_ON_NONK_OUT_1OUT = 0.15
+
+
+def _advance_runners(
+    outcomes: np.ndarray,
+    r1: np.ndarray,
+    r2: np.ndarray,
+    r3: np.ndarray,
+    inning_outs: np.ndarray,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Apply PA outcomes to base state and return runs + new base occupancy.
+
+    Vectorized over ``n`` active sim lanes. ``r1/r2/r3`` are int32 0/1 flags
+    for base occupancy; ``inning_outs`` is the PRE-PA out count in the
+    current inning (so sac fly eligibility can be checked before the out is
+    recorded).
+
+    Advancement rules (approved 2026-04-10):
+    - **Strikeout** / **non-K out**: no movement, except a runner on 3B
+      scores with prob 0.50 (0 outs) / 0.30 (1 out) / 0.0 (2 outs) to model
+      sac flies and productive outs.
+    - **Walk / HBP**: forced advancement only. Bases-loaded walk scores 1.
+    - **Single**: batter → 1B, r3 scores, r2 scores (p=0.60) else → 3B,
+      r1 → 2B.
+    - **Double**: batter → 2B, r3 scores, r2 scores, r1 scores (p=0.40)
+      else → 3B.
+    - **Triple**: all on-base runners score, batter → 3B.
+    - **HR**: batter + all on-base runners score, bases clear.
+
+    No GIDPs, errors, passed balls, or 1B→3B hit-and-run advancement —
+    these cut both ways and are deferred.
+
+    Returns
+    -------
+    (runs, new_r1, new_r2, new_r3)
+        Each shape ``(n,)``. ``runs`` is int32 count, base flags are int32
+        0/1.
+    """
+    n = outcomes.shape[0]
+    runs = np.zeros(n, dtype=np.int32)
+    new_r1 = r1.copy()
+    new_r2 = r2.copy()
+    new_r3 = r3.copy()
+
+    # --- Non-K out: sac fly with runner on 3B, then R2 productive-out adv ---
+    out_mask = outcomes == PA_OUT
+    sf_prob = np.where(
+        out_mask & (r3 == 1) & (inning_outs == 0),
+        _SAC_FLY_PROB_0OUT,
+        np.where(
+            out_mask & (r3 == 1) & (inning_outs == 1),
+            _SAC_FLY_PROB_1OUT,
+            0.0,
+        ),
+    )
+    sf_draw = rng.random(n) < sf_prob
+    runs += sf_draw.astype(np.int32)
+    new_r3 = np.where(sf_draw, 0, new_r3)
+
+    # R2 → 3B on productive out (groundout to right side). Only fires when
+    # 3B will be empty after sac fly handling and there are fewer than 2
+    # outs. Approximates the productive-out advancement rate that is
+    # otherwise invisible to a three-true-outcome sim.
+    r2_adv_prob = np.where(
+        inning_outs == 0, _R2_TO_3B_ON_NONK_OUT_0OUT,
+        np.where(inning_outs == 1, _R2_TO_3B_ON_NONK_OUT_1OUT, 0.0),
+    )
+    r2_adv_draw = rng.random(n) < r2_adv_prob
+    r2_advances_on_out = out_mask & (r2 == 1) & (new_r3 == 0) & r2_adv_draw
+    new_r3 = np.where(r2_advances_on_out, 1, new_r3)
+    new_r2 = np.where(r2_advances_on_out, 0, new_r2)
+
+    # --- Walk / HBP: forced advancement ---
+    walk_mask = (outcomes == PA_WALK) | (outcomes == PA_HBP)
+    bases_loaded_walk = walk_mask & (r1 == 1) & (r2 == 1) & (r3 == 1)
+    runs += bases_loaded_walk.astype(np.int32)
+    # r3 becomes 1 when r1 AND r2 are already on (the runner on 2B gets
+    # pushed to 3B). r3=1 sims where r3 was already on also keep r3=1.
+    walk_push_r3 = walk_mask & (r1 == 1) & (r2 == 1)
+    # r2 becomes 1 when r1 was on (r1 pushed) — or if r2 was already on.
+    walk_push_r2 = walk_mask & (r1 == 1)
+    new_r3 = np.where(walk_push_r3, 1, new_r3)
+    new_r2 = np.where(walk_push_r2, 1, new_r2)
+    new_r1 = np.where(walk_mask, 1, new_r1)
+
+    # --- Single ---
+    single_mask = outcomes == PA_SINGLE
+    r3_scores_single = single_mask & (r3 == 1)
+    runs += r3_scores_single.astype(np.int32)
+
+    r2_on_single = single_mask & (r2 == 1)
+    r2_score_draw = rng.random(n) < _R2_SCORES_ON_SINGLE
+    r2_scores_single = r2_on_single & r2_score_draw
+    r2_holds_at_3_single = r2_on_single & ~r2_score_draw
+    runs += r2_scores_single.astype(np.int32)
+
+    # R1 → 3B first-to-third is only physically possible when 2B is empty
+    # before the PA (otherwise traffic forces R1 to 2B).
+    r1_on_single = single_mask & (r1 == 1)
+    r1_to_3b_draw = rng.random(n) < _R1_TO_3B_ON_SINGLE
+    r1_advances_to_3b = r1_on_single & (r2 == 0) & r1_to_3b_draw
+
+    # new_r3: either R2 held at 3B (didn't score), or R1 advanced to 3B
+    new_r3 = np.where(
+        single_mask,
+        (r2_holds_at_3_single | r1_advances_to_3b).astype(np.int32),
+        new_r3,
+    )
+    # new_r2: R1 goes to 2B unless they took the extra base to 3B
+    new_r2 = np.where(
+        single_mask,
+        (r1_on_single & ~r1_advances_to_3b).astype(np.int32),
+        new_r2,
+    )
+    new_r1 = np.where(single_mask, 1, new_r1)
+
+    # --- Double ---
+    double_mask = outcomes == PA_DOUBLE
+    runs += (double_mask & (r3 == 1)).astype(np.int32)
+    runs += (double_mask & (r2 == 1)).astype(np.int32)
+
+    r1_on_double = double_mask & (r1 == 1)
+    r1_score_draw = rng.random(n) < _R1_SCORES_ON_DOUBLE
+    r1_scores_double = r1_on_double & r1_score_draw
+    r1_holds_at_3_double = r1_on_double & ~r1_score_draw
+    runs += r1_scores_double.astype(np.int32)
+
+    new_r3 = np.where(double_mask, r1_holds_at_3_double.astype(np.int32), new_r3)
+    new_r2 = np.where(double_mask, 1, new_r2)
+    new_r1 = np.where(double_mask, 0, new_r1)
+
+    # --- Triple ---
+    triple_mask = outcomes == PA_TRIPLE
+    runs += (triple_mask & (r3 == 1)).astype(np.int32)
+    runs += (triple_mask & (r2 == 1)).astype(np.int32)
+    runs += (triple_mask & (r1 == 1)).astype(np.int32)
+    new_r3 = np.where(triple_mask, 1, new_r3)
+    new_r2 = np.where(triple_mask, 0, new_r2)
+    new_r1 = np.where(triple_mask, 0, new_r1)
+
+    # --- Home run ---
+    hr_mask = outcomes == PA_HOME_RUN
+    hr_runs = (
+        hr_mask.astype(np.int32)
+        + (hr_mask & (r1 == 1)).astype(np.int32)
+        + (hr_mask & (r2 == 1)).astype(np.int32)
+        + (hr_mask & (r3 == 1)).astype(np.int32)
+    )
+    runs += hr_runs
+    new_r3 = np.where(hr_mask, 0, new_r3)
+    new_r2 = np.where(hr_mask, 0, new_r2)
+    new_r1 = np.where(hr_mask, 0, new_r1)
+
+    return runs, new_r1, new_r2, new_r3
+
+
 def simulate_bullpen_tail(
     *,
     outs: np.ndarray,
@@ -264,34 +510,72 @@ def simulate_bullpen_tail(
     r1: np.ndarray,
     r2: np.ndarray,
     r3: np.ndarray,
+    runs_this_inning: np.ndarray,
     bullpen_k_rate: float,
     bullpen_bb_rate: float,
     bullpen_hr_rate: float,
-    umpire_k_lift: float,
-    umpire_bb_lift: float,
-    park_hr_lift: float,
-    weather_k_lift: float,
+    game_context: GameContext | None,
     babip_adj: float,
     rng: np.random.Generator,
     n_sims: int,
+    bullpen_profile: TeamBullpenProfile | None = None,
+    starter_runs: np.ndarray | None = None,
+    opposing_runs: np.ndarray | None = None,
 ) -> np.ndarray:
     """Continue a game simulation after the starter exits using team bullpen rates.
 
     Runs PA-by-PA with team-aggregate bullpen rates until every sim reaches
     27 outs (or ``_MAX_BULLPEN_PA`` is hit as a safety valve). Mutates the
     passed-in state vectors (``outs``, ``inning``, ``inning_outs``,
-    ``r1``, ``r2``, ``r3``) in place.
+    ``r1``, ``r2``, ``r3``, ``runs_this_inning``) in place -- they represent
+    the same sim lanes the starter loop was tracking.
 
-    Matchup, TTO, fatigue, pitch counts, and the exit model are all disabled
-    in the tail. Park/umpire/weather lifts carry through since the
-    environment doesn't change mid-game.
+    When a ``bullpen_profile`` is provided, rates vary by game state:
+    high-leverage arms (CL/SU) in close games, low-leverage (MR) in blowouts.
+
+    Parameters
+    ----------
+    outs, inning, inning_outs, r1, r2, r3, runs_this_inning : np.ndarray
+        Per-sim game state at starter exit. Shape ``(n_sims,)``. Mutated.
+    bullpen_k_rate, bullpen_bb_rate, bullpen_hr_rate : float
+        Flat fallback rates (used when ``bullpen_profile`` is None).
+    game_context : GameContext, optional
+        Environmental context. Starter-specific fields zeroed for bullpen.
+    babip_adj : float
+        BABIP adjustment for BIP outcomes.
+    rng : np.random.Generator
+        Shared RNG from the parent simulation.
+    n_sims : int
+        Total number of simulation lanes.
+    bullpen_profile : TeamBullpenProfile, optional
+        Two-tier bullpen profile. When provided, rates are selected per-sim
+        based on the current score differential.
+    starter_runs : np.ndarray, optional
+        Runs allowed by the starter (this pitching team's perspective).
+        Required when ``bullpen_profile`` is set to compute score_diff.
+    opposing_runs : np.ndarray, optional
+        Runs scored by the opposing team's starter against our lineup.
+        Required when ``bullpen_profile`` is set.
 
     Returns
     -------
     np.ndarray
-        ``bullpen_runs`` of shape ``(n_sims,)``.
+        ``bullpen_runs`` of shape ``(n_sims,)``
     """
     pa_outcome_model = PAOutcomeModel()
+
+    # Drop starter-specific context for the bullpen phase.
+    if game_context is not None:
+        bullpen_ctx = _dc_replace(game_context, form_bb_lift=0.0, xgb_bb_lift=0.0)
+    else:
+        bullpen_ctx = None
+
+    # Determine whether we can do leverage-tier selection
+    use_tiers = (
+        bullpen_profile is not None
+        and starter_runs is not None
+        and opposing_runs is not None
+    )
 
     bullpen_runs = np.zeros(n_sims, dtype=np.int32)
 
@@ -304,9 +588,25 @@ def simulate_bullpen_tail(
             break
 
         zeros_active = np.zeros(n_active, dtype=np.float64)
-        k_rates = np.full(n_active, bullpen_k_rate, dtype=np.float64)
-        bb_rates = np.full(n_active, bullpen_bb_rate, dtype=np.float64)
-        hr_rates = np.full(n_active, bullpen_hr_rate, dtype=np.float64)
+
+        if use_tiers:
+            # Score diff from pitching team's perspective (positive = winning)
+            # Our team's runs = opposing_runs (scored against opposing pitcher)
+            # Opponent's runs = starter_runs + bullpen_runs (scored against us)
+            our_runs = opposing_runs[active] if opposing_runs is not None else np.zeros(n_active)
+            their_runs = (
+                (starter_runs[active] if starter_runs is not None else np.zeros(n_active))
+                + bullpen_runs[active]
+            )
+            score_diff = (our_runs - their_runs).astype(np.int32)
+            k_rates, bb_rates, hr_rates = bullpen_profile.select_rates(score_diff)  # type: ignore[union-attr]
+            k_rates = np.asarray(k_rates, dtype=np.float64)
+            bb_rates = np.asarray(bb_rates, dtype=np.float64)
+            hr_rates = np.asarray(hr_rates, dtype=np.float64)
+        else:
+            k_rates = np.full(n_active, bullpen_k_rate, dtype=np.float64)
+            bb_rates = np.full(n_active, bullpen_bb_rate, dtype=np.float64)
+            hr_rates = np.full(n_active, bullpen_hr_rate, dtype=np.float64)
 
         probs = pa_outcome_model.compute_pa_probs(
             pitcher_k_rate=k_rates,
@@ -321,17 +621,15 @@ def simulate_bullpen_tail(
             fatigue_k_lift=zeros_active,
             fatigue_bb_lift=zeros_active,
             fatigue_hr_lift=zeros_active,
-            umpire_k_lift=umpire_k_lift,
-            umpire_bb_lift=umpire_bb_lift,
-            park_hr_lift=park_hr_lift,
-            weather_k_lift=weather_k_lift,
+            ctx=bullpen_ctx,
         )
 
         outcomes = pa_outcome_model.draw_outcomes(
             probs=probs, rng=rng, n_draws=n_active, babip_adj=babip_adj,
         )
 
-        # Runner advancement (pre-out-increment for sac fly eligibility)
+        # --- Runner advancement (pre-out-increment so sac flies can read
+        #     inning_outs as 0 or 1 and score the runner on 3B).
         runs_scored, new_r1, new_r2, new_r3 = _advance_runners(
             outcomes=outcomes,
             r1=r1[active],
@@ -346,7 +644,7 @@ def simulate_bullpen_tail(
         r2[active] = new_r2
         r3[active] = new_r3
 
-        # Outs (after sac fly check)
+        # --- Outs (after the sac fly check) ---
         is_out = np.isin(outcomes, [PA_STRIKEOUT, PA_OUT])
         outs[active] += is_out.astype(np.int32)
         inning_outs[active] += is_out.astype(np.int32)
@@ -358,7 +656,12 @@ def simulate_bullpen_tail(
         r1[active] = np.where(inning_over, 0, r1[active])
         r2[active] = np.where(inning_over, 0, r2[active])
         r3[active] = np.where(inning_over, 0, r3[active])
+        runs_this_inning[active] = np.where(
+            inning_over, 0, runs_this_inning[active],
+        )
+        runs_this_inning[active] += runs_scored
 
+        # Recompute active: sims that have reached 27 outs drop out
         active = outs < 27
 
     return bullpen_runs
@@ -375,14 +678,17 @@ def simulate_game(
     exit_model: ExitModel,
     pitcher_avg_pitches: float = 88.0,
     babip_adj: float = 0.0,
-    umpire_k_lift: float = 0.0,
-    umpire_bb_lift: float = 0.0,
-    park_hr_lift: float = 0.0,
-    weather_k_lift: float = 0.0,
-    bullpen_k_rate: float = _LEAGUE_BULLPEN_K_RATE,
-    bullpen_bb_rate: float = _LEAGUE_BULLPEN_BB_RATE,
-    bullpen_hr_rate: float = _LEAGUE_BULLPEN_HR_RATE,
-    n_sims: int = 10_000,
+    game_context: GameContext | None = None,
+    exit_calibration_offset: float = _DEFAULT_EXIT_CALIBRATION_OFFSET,
+    manager_pull_tendency: float = 88.0,
+    lineup_matchup_reliabilities: dict[str, np.ndarray] | None = None,
+    bullpen_k_rate: float = BULLPEN_K_RATE,
+    bullpen_bb_rate: float = BULLPEN_BB_RATE,
+    bullpen_hr_rate: float = BULLPEN_HR_RATE,
+    bullpen_profile: TeamBullpenProfile | None = None,
+    opposing_runs_estimate: np.ndarray | None = None,
+    lineup_bip_probs: np.ndarray | None = None,
+    n_sims: int = 50_000,
     random_seed: int = 42,
 ) -> SimulationResult:
     """Run vectorized Monte Carlo game simulation.
@@ -414,14 +720,22 @@ def simulate_game(
         Pitcher's historical average exit pitch count.
     babip_adj : float
         Pitcher BABIP adjustment for BIP outcomes.
-    umpire_k_lift : float
-        Umpire K-rate logit lift.
-    umpire_bb_lift : float
-        Umpire BB-rate logit lift.
-    park_hr_lift : float
-        Park HR logit lift.
-    weather_k_lift : float
-        Weather K logit lift.
+    game_context : GameContext, optional
+        Per-game environmental lifts (umpire, park, weather, catcher
+        framing, pitcher form). Defaults to zero lifts.
+    exit_calibration_offset : float
+        Logit-scale offset for exit model probabilities. Negative values
+        reduce exit probability (pitcher stays in longer).
+    manager_pull_tendency : float
+        Team's avg starter exit pitch count (manager proxy).
+    lineup_matchup_reliabilities : dict[str, np.ndarray], optional
+        Per-stat reliability per batter slot. Keys: 'k', 'bb', 'hr'.
+        Each value shape (9,), range [0, 1]. When provided, adds per-sim
+        noise to matchup lifts: high reliability → tight, low → wide.
+    bullpen_k_rate, bullpen_bb_rate, bullpen_hr_rate : float
+        Opposing team's aggregate bullpen rates, used after the starter
+        exits to complete the game to 27 outs. Defaults to league-average
+        constants if team-specific rates are unavailable.
     n_sims : int
         Number of Monte Carlo simulations.
     random_seed : int
@@ -439,15 +753,9 @@ def simulate_game(
     pa_outcome_model = PAOutcomeModel()
 
     # Resample posterior draws to n_sims
-    def _resample(arr: np.ndarray) -> np.ndarray:
-        if len(arr) == n_sims:
-            return arr.copy()
-        idx = rng.choice(len(arr), size=n_sims, replace=True)
-        return arr[idx]
-
-    k_rates = _resample(pitcher_k_rate_samples)
-    bb_rates = _resample(pitcher_bb_rate_samples)
-    hr_rates = _resample(pitcher_hr_rate_samples)
+    k_rates = resample_posterior(pitcher_k_rate_samples, n_sims, rng)
+    bb_rates = resample_posterior(pitcher_bb_rate_samples, n_sims, rng)
+    hr_rates = resample_posterior(pitcher_hr_rate_samples, n_sims, rng)
 
     # Default matchup lifts to zeros if missing stat keys
     for stat in ("k", "bb", "hr"):
@@ -456,6 +764,33 @@ def simulate_game(
         if stat not in tto_lifts:
             tto_lifts[stat] = np.zeros(3)
 
+    # Dampen matchup lifts — empirical calibration from 11,517 game
+    # walk-forward backtest (2023-2025). Raw pitch-type matchup scoring
+    # over-applies lifts by ~2x for K/BB. HR signal is near-zero.
+    for stat, damp in MATCHUP_DAMPEN.items():
+        lineup_matchup_lifts[stat] = lineup_matchup_lifts[stat] * damp
+
+    # Reliability-based per-sim noise: when reliability is low the true
+    # matchup effect is uncertain, so we draw per-sim perturbations.
+    # At reliability=1.0 sigma→0 (point mass at computed lift);
+    # at reliability=0.0 sigma→full spread (essentially random).
+    # Drawn once per simulation path (not per PA) — this represents
+    # epistemic uncertainty about the matchup, not within-game noise.
+    # Shape: (n_sims, 9) per stat — indexed by batter slot in the PA loop.
+    _MATCHUP_NOISE_SIGMA = {"k": 0.30, "bb": 0.25, "hr": 0.15}
+    matchup_noise: dict[str, np.ndarray] = {}
+    if lineup_matchup_reliabilities is not None:
+        for stat in ("k", "bb", "hr"):
+            rel = lineup_matchup_reliabilities.get(stat, np.ones(9))
+            sigma_per_slot = _MATCHUP_NOISE_SIGMA[stat] * (1.0 - rel)  # (9,)
+            # Draw (n_sims, 9) noise, then add to base lifts per sim
+            matchup_noise[stat] = rng.normal(
+                loc=0.0, scale=sigma_per_slot[np.newaxis, :], size=(n_sims, 9),
+            )
+    else:
+        for stat in ("k", "bb", "hr"):
+            matchup_noise[stat] = np.zeros((n_sims, 9))
+
     # --- Game state arrays (all shape n_sims) ---
     pitches = np.zeros(n_sims, dtype=np.int32)
     outs = np.zeros(n_sims, dtype=np.int32)
@@ -463,8 +798,8 @@ def simulate_game(
     inning_outs = np.zeros(n_sims, dtype=np.int32)  # 0, 1, 2 within inning
     lineup_pos = np.zeros(n_sims, dtype=np.int32)    # 0-8
     bf_count = np.zeros(n_sims, dtype=np.int32)
-    # Base occupancy flags (exit model still takes a total count, computed
-    # on the fly as r1+r2+r3).
+    # Base occupancy: 0/1 flags. The exit model still takes a total count,
+    # which we compute on the fly as r1+r2+r3.
     r1 = np.zeros(n_sims, dtype=np.int32)
     r2 = np.zeros(n_sims, dtype=np.int32)
     r3 = np.zeros(n_sims, dtype=np.int32)
@@ -481,6 +816,12 @@ def simulate_game(
     # Recent trouble tracker (last 2 PA: BB, H, HBP)
     recent_trouble = np.zeros(n_sims, dtype=np.int32)
     prev_trouble = np.zeros(n_sims, dtype=np.int32)
+
+    # 3-PA trouble tracker (blow-up detection)
+    prev_trouble_2 = np.zeros(n_sims, dtype=np.int32)
+
+    # Runs scored in current inning (blow-up indicator)
+    runs_this_inning = np.zeros(n_sims, dtype=np.int32)
 
     # Active mask — simulations where pitcher is still in the game
     active = np.ones(n_sims, dtype=bool)
@@ -510,10 +851,14 @@ def simulate_game(
         # --- 2. Compute PA outcome probabilities ---
         fatigue = compute_fatigue_adjustments(pitches[active])
 
-        # Gather per-batter matchup lifts
-        k_matchup = np.array([lineup_matchup_lifts["k"][s] for s in slot])
-        bb_matchup = np.array([lineup_matchup_lifts["bb"][s] for s in slot])
-        hr_matchup = np.array([lineup_matchup_lifts["hr"][s] for s in slot])
+        # Gather per-batter matchup lifts + per-sim reliability noise
+        active_idx = np.where(active)[0]
+        k_matchup = np.array([lineup_matchup_lifts["k"][s] for s in slot]) + \
+            matchup_noise["k"][active_idx, slot]
+        bb_matchup = np.array([lineup_matchup_lifts["bb"][s] for s in slot]) + \
+            matchup_noise["bb"][active_idx, slot]
+        hr_matchup = np.array([lineup_matchup_lifts["hr"][s] for s in slot]) + \
+            matchup_noise["hr"][active_idx, slot]
 
         # Gather TTO lifts
         k_tto = np.array([tto_lifts["k"][t] for t in tto])
@@ -533,15 +878,17 @@ def simulate_game(
             fatigue_k_lift=fatigue["k"],
             fatigue_bb_lift=fatigue["bb"],
             fatigue_hr_lift=fatigue["hr"],
-            umpire_k_lift=umpire_k_lift,
-            umpire_bb_lift=umpire_bb_lift,
-            park_hr_lift=park_hr_lift,
-            weather_k_lift=weather_k_lift,
+            ctx=game_context,
         )
 
         # --- 3. Draw PA outcomes ---
+        # If per-batter BIP probs are available, slice by slot for active sims
+        batter_bip_active: np.ndarray | None = None
+        if lineup_bip_probs is not None:
+            batter_bip_active = lineup_bip_probs[slot]
         outcomes = pa_outcome_model.draw_outcomes(
             probs=probs, rng=rng, n_draws=n_active, babip_adj=babip_adj,
+            batter_bip_probs=batter_bip_active,
         )
 
         # --- 4. Update game state ---
@@ -554,8 +901,8 @@ def simulate_game(
         is_hit = np.isin(outcomes, [PA_SINGLE, PA_DOUBLE, PA_TRIPLE, PA_HOME_RUN])
         h_total[active] += is_hit.astype(np.int32)
 
-        # --- Runner advancement (pre-out-increment so sac flies can see
-        #     the current inning_outs as 0 or 1).
+        # --- Runner advancement (pre-out-increment so sac flies see the
+        #     current inning_outs as 0 or 1).
         runs_scored, new_r1, new_r2, new_r3 = _advance_runners(
             outcomes=outcomes,
             r1=r1[active],
@@ -583,13 +930,19 @@ def simulate_game(
         r1[active] = np.where(inning_over, 0, r1[active])
         r2[active] = np.where(inning_over, 0, r2[active])
         r3[active] = np.where(inning_over, 0, r3[active])
+        runs_this_inning[active] = np.where(inning_over, 0, runs_this_inning[active])
 
-        # Update recent trouble
+        # Update runs_this_inning with runs scored this PA
+        runs_this_inning[active] += runs_scored
+
+        # Update recent trouble (2-PA and 3-PA windows)
         is_trouble = np.isin(
             outcomes,
             [PA_WALK, PA_HBP, PA_SINGLE, PA_DOUBLE, PA_TRIPLE, PA_HOME_RUN],
         ).astype(np.int32)
         new_recent = prev_trouble[active] + is_trouble
+        blowup_3pa = prev_trouble_2[active] + prev_trouble[active] + is_trouble
+        prev_trouble_2[active] = prev_trouble[active]
         prev_trouble[active] = is_trouble
         recent_trouble[active] = new_recent
 
@@ -614,7 +967,16 @@ def simulate_game(
             tto=current_tto,
             recent_trouble=recent_trouble[active],
             pitcher_avg_pitches=pitcher_avg_pitches,
+            runs_this_inning=runs_this_inning[active],
+            blowup_recent_3pa=blowup_3pa,
+            manager_pull_tendency=manager_pull_tendency,
         )
+
+        # Apply calibration offset (logit scale)
+        if exit_calibration_offset != 0.0:
+            exit_prob = np.clip(exit_prob, CLIP_LO, CLIP_HI)
+            exit_logit = logit(exit_prob) + exit_calibration_offset
+            exit_prob = expit(exit_logit)
 
         # Draw exit decisions
         exit_draw = rng.random(n_active) < exit_prob
@@ -625,7 +987,8 @@ def simulate_game(
         active[active_indices[exits]] = False
 
     # --- Bullpen tail: finish the game to 27 outs using team bullpen rates ---
-    # Snapshot starter totals before the tail mutates shared state arrays.
+    # `runs` and `outs` up to this point belong to the starter. Snapshot the
+    # starter counting stats before the tail mutates shared state arrays.
     starter_runs = runs.copy()
     starter_outs = outs.copy()
 
@@ -636,16 +999,17 @@ def simulate_game(
         r1=r1,
         r2=r2,
         r3=r3,
+        runs_this_inning=runs_this_inning,
         bullpen_k_rate=bullpen_k_rate,
         bullpen_bb_rate=bullpen_bb_rate,
         bullpen_hr_rate=bullpen_hr_rate,
-        umpire_k_lift=umpire_k_lift,
-        umpire_bb_lift=umpire_bb_lift,
-        park_hr_lift=park_hr_lift,
-        weather_k_lift=weather_k_lift,
+        game_context=game_context,
         babip_adj=babip_adj,
         rng=rng,
         n_sims=n_sims,
+        bullpen_profile=bullpen_profile,
+        starter_runs=starter_runs,
+        opposing_runs=opposing_runs_estimate,
     )
 
     total_runs = starter_runs + bullpen_runs
@@ -680,14 +1044,13 @@ def predict_game(
     exit_model: ExitModel,
     pitcher_avg_pitches: float = 88.0,
     babip_adj: float = 0.0,
-    umpire_k_lift: float = 0.0,
-    umpire_bb_lift: float = 0.0,
-    park_hr_lift: float = 0.0,
-    weather_k_lift: float = 0.0,
-    bullpen_k_rate: float = _LEAGUE_BULLPEN_K_RATE,
-    bullpen_bb_rate: float = _LEAGUE_BULLPEN_BB_RATE,
-    bullpen_hr_rate: float = _LEAGUE_BULLPEN_HR_RATE,
-    n_sims: int = 10_000,
+    game_context: GameContext | None = None,
+    manager_pull_tendency: float = 88.0,
+    bullpen_k_rate: float = BULLPEN_K_RATE,
+    bullpen_bb_rate: float = BULLPEN_BB_RATE,
+    bullpen_hr_rate: float = BULLPEN_HR_RATE,
+    lineup_bip_probs: np.ndarray | None = None,
+    n_sims: int = 50_000,
     random_seed: int = 42,
 ) -> dict[str, Any]:
     """High-level game prediction interface.
@@ -723,8 +1086,9 @@ def predict_game(
         Average exit pitch count.
     babip_adj : float
         Pitcher BABIP adjustment.
-    umpire_k_lift, umpire_bb_lift, park_hr_lift, weather_k_lift : float
-        Context adjustments.
+    game_context : GameContext, optional
+        Per-game environmental lifts (umpire, park, weather, catcher
+        framing, pitcher form).
     n_sims : int
         Number of simulations.
     random_seed : int
@@ -747,7 +1111,6 @@ def predict_game(
         season=season,
     )
 
-    # Run simulation
     result = simulate_game(
         pitcher_k_rate_samples=pitcher_k_rate_samples,
         pitcher_bb_rate_samples=pitcher_bb_rate_samples,
@@ -759,13 +1122,12 @@ def predict_game(
         exit_model=exit_model,
         pitcher_avg_pitches=pitcher_avg_pitches,
         babip_adj=babip_adj,
-        umpire_k_lift=umpire_k_lift,
-        umpire_bb_lift=umpire_bb_lift,
-        park_hr_lift=park_hr_lift,
-        weather_k_lift=weather_k_lift,
+        game_context=game_context,
+        manager_pull_tendency=manager_pull_tendency,
         bullpen_k_rate=bullpen_k_rate,
         bullpen_bb_rate=bullpen_bb_rate,
         bullpen_hr_rate=bullpen_hr_rate,
+        lineup_bip_probs=lineup_bip_probs,
         n_sims=n_sims,
         random_seed=random_seed,
     )
@@ -777,4 +1139,5 @@ def predict_game(
         "bb_over_probs": result.over_probs("bb"),
         "h_over_probs": result.over_probs("h"),
         "hr_over_probs": result.over_probs("hr"),
+        "outs_over_probs": result.over_probs("outs"),
     }

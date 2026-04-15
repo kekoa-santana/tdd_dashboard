@@ -10,6 +10,7 @@ from config import GOLD, SAGE, EMBER, SLATE, CREAM
 from services.data_loader import (
     load_projections, load_game_props, load_dk_props, load_pp_props,
     load_todays_games, fetch_live_schedule, load_stat_tier_thresholds,
+    dedupe_pp_against_dk,
 )
 from components.headshot import headshot_html
 from utils.helpers import format_game_time
@@ -180,6 +181,10 @@ def _build_all_picks(props: pd.DataFrame) -> pd.DataFrame:
     """Join model props against DK and PP lines into a unified DataFrame."""
     dk = load_dk_props()
     pp = load_pp_props()
+    # Drop PP lines whose value duplicates a DK market line — DK wins
+    # because it has vig odds and edge. PP lines with unique values
+    # (typically goblin / demon off-market) are retained.
+    pp = dedupe_pp_against_dk(dk, pp)
 
     picks: list[pd.DataFrame] = []
 

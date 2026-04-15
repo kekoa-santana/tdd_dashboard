@@ -41,6 +41,22 @@ FILE_MAP: dict[str, str] = {
     "schedule.py":          "data/schedule.py",
     "db.py":                "data/db.py",
     "game_predictions.py":  "models/game_predictions.py",
+    # game_sim/ package — PA-by-PA simulator used by update_in_season for
+    # todays_sims.parquet. Keep in sync so live dashboard predictions use
+    # the same softmax + bullpen tier + per-batter BIP enrichments that
+    # confident_picks.py uses.
+    "game_sim/__init__.py":          "models/game_sim/__init__.py",
+    "game_sim/_sim_utils.py":        "models/game_sim/_sim_utils.py",
+    "game_sim/batter_pa_model.py":   "models/game_sim/batter_pa_model.py",
+    "game_sim/batter_simulator.py":  "models/game_sim/batter_simulator.py",
+    "game_sim/bip_model.py":         "models/game_sim/bip_model.py",
+    "game_sim/bullpen_model.py":     "models/game_sim/bullpen_model.py",
+    "game_sim/exit_model.py":        "models/game_sim/exit_model.py",
+    "game_sim/fantasy_scoring.py":   "models/game_sim/fantasy_scoring.py",
+    "game_sim/pa_outcome_model.py":  "models/game_sim/pa_outcome_model.py",
+    "game_sim/pitch_count_model.py": "models/game_sim/pitch_count_model.py",
+    "game_sim/simulator.py":         "models/game_sim/simulator.py",
+    "game_sim/tto_model.py":         "models/game_sim/tto_model.py",
 }
 
 # Verify targets: module name -> list of names to import
@@ -63,9 +79,32 @@ VERIFY_IMPORTS: dict[str, list[str]] = {
 # ---------------------------------------------------------------------------
 
 def _fix_imports(content: str) -> str:
-    """Replace ``from src.`` / ``import src.`` with ``from lib.`` / ``import lib.``."""
-    content = re.sub(r'\bfrom\s+src\.', 'from lib.', content)
-    content = re.sub(r'\bimport\s+src\.', 'import lib.', content)
+    """Rewrite ``src.*`` imports to their ``lib.*`` counterparts.
+
+    The dashboard's lib/ folder is a flattened subset of
+    player_profiles/src/, so ``src.models.game_sim.X`` -> ``lib.game_sim.X``,
+    ``src.models.X`` -> ``lib.X``, ``src.utils.constants`` ->
+    ``lib.constants``, etc. Order matters: apply the most-specific rewrites
+    before the generic ``src.`` -> ``lib.`` fallback.
+    """
+    # Specific mappings first (longest prefix wins)
+    mappings = [
+        (r'\bfrom\s+src\.models\.game_sim\.',  'from lib.game_sim.'),
+        (r'\bimport\s+src\.models\.game_sim\.', 'import lib.game_sim.'),
+        (r'\bfrom\s+src\.models\.',            'from lib.'),
+        (r'\bimport\s+src\.models\.',          'import lib.'),
+        (r'\bfrom\s+src\.utils\.',             'from lib.'),
+        (r'\bimport\s+src\.utils\.',           'import lib.'),
+        (r'\bfrom\s+src\.viz\.',               'from lib.'),
+        (r'\bimport\s+src\.viz\.',             'import lib.'),
+        (r'\bfrom\s+src\.data\.',              'from lib.'),
+        (r'\bimport\s+src\.data\.',            'import lib.'),
+        # Generic fallback — catches anything else that remains
+        (r'\bfrom\s+src\.',                    'from lib.'),
+        (r'\bimport\s+src\.',                  'import lib.'),
+    ]
+    for pattern, repl in mappings:
+        content = re.sub(pattern, repl, content)
     return content
 
 
