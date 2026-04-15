@@ -172,7 +172,11 @@ def check_roster_moves(game_date: str) -> bool:
 
     Returns True if a precompute was triggered.
     """
-    from lib.schedule import fetch_recent_transactions
+    try:
+        from lib.schedule import fetch_recent_transactions
+    except ImportError as e:
+        logger.warning("Roster move check unavailable (%s); skipping", e)
+        return False
 
     state_path = DASHBOARD_DIR / "roster_move_state.json"
 
