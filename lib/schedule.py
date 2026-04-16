@@ -76,49 +76,6 @@ def parse_wind_string(wind_str: str | None) -> tuple[int | None, str]:
     return (speed, direction)
 
 
-def fetch_standings(season: int | None = None) -> dict[str, tuple[int, int]]:
-    """Fetch current-season team W-L records from MLB Stats API.
-
-    Parameters
-    ----------
-    season : int or None
-        Season year. Defaults to current year.
-
-    Returns
-    -------
-    dict[str, tuple[int, int]]
-        ``{team_abbr: (wins, losses)}`` — e.g. ``{"NYY": (95, 67), ...}``.
-        Returns an empty dict on any fetch or parse failure so downstream
-        views can render without records.
-    """
-    import urllib.request
-
-    if season is None:
-        season = date.today().year
-
-    url = (
-        f"{MLB_API_BASE}/standings"
-        f"?leagueId=103,104&season={season}&hydrate=team"
-    )
-    try:
-        with urllib.request.urlopen(url, timeout=15) as resp:
-            data = json.loads(resp.read().decode())
-    except Exception as e:
-        logger.error("Failed to fetch standings from MLB API: %s", e)
-        return {}
-
-    out: dict[str, tuple[int, int]] = {}
-    for record in data.get("records", []):
-        for team_record in record.get("teamRecords", []):
-            abbr = (team_record.get("team") or {}).get("abbreviation", "")
-            if not abbr:
-                continue
-            wins = int(team_record.get("wins", 0) or 0)
-            losses = int(team_record.get("losses", 0) or 0)
-            out[abbr] = (wins, losses)
-    return out
-
-
 def fetch_game_weather(game_pk: int) -> dict[str, Any]:
     """Fetch weather for a single game from MLB's /feed/live endpoint.
 
@@ -412,3 +369,50 @@ def fetch_all_lineups(
         return pd.DataFrame()
 
     return pd.concat(frames, ignore_index=True)
+
+
+def fetch_standings(season: int | None = None) -> dict[str, tuple[int, int]]:
+    """Fetch current W-L records for all MLB teams from the Stats API.
+
+    Parameters
+    ----------
+    season : int | None
+        Season year. Defaults to ``config.CURRENT_SEASON``.
+
+    Returns
+    -------
+    dict[str, tuple[int, int]]
+        Team abbreviation -> (wins, losses). Empty dict on API failure.
+    """
+    import urllib.request
+
+    if season is None:
+        from config import CURRENT_SEASON
+        season = CURRENT_SEASON
+
+    # leagueId 103 = AL, 104 = NL
+    url = (
+        f"{MLB_API_BASE}/standings"
+        f"?leagueId=103,104&season={season}"
+        f"&standingsTypes=regularSeason&hydrate=team"
+    )
+
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:
+        logger.error("Failed to fetch standings from MLB API: %s", e)
+        return {}
+
+    records: dict[str, tuple[int, int]] = {}
+    for record_block in data.get("records", []):
+        for team_record in record_block.get("teamRecords", []):
+            abbr = team_record.get("team", {}).get("abbreviation")
+            if not abbr:
+                continue
+            wins = int(team_record.get("wins", 0))
+            losses = int(team_record.get("losses", 0))
+            records[abbr] = (wins, losses)
+
+    logger.info("Fetched standings for %d teams (season %d)", len(records), season)
+    return records
