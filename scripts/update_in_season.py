@@ -27,7 +27,7 @@ import logging
 import shutil
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +60,20 @@ _MAJOR_MOVE_KEYWORDS = [
 ]
 
 _PRECOMPUTE_GROUPS = ["team", "rankings", "game_data", "health"]
+
+# Statuses indicating a game has not yet started. Anything outside this set
+# (In Progress, Final, Game Over, Postponed, Cancelled, Suspended, etc.)
+# counts as "the slate has moved past its start window", so we can begin
+# surfacing the next day's projections.
+_PREGAME_STATUSES = {"Scheduled", "Pre-Game", "Warmup", "Delayed Start"}
+
+
+def _all_today_games_started(schedule: "pd.DataFrame") -> bool:
+    """Return True when every row in ``schedule`` is past the pre-game phase."""
+    if schedule.empty or "status" not in schedule.columns:
+        return False
+    statuses = schedule["status"].fillna("").astype(str).str.strip()
+    return bool((~statuses.isin(_PREGAME_STATUSES)).all())
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +368,22 @@ def run_schedule_refresh(game_date: str) -> bool:
     if schedule.empty:
         logger.info("No games scheduled for %s", game_date)
         return False
+
+    # Once all of today's games have moved past pre-game, also pull
+    # tomorrow's schedule so the same pipeline produces lineups + sims
+    # for the next slate. Tomorrow's rows get roster-backfilled lineups
+    # exactly like today's do before lineups are posted.
+    if _all_today_games_started(schedule):
+        tomorrow = (date.fromisoformat(game_date) + timedelta(days=1)).isoformat()
+        tomorrow_schedule = fetch_todays_schedule(tomorrow)
+        if not tomorrow_schedule.empty:
+            logger.info(
+                "Today's slate is underway — extending fetch to %s (%d games)",
+                tomorrow, len(tomorrow_schedule),
+            )
+            schedule = pd.concat(
+                [schedule, tomorrow_schedule], ignore_index=True,
+            )
 
     # Fetch lineups
     lineups = fetch_all_lineups(schedule)

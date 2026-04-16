@@ -73,6 +73,73 @@ def _norm_date(s: pd.Series) -> pd.Series:
     return pd.to_datetime(s, errors="coerce").dt.strftime("%Y-%m-%d")
 
 
+# Override for teams whose roster.team_name doesn't match the nickname books use.
+# 109 (Arizona) ships as "D-backs" in roster but books write "Diamondbacks".
+_ALIAS_OVERRIDES: dict[int, list[str]] = {
+    109: ["Diamondbacks", "D-backs"],
+}
+
+
+def _load_team_aliases() -> dict[int, list[str]]:
+    """Build team_id -> list of name substrings that can appear in a book's
+    `game_description`. Combines roster team_name (MLB-style nickname like
+    "Diamondbacks") with team_abbr, applying `_ALIAS_OVERRIDES` for teams
+    whose roster nickname doesn't match the book wording. Longest name first
+    so multi-word nicknames ("White Sox", "Red Sox", "Blue Jays") match
+    before any shorter overlapping alias.
+    """
+    from pathlib import Path
+    dash_dir = Path(__file__).resolve().parents[1] / "data" / "dashboard"
+    try:
+        roster = pd.read_parquet(dash_dir / "roster.parquet")
+    except Exception:
+        return {}
+    if "org_id" not in roster.columns or "team_name" not in roster.columns:
+        return {}
+    pairs = (
+        roster[["org_id", "team_name", "team_abbr"]]
+        .dropna()
+        .drop_duplicates(subset=["org_id"])
+    )
+    aliases: dict[int, list[str]] = {}
+    for _, r in pairs.iterrows():
+        tid = int(r["org_id"])
+        names = list(_ALIAS_OVERRIDES.get(tid, []))
+        names.append(str(r["team_name"]))
+        if pd.notna(r.get("team_abbr")):
+            names.append(str(r["team_abbr"]))
+        aliases[tid] = sorted(set(names), key=len, reverse=True)
+    return aliases
+
+
+def _infer_team_ids(
+    game_description: object, aliases: dict[int, list[str]],
+) -> frozenset[int] | None:
+    """Return the pair of team_ids whose nicknames both appear in the
+    `game_description` string (e.g. 'Arizona Diamondbacks @ New York Mets'
+    or 'ARI Diamondbacks @ NY Mets'). Returns None if not exactly 2 teams match.
+    """
+    if not isinstance(game_description, str) or not aliases:
+        return None
+    desc_lower = game_description.lower()
+    matched: set[int] = set()
+    # Try every nickname alias for each team (longest first), not just the
+    # first one, so teams with multiple name forms (e.g. 109 = Diamondbacks
+    # or D-backs) match whichever the book uses.
+    for tid, names in aliases.items():
+        for alias in names:
+            # Skip short abbreviations (<=3 chars); collision-prone
+            # ("NY" vs "NYY"/"NYM", "LA" vs "LAA"/"LAD", "SD" vs "STL").
+            if len(alias) <= 3:
+                continue
+            if alias.lower() in desc_lower:
+                matched.add(tid)
+                break
+    if len(matched) != 2:
+        return None
+    return frozenset(matched)
+
+
 def _confidence_tier(
     thresholds: dict, player_type: str, stat: str, model_p: float,
 ) -> str:
@@ -283,13 +350,18 @@ def validate_game_totals(
         total_var=("std_runs", lambda s: float(np.sum(s.astype(float) ** 2))),
         game_date=("game_date", "first"),
         n_pitchers=("pitcher_id", "count"),
+        team_ids=("pitcher_team_id", lambda s: frozenset(int(x) for x in s.dropna())),
     ).reset_index()
     grouped = grouped[grouped["n_pitchers"] == 2].copy()
+    grouped = grouped[grouped["team_ids"].apply(len) == 2].copy()
     grouped["total_std"] = np.sqrt(np.maximum(grouped["total_var"], 1.0))
     grouped["game_date"] = _norm_date(grouped["game_date"])
 
-    # Actual game totals: sum of pitcher actual_total_runs (both are same value)
-    actual_runs = preds.groupby("game_pk")["actual_total_runs"].first().reset_index()
+    # Actual game totals: the `actual_total_runs` column is per-pitcher (runs
+    # scored against that pitcher's team = the OPPOSING team's runs), so each
+    # game has two complementary values that sum to the real game total.
+    # Example: game 822828 -> pitcher@team141=8, pitcher@team142=2, total=10.
+    actual_runs = preds.groupby("game_pk")["actual_total_runs"].sum().reset_index()
     grouped = grouped.merge(actual_runs, on="game_pk", how="left")
     grouped = grouped.dropna(subset=["actual_total_runs"])
 
@@ -304,23 +376,35 @@ def validate_game_totals(
         subset=["game_date", "game_description", "line", "outcome_type"],
         keep="last",
     )
-    # Get over rows; book line
-    over = tot[tot["outcome_type"].str.lower() == "over"][
+    # Get over rows; book line. Use team_or_label (populated by both DK and Bovada)
+    # rather than outcome_type (DK-only).
+    over = tot[tot["team_or_label"].str.lower() == "over"][
         ["game_date", "game_description", "line"]
     ].drop_duplicates()
-
-    # Join — game_pk ↔ game_description mapping isn't direct. Use game_date +
-    # team match via pitcher team. Simpler: try to join on game_date only and
-    # pick the book line closest to our expected total.
     over["game_date"] = _norm_date(over["game_date"])
-    joined = grouped.merge(over, on="game_date", how="inner", suffixes=("", "_book"))
-    if joined.empty:
-        print("\n(no game_date overlap with game_odds_history; skipping)")
+
+    # Map each odds row's `game_description` to the pair of team_ids it represents,
+    # then join on (game_date, frozenset(team_ids)) so each predicted game is paired
+    # with its own book line rather than the nearest line from any game that day.
+    team_aliases = _load_team_aliases()  # team_id -> list[str] of name substrings
+    over["team_ids"] = over["game_description"].apply(
+        lambda d: _infer_team_ids(d, team_aliases),
+    )
+    over = over[over["team_ids"].apply(lambda s: isinstance(s, frozenset) and len(s) == 2)]
+    if over.empty:
+        print("\n(could not match any game_description to team_ids; skipping)")
         return
 
-    # One book row per game (closest by team if we could; by nearest line otherwise)
-    joined["book_diff"] = (joined["line"] - joined["total_exp"]).abs()
-    joined = joined.sort_values("book_diff").drop_duplicates("game_pk", keep="first")
+    # Per-game consensus book line: median across sources (DK + Bovada)
+    over = (
+        over.groupby(["game_date", "team_ids"])["line"]
+        .median()
+        .reset_index()
+    )
+    joined = grouped.merge(over, on=["game_date", "team_ids"], how="inner")
+    if joined.empty:
+        print("\n(no predicted games matched to book totals; skipping)")
+        return
 
     joined["model_p_over"] = joined.apply(
         lambda r: float(
