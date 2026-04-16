@@ -201,6 +201,10 @@ def fetch_bovada_game_odds() -> pd.DataFrame:
     for group in data:
         for event in group.get("events", []):
             game_desc = event.get("description", "")
+            # Skip placeholder/prop events whose description isn't a real
+            # matchup (e.g. "Away Total Runs @ Home Total Runs").
+            if "Total Runs" in game_desc:
+                continue
 
             for dg in event.get("displayGroups", []):
                 dg_desc = dg.get("description", "").lower()
