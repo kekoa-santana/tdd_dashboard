@@ -2,7 +2,7 @@
 The Data Diamond -- MLB Bayesian Projection Dashboard.
 
 Interactive Streamlit app for exploring hierarchical Bayesian player
-projections, posterior distributions, and game-level K predictions.
+projections, posterior distributions, and game-level stat predictions.
 
 Run:
     streamlit run app.py
