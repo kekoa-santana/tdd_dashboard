@@ -1,8 +1,7 @@
-"""Chart builders for the TDD Dashboard (matplotlib + plotly)."""
+"""Chart builders for the TDD Dashboard (plotly)."""
 from __future__ import annotations
 
 import matplotlib as mpl
-from matplotlib.figure import Figure
 import numpy as np
 import pandas as pd
 from scipy.stats import gaussian_kde
@@ -12,35 +11,6 @@ from config import (
     PITCH_DISPLAY, PITCH_ORDER, PITCH_TYPE_COLORS,
     PRIOR_SEASON,
 )
-from lib.theme import add_watermark as _theme_watermark
-
-
-def add_watermark(fig) -> None:
-    """Dashboard-specific watermark that scales to figure size."""
-    try:
-        from tdd_theme import LOGO_PATH
-        import matplotlib.image as mpimg
-        from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-
-        if not LOGO_PATH.exists():
-            return
-        logo_img = mpimg.imread(str(LOGO_PATH))
-        # Scale zoom to figure size — smaller charts get smaller watermarks
-        w, h = fig.get_size_inches()
-        zoom = min(w, h) * 0.04  # ~0.12–0.16 for typical 3–4 inch charts
-        zoom = max(0.08, min(zoom, 0.25))  # clamp range
-        imagebox = OffsetImage(logo_img, zoom=zoom, alpha=0.025)
-        imagebox.image.axes = fig.axes[0] if fig.axes else None
-        ab = AnnotationBbox(
-            imagebox, (0.5, 0.5),
-            xycoords="figure fraction",
-            frameon=False,
-            box_alignment=(0.5, 0.5),
-            zorder=0,
-        )
-        fig.add_artist(ab)
-    except (ImportError, Exception):
-        _theme_watermark(fig)
 
 
 def apply_dark_mpl() -> None:
@@ -58,12 +28,14 @@ def apply_dark_mpl() -> None:
         "axes.spines.right": False,
         "axes.spines.left": False,
         "axes.spines.bottom": False,
-        "font.size": 14,
+        "font.size": 11,
         "font.family": "sans-serif",
-        "axes.titlesize": 14,
-        "axes.labelsize": 12,
-        "xtick.labelsize": 11,
-        "ytick.labelsize": 11,
+        "axes.titlesize": 12,
+        "axes.labelsize": 10,
+        "xtick.labelsize": 9,
+        "ytick.labelsize": 9,
+        "legend.fontsize": 9,
+        "legend.framealpha": 0.15,
     })
 
 
@@ -970,13 +942,14 @@ def create_matchup_whiff_bars_fig(
     _str_df: pd.DataFrame,
     pitcher_name: str,
     hitter_name: str,
-) -> Figure | None:
-    """Grouped horizontal bars: pitcher vs hitter whiff% by pitch (usage → alpha).
+):
+    """Grouped horizontal bars: pitcher vs hitter whiff% by pitch (usage -> alpha).
 
+    Returns a plotly Figure (or None if insufficient data).
     ``_str_df`` is accepted for parity with ``build_matchup_table`` call sites.
     """
+    import plotly.graph_objects as go
     from lib.constants import LEAGUE_AVG_OVERALL
-    from matplotlib.patches import Patch
 
     p_df = arsenal_df.copy()
     p_df = p_df[p_df["pitches"] >= 20]
@@ -1019,50 +992,72 @@ def create_matchup_whiff_bars_fig(
         h_pct.append(hr)
 
     n = len(labels)
-    y = np.arange(n, dtype=float)
-    fig = Figure(figsize=(7, max(3.0, 0.38 * n + 1.2)))
-    ax = fig.subplots()
-    fig.patch.set_facecolor(DARK)
-    ax.set_facecolor(DARK)
+    if n == 0:
+        return None
 
-    h_bar = 0.16
-    for i in range(n):
-        alpha = 0.38 + 0.62 * min(max(usages[i], 0.0), 1.0)
-        alpha = min(alpha, 1.0)
-        if pd.notna(p_pct[i]):
-            ax.barh(
-                y[i] - 0.19, p_pct[i], height=h_bar,
-                color=SAGE, alpha=alpha, zorder=2,
-            )
-        if pd.notna(h_pct[i]):
-            ax.barh(
-                y[i] + 0.19, h_pct[i], height=h_bar,
-                color=EMBER, alpha=alpha, zorder=2,
-            )
+    p_opacities = [0.38 + 0.62 * min(max(u, 0.0), 1.0) for u in usages]
+    h_opacities = list(p_opacities)
 
-    ax.set_yticks(y, labels)
-    ax.set_xlabel("Whiff%", color=SLATE, fontsize=10)
-    ax.set_xlim(0, 52)
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-    ax.tick_params(colors=SLATE, labelsize=9)
-    ax.grid(axis="x", color=SLATE, alpha=0.15, linestyle="-", linewidth=0.5)
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        y=labels, x=p_pct, orientation="h",
+        name="Pitcher whiff%",
+        marker=dict(
+            color=[_hex_to_rgba(SAGE, a) for a in p_opacities],
+        ),
+        hovertemplate="%{y}: %{x:.1f}%<extra>Pitcher</extra>",
+        offsetgroup=0,
+    ))
+    fig.add_trace(go.Bar(
+        y=labels, x=h_pct, orientation="h",
+        name="Hitter whiff%",
+        marker=dict(
+            color=[_hex_to_rgba(EMBER, a) for a in h_opacities],
+        ),
+        hovertemplate="%{y}: %{x:.1f}%<extra>Hitter</extra>",
+        offsetgroup=1,
+    ))
 
     lg_w = LEAGUE_AVG_OVERALL.get("whiff_rate", 0.25) * 100
-    ax.axvline(lg_w, color=GOLD, linestyle="--", linewidth=0.8, alpha=0.5, zorder=1)
+    fig.add_vline(
+        x=lg_w, line_dash="dash", line_color=GOLD,
+        line_width=1, opacity=0.5,
+    )
 
-    leg = [
-        Patch(facecolor=SAGE, label="Pitcher whiff%", alpha=0.85),
-        Patch(facecolor=EMBER, label="Hitter whiff%", alpha=0.85),
-    ]
-    ax.legend(
-        handles=leg, loc="lower right", fontsize=8,
-        framealpha=0.15, labelcolor=CREAM, facecolor=DARK,
+    height = max(260, 38 * n + 80)
+    fig.update_layout(
+        barmode="group",
+        bargap=0.25,
+        bargroupgap=0.05,
+        title=dict(
+            text=f"P vs H whiff -- {pitcher_name} \u00b7 {hitter_name}",
+            font=dict(color=CREAM, size=12),
+            x=0.5, xanchor="center",
+        ),
+        xaxis=dict(
+            title=dict(text="Whiff%", font=dict(color=SLATE, size=10)),
+            range=[0, 52],
+            tickfont=dict(color=SLATE, size=9),
+            showgrid=True,
+            gridcolor="rgba(123,143,166,0.12)",
+            zeroline=False, showline=False,
+        ),
+        yaxis=dict(
+            tickfont=dict(color=SLATE, size=9),
+            autorange="reversed",
+            showgrid=False, zeroline=False, showline=False,
+        ),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=-0.15, x=0.5, xanchor="center",
+            font=dict(color=CREAM, size=9),
+            bgcolor="rgba(0,0,0,0)",
+        ),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=10, r=20, t=40, b=40),
+        height=height,
+        dragmode=False,
     )
-    ax.set_title(
-        f"P vs H whiff — {pitcher_name} · {hitter_name}",
-        color=CREAM, fontsize=11, pad=8,
-    )
-    fig.tight_layout()
-    add_watermark(fig)
+
     return fig

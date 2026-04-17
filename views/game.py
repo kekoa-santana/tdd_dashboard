@@ -18,6 +18,7 @@ from services.data_loader import (
 from components.team_logo import team_logo_html
 from components.headshot import headshot_html
 from components.grades import pitcher_grades_html, hitter_grades_html
+from utils.alerts import tdd_info, tdd_warn
 from components.sim_chart import render_player_sim_from_props, PITCHER_STAT_META, BATTER_STAT_META
 from components.scouting import render_scouting_html, compute_matchup_xwoba_edge
 from lib.fantasy_report import load_report_data, get_pitcher_scouting, ReportData
@@ -399,7 +400,7 @@ def _render_lineup_matchups(
             parts.append(f"{n_new} new batter(s)")
         if n_miss:
             parts.append(f"{n_miss} removed")
-        st.info(f"Lineup changed since last sim. {', '.join(parts)}.")
+        tdd_info(f"Lineup changed since last sim. {', '.join(parts)}.")
 
     _render_matchup_tab_sidebyside(
         sides, h_arch, h_stat,
@@ -451,7 +452,7 @@ def _render_game_selector() -> int | None:
         schedule = fetch_live_schedule(selected_date.isoformat())
 
     if schedule.empty:
-        st.info("No games found for this date.")
+        tdd_info("No games found for this date.")
         return None
 
     if "game_datetime_utc" in schedule.columns:
@@ -510,7 +511,7 @@ def page_game() -> None:
                 break
 
     if game is None:
-        st.warning("Game not found. It may be outside the available date range.")
+        tdd_warn("Game not found. It may be outside the available date range.")
         if st.button("Back to Schedule"):
             st.query_params["page"] = "schedule"
             st.rerun()

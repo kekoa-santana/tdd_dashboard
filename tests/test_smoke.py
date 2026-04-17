@@ -54,6 +54,9 @@ class TestImports:
     def test_import_page_projections(self):
         from views.projections import page_projections  # noqa: F401
 
+    def test_import_page_diamond_daily(self):
+        from views.diamond_daily import page_diamond_daily  # noqa: F401
+
     def test_import_page_player_profile(self):
         from views.player_profile import page_player_profile  # noqa: F401
 
@@ -133,6 +136,74 @@ class TestImports:
     def test_import_compute_over_probs(self):
         from lib.game_k_model import compute_over_probs  # noqa: F401
 
+    def test_import_leaderboard_renderer(self):
+        from components.leaderboard import render_card  # noqa: F401
+
+    def test_import_html_escape(self):
+        from utils.html import esc, esc_attr  # noqa: F401
+
+
+# =====================================================================
+# 1b. Shared component functional tests
+# =====================================================================
+class TestLeaderboardRenderer:
+    """Verify leaderboard renderer produces expected markup."""
+
+    def test_render_card_basic(self):
+        from components.leaderboard import render_card
+
+        html = render_card(
+            "Top 3 HR",
+            [
+                {"player_id": 1, "name": "Test", "value": "40", "team": "NYY"},
+                {"player_id": 2, "name": "Other", "value": "38"},
+            ],
+        )
+        assert 'class="lb-card"' in html
+        assert 'class="lb-title"' in html
+        assert "Top 3 HR" in html
+        assert 'data-team="NYY"' in html
+
+    def test_render_card_escapes_html(self):
+        from components.leaderboard import render_card
+
+        html = render_card(
+            "<script>alert(1)</script>",
+            [{"player_id": 1, "name": 'O"Brien <b>', "value": "5", "team": "A&B"}],
+        )
+        assert "<script>" not in html
+        assert "&lt;script&gt;" in html
+        assert 'O"Brien &lt;b&gt;' in html
+        assert "A&amp;B" in html
+
+    def test_render_card_watch_rows(self):
+        from components.leaderboard import render_card
+
+        html = render_card(
+            "Title",
+            [{"player_id": 1, "name": "Main", "value": "10"}],
+            watch_rows=[{"player_id": 2, "name": "Watcher", "value": "5", "team": "BOS"}],
+        )
+        assert "Players to Watch" in html
+        assert "Watcher" in html
+        assert 'class="lb-watch-row"' in html
+
+
+class TestHtmlEscape:
+    """Verify HTML escape helpers."""
+
+    def test_esc_basic(self):
+        from utils.html import esc
+        assert esc("a<b>c") == "a&lt;b&gt;c"
+        assert esc("a&b") == "a&amp;b"
+        assert esc(None) == ""
+        assert esc(42) == "42"
+
+    def test_esc_attr_quotes(self):
+        from utils.html import esc_attr
+        assert esc_attr('a"b') == "a&quot;b"
+        assert esc_attr("a'b") == "a&#x27;b"
+        assert esc_attr(None) == ""
 
 
 # =====================================================================

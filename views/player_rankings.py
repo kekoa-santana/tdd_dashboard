@@ -8,6 +8,8 @@ from config import GOLD, EMBER, SAGE, SLATE, CREAM
 from components.metric_cards import metric_card
 from components.expandable_card import EXPANDABLE_CARD_CSS, expandable_card_html
 from components.headshot import headshot_html
+from utils.alerts import tdd_info, tdd_warn
+from utils.html import esc, esc_attr
 from lib.diamond_rating import score_to_diamonds
 from services.data_loader import (
     load_core_rankings,
@@ -462,7 +464,7 @@ def _render_ranking_card(
         hs = f'<span class="lb-headshot">{headshot_html(pid, size=50)}</span>'
 
         team = teams_lookup.get(pid, "")
-        team_html = f'<span class="lb-team" data-team="{team}">{team}</span>' if team else ""
+        team_html = f'<span class="lb-team" data-team="{esc_attr(team)}">{esc(team)}</span>' if team else ""
 
         info_html = ""
         if info_col and info_col in row.index and pd.notna(row[info_col]):
@@ -487,7 +489,7 @@ def _render_ranking_card(
         # When not expandable, keep clickable name link
         if not expandable and link_type:
             profile_url = f"?page=player_profile&player_id={pid}&player_type={link_type}"
-            name_content = f'<a href="{profile_url}">{name}</a>'
+            name_content = f'<a href="{profile_url}">{esc(name)}</a>'
         else:
             name_content = name
 
@@ -531,7 +533,7 @@ def _render_ranking_card(
                 f'<div style="display:flex; align-items:center; gap:0.8rem; margin-bottom:0.6rem;">'
                 f'{headshot_html(pid, size=80)}'
                 f'<div>'
-                f'<div style="color:var(--tdd-cream); font-size:1.1rem; font-weight:700;">{name}</div>'
+                f'<div style="color:var(--tdd-cream); font-size:1.1rem; font-weight:700;">{esc(name)}</div>'
                 f'<div style="color:var(--tdd-slate); font-size:0.8rem;">'
                 f'{row.get(info_col, "") if info_col else ""}'
                 f'{" · " + team if team else ""}</div>'
@@ -676,7 +678,7 @@ def _render_batter_rankings(
         df = df[df["batter_id"].isin(nl_ids)]
 
     if df.empty:
-        st.info("No matching batters found.")
+        tdd_info("No matching batters found.")
         return
 
     # Resolve columns based on value mode
@@ -755,7 +757,7 @@ def _render_pitcher_rankings(
         df = df[df["pitcher_id"].isin(nl_ids)]
 
     if df.empty:
-        st.info("No matching pitchers found.")
+        tdd_info("No matching pitchers found.")
         return
 
     # Resolve columns based on value mode
@@ -843,7 +845,7 @@ def _render_prospect_rankings(df: pd.DataFrame, search: str = "") -> None:
         ]
 
     if filtered.empty:
-        st.info("No matching hitting prospects found.")
+        tdd_info("No matching hitting prospects found.")
         return
 
     # Summary metrics
@@ -949,7 +951,7 @@ def _render_pitching_prospect_rankings(df: pd.DataFrame, search: str = "") -> No
         ]
 
     if filtered.empty:
-        st.info("No matching pitching prospects found.")
+        tdd_info("No matching pitching prospects found.")
         return
 
     # Summary metrics
@@ -1033,7 +1035,7 @@ def _style_readiness_tier(val: str) -> str:
 
 def _render_prospect_readiness(df: pd.DataFrame) -> None:
     """Render prospect readiness scores with filters."""
-    col_tier, col_pos, col_level, col_search = st.columns([1, 1, 1, 2])
+    col_tier, col_pos, col_search = st.columns(3)
 
     with col_tier:
         tier_options = ["All", "Elite", "Strong", "Developing", "Fringe"]
@@ -1041,11 +1043,10 @@ def _render_prospect_readiness(df: pd.DataFrame) -> None:
     with col_pos:
         pos_groups = ["All"] + sorted(df["pos_group"].dropna().unique().tolist()) if "pos_group" in df.columns else ["All"]
         pos_filter = st.selectbox("Position", pos_groups, key="rank_rd_pos")
-    with col_level:
-        levels = [lv for lv in _LEVEL_ORDER if lv in df["max_level"].unique()] if "max_level" in df.columns else []
-        level_filter = st.selectbox("Highest Level", ["All"] + levels, key="rank_rd_level")
     with col_search:
         search = st.text_input("Search player", key="rank_rd_search")
+    levels = [lv for lv in _LEVEL_ORDER if lv in df["max_level"].unique()] if "max_level" in df.columns else []
+    level_filter = st.selectbox("Highest Level", ["All"] + levels, key="rank_rd_level")
 
     filtered = df.copy()
     if tier_filter != "All":
@@ -1107,7 +1108,7 @@ def _render_prospect_readiness(df: pd.DataFrame) -> None:
     if "Tier" in display_df.columns:
         styler = styler.map(_style_readiness_tier, subset=["Tier"])
 
-    st.dataframe(styler, width='stretch', hide_index=True, height=600)
+    st.dataframe(styler, use_container_width=True, hide_index=True, height=600)
 
     st.caption(
         "**Readiness Score** = probability of sticking in MLB (200+ PA season), "
@@ -1146,11 +1147,11 @@ def _render_prospect_readiness(df: pd.DataFrame) -> None:
                     "Factor": "{:.3f}", "P25": "{:.3f}", "P75": "{:.3f}",
                     "Sample Size": "{:,.0f}",
                 }, na_rep=""),
-                width='stretch',
+                use_container_width=True,
                 hide_index=True,
             )
         else:
-            st.info("Translation factors not available.")
+            tdd_info("Translation factors not available.")
 
 
 # ── Main page ────────────────────────────────────────────────────────────────
@@ -1161,7 +1162,7 @@ def page_player_rankings() -> None:
     st.markdown(EXPANDABLE_CARD_CSS, unsafe_allow_html=True)
 
     # Inline toolbar: Category | Value Mode | League | Search
-    tb1, tb2, tb3, tb4 = st.columns([1.5, 1.5, 0.7, 2.5])
+    tb1, tb2, tb3 = st.columns(3)
     with tb1:
         category = st.selectbox(
             "Category",
@@ -1178,17 +1179,16 @@ def page_player_rankings() -> None:
             disabled=category not in ("Batters", "Pitchers"),
         )
     with tb3:
-        league_filter = st.selectbox(
-            "League", ["All", "AL", "NL"],
-            key="rank_league",
-            label_visibility="collapsed",
-            disabled=category not in ("Batters", "Pitchers"),
-        )
-    with tb4:
         search = st.text_input(
             "Search", placeholder="Search player...",
             key="rank_search", label_visibility="collapsed",
         )
+    league_filter = st.selectbox(
+        "League", ["All", "AL", "NL"],
+        key="rank_league",
+        label_visibility="collapsed",
+        disabled=category not in ("Batters", "Pitchers"),
+    )
 
     # "Overall Rating" = scouting-informed comprehensive ranking (default)
     # "Projected Value" = forward-looking 2-3 year outlook (trajectory, age, production)
@@ -1211,7 +1211,7 @@ def page_player_rankings() -> None:
     if category == "Batters":
         df = load_core_rankings("hitters")
         if df.empty:
-            st.warning(
+            tdd_warn(
                 "No batter core rankings found. Build "
                 "``hitters_core_rankings.parquet`` (precompute player rankings)."
             )
@@ -1229,7 +1229,7 @@ def page_player_rankings() -> None:
     elif category == "Pitchers":
         df = load_core_rankings("pitchers")
         if df.empty:
-            st.warning(
+            tdd_warn(
                 "No pitcher core rankings found. Build "
                 "``pitchers_core_rankings.parquet`` (precompute player rankings)."
             )
@@ -1247,20 +1247,20 @@ def page_player_rankings() -> None:
     elif category == "Hitting Prospects":
         df = load_rankings("prospect")
         if df.empty:
-            st.warning("No prospect rankings data found. Run precompute first.")
+            tdd_warn("No prospect rankings data found. Run precompute first.")
             return
         _render_prospect_rankings(df, search=search)
 
     elif category == "Pitching Prospects":
         df = load_rankings("pitching_prospect")
         if df.empty:
-            st.warning("No pitching prospect rankings data found. Run precompute first.")
+            tdd_warn("No pitching prospect rankings data found. Run precompute first.")
             return
         _render_pitching_prospect_rankings(df, search=search)
 
     else:  # Prospect Readiness
         df = load_prospect_readiness()
         if df.empty:
-            st.warning("No prospect readiness data found. Run precompute first.")
+            tdd_warn("No prospect readiness data found. Run precompute first.")
             return
         _render_prospect_readiness(df)

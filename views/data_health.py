@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from utils.alerts import tdd_info, tdd_warn
 from config import (
     GOLD, SAGE, EMBER, DASHBOARD_DIR,
     CURRENT_SEASON, PRIOR_SEASON, TRAIN_START, TRAIN_END,
@@ -103,7 +104,7 @@ def page_data_health() -> None:
     meta = load_update_metadata()
 
     if not meta:
-        st.warning("No update metadata found. Run the update pipeline to generate one.")
+        tdd_warn("No update metadata found. Run the update pipeline to generate one.")
     else:
         # Compute freshness
         hours_since: float | None = None
@@ -173,7 +174,7 @@ def page_data_health() -> None:
     df_snap = _scan_artifacts(str(snapshot_dir))
 
     if df_main.empty:
-        st.info("No artifacts found in data/dashboard/.")
+        tdd_info("No artifacts found in data/dashboard/.")
     else:
         st.markdown(
             f'<span class="tdd-meta">'
@@ -184,7 +185,7 @@ def page_data_health() -> None:
         )
         display_df = df_main[["filename", "size", "last_modified", "rows"]].copy()
         display_df.columns = ["Filename", "Size", "Last Modified", "Rows"]
-        st.dataframe(display_df, width='stretch', hide_index=True)
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     if not df_snap.empty:
         st.markdown(
@@ -196,7 +197,7 @@ def page_data_health() -> None:
         )
         display_snap = df_snap[["filename", "size", "last_modified", "rows"]].copy()
         display_snap.columns = ["Filename", "Size", "Last Modified", "Rows"]
-        st.dataframe(display_snap, width='stretch', hide_index=True)
+        st.dataframe(display_snap, use_container_width=True, hide_index=True)
 
     # ------------------------------------------------------------------
     # Section 3: Manifest Validation
@@ -211,7 +212,7 @@ def page_data_health() -> None:
 
         manifest_path = DASHBOARD_DIR / "manifest.json"
         if not manifest_path.exists():
-            st.info(
+            tdd_info(
                 "No manifest found. Run update pipeline to generate one."
             )
         else:
@@ -286,7 +287,7 @@ def page_data_health() -> None:
                 )
 
     except ImportError:
-        st.info("Manifest validation is not yet available (services/manifest.py not found).")
+        tdd_info("Manifest validation is not yet available (services/manifest.py not found).")
 
     # ------------------------------------------------------------------
     # Section 4: Config Summary

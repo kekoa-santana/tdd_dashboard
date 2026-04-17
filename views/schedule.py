@@ -10,6 +10,7 @@ import streamlit as st
 from config import (
     GOLD, EMBER, SAGE, SLATE, CREAM, POSITIVE, NEGATIVE, DASHBOARD_DIR,
 )
+from utils.alerts import tdd_info
 from services.data_loader import (
     load_todays_games, load_todays_lineups, load_todays_batter_sims,
     load_update_metadata, load_pitcher_arsenal, load_hitter_vulnerability,
@@ -21,6 +22,7 @@ from services.data_loader import (
     load_pitcher_game_sim_samples, load_batter_game_sim_samples,
 )
 from utils.helpers import format_ip, format_game_time
+from utils.html import esc, esc_attr
 from components.diamond_rating import diamond_rating_html
 from components.expandable_card import EXPANDABLE_CARD_CSS, expandable_card_html
 from components.team_logo import team_logo_html
@@ -329,7 +331,7 @@ def _render_schedule_cards(
         return _drilldown_data
 
     if schedule.empty:
-        st.info("No games scheduled for this date.")
+        tdd_info("No games scheduled for this date.")
         return
 
     n_games = len(schedule)
@@ -343,15 +345,14 @@ def _render_schedule_cards(
 
     if sims_stale:
         st.markdown(
-            f'<div style="color:var(--tdd-ember); font-size:0.85rem; margin-bottom:0.5rem;">'
-            f'Simulations are from a previous date | showing base projections only.'
-            f'</div>',
+            '<div class="tdd-callout-warn">'
+            'Simulations are from a previous date | showing base projections only.'
+            '</div>',
             unsafe_allow_html=True,
         )
 
     st.markdown(
-        f'<div style="color:var(--tdd-slate); font-size:0.9rem; margin-bottom:1rem;">'
-        f'{n_games} games</div>',
+        f'<div class="tdd-game-count">{n_games} games</div>',
         unsafe_allow_html=True,
     )
 
@@ -406,11 +407,11 @@ def _render_schedule_cards(
         status_badge = ""
         if status:
             if status in ("In Progress", "Live"):
-                status_badge = f'<span style="color:var(--tdd-sage); font-size:0.75rem; font-weight:600;">● LIVE</span>'
+                status_badge = '<span class="tdd-status-live">● LIVE</span>'
             elif "Final" in status:
-                status_badge = f'<span style="color:var(--tdd-slate); font-size:0.75rem;">{status}</span>'
+                status_badge = f'<span class="tdd-status-final">{status}</span>'
             elif "Scheduled" not in status:
-                status_badge = f'<span style="color:var(--tdd-slate); font-size:0.75rem;">{status}</span>'
+                status_badge = f'<span class="tdd-status-final">{status}</span>'
 
         # Game context
         venue_name = game.get("venue_name", "")
@@ -539,7 +540,7 @@ def _render_schedule_cards(
         n_pitchers = len(pitcher_sims)
         st.markdown("---")
         st.markdown(
-            f'<div style="color:var(--tdd-slate); font-size:0.8rem;">'
+            f'<div class="tdd-sim-summary">'
             f'{n_pitchers} pitchers simulated | '
             f'10,000 Monte Carlo draws per pitcher</div>',
             unsafe_allow_html=True,
@@ -609,10 +610,8 @@ def _render_props_section(
         game_df = game_df[is_pitcher | is_in_lineup].copy()
     else:
         st.markdown(
-            '<div style="background:var(--tdd-dark-border); border-left:3px solid '
-            'var(--tdd-gold); padding:0.4rem 0.75rem; margin-bottom:0.5rem; '
-            'font-size:0.8rem; color:var(--tdd-gold);">'
-            'Estimated lineup — probable lineup not yet released'
+            '<div class="tdd-callout">'
+            'Estimated lineup -- probable lineup not yet released'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -679,8 +678,7 @@ def _render_props_section(
     st.markdown(EXPANDABLE_CARD_CSS, unsafe_allow_html=True)
 
     st.markdown(
-        '<div style="font-size:0.85rem; font-weight:600; color:var(--tdd-sage); '
-        'margin:0.6rem 0 0.3rem; letter-spacing:0.3px;">Over Projections</div>',
+        '<div class="tdd-props-header">Over Projections</div>',
         unsafe_allow_html=True,
     )
     if pop_df.empty:
@@ -753,8 +751,8 @@ def _prop_card_html(row: pd.Series) -> str:
         f'border:1px solid var(--tdd-dark-border); border-radius:3px; '
         f'padding:0 0.25rem; flex-shrink:0;">{type_badge}</span>'
         # Name + team
-        f'<span class="tdd-player-name" style="min-width:0; flex:1;">{name}'
-        f'<span class="tdd-stat-label" style="margin-left:0.3rem;">{team} vs {opp}</span></span>'
+        f'<span class="tdd-player-name" style="min-width:0; flex:1;">{esc(name)}'
+        f'<span class="tdd-stat-label" style="margin-left:0.3rem;">{esc(team)} vs {esc(opp)}</span></span>'
         # Stat + expected
         f'<span style="color:var(--tdd-cream); font-size:0.8rem; flex-shrink:0;">'
         f'{stat_label} {expected:.2f}</span>'
@@ -855,7 +853,7 @@ def _render_game_drilldown(
                 parts.append(f"{n_new} new batter(s)")
             if n_miss:
                 parts.append(f"{n_miss} removed")
-            st.info(f"Lineup changed since last sim. {', '.join(parts)}. Sims will auto-update shortly.")
+            tdd_info(f"Lineup changed since last sim. {', '.join(parts)}. Sims will auto-update shortly.")
 
         _render_matchup_tab_sidebyside(
             sides, h_arch_lookup, h_stat_lookup,
@@ -1278,6 +1276,22 @@ def page_schedule() -> None:
 
     # Use ET date as "today" (MLB games are scheduled in ET)
     meta = load_update_metadata()
+
+    # Freshness badge
+    _last = meta.get("last_updated", "") if meta else ""
+    if _last:
+        try:
+            from datetime import datetime as _dt
+            _ts = _dt.fromisoformat(_last.replace("Z", "+00:00"))
+            _ago = (datetime.now(timezone.utc) - _ts).total_seconds() / 3600
+            _fresh_color = "var(--tdd-sage)" if _ago < 6 else "var(--tdd-gold)" if _ago < 24 else "var(--tdd-ember)"
+            st.markdown(
+                f'<div class="tdd-meta" style="margin-bottom:0.5rem;">'
+                f'<span style="color:{_fresh_color};">Data updated {_ago:.0f}h ago</span></div>',
+                unsafe_allow_html=True,
+            )
+        except Exception:
+            pass
     utc_now = datetime.now(timezone.utc)
     et_now = utc_now - timedelta(hours=4)  # EDT during baseball season
     today = et_now.date()
@@ -1300,44 +1314,61 @@ def page_schedule() -> None:
     selected_date = dates[date_labels.index(selected_label)]
     is_today = selected_date == today
 
-    if is_today:
-        # Today: use cached parquets if they match today's date
-        schedule = load_todays_games()
-        cached_date = (
-            schedule["game_date"].iloc[0]
-            if not schedule.empty and "game_date" in schedule.columns
-            else None
+    tomorrow = today + timedelta(days=1)
+    is_tomorrow = selected_date == tomorrow
+    cached_all = load_todays_games()
+    cached_dates = (
+        set(cached_all["game_date"].astype(str).unique())
+        if not cached_all.empty and "game_date" in cached_all.columns
+        else set()
+    )
+    cache_has_today = today.isoformat() in cached_dates
+    cache_has_tomorrow = tomorrow.isoformat() in cached_dates
+
+    if is_today and cache_has_today:
+        schedule = cached_all[cached_all["game_date"] == today.isoformat()].copy()
+        sims = load_game_props()
+        lineups = load_todays_lineups()
+        if not lineups.empty and "game_pk" in lineups.columns and not schedule.empty:
+            lineups = lineups[lineups["game_pk"].isin(schedule["game_pk"])]
+        lineups = backfill_missing_lineups(schedule, lineups)
+        # Overlay live game status from MLB API so cards reflect
+        # current state (In Progress / Final) between refreshes
+        try:
+            live_sched = fetch_live_schedule(today.isoformat())
+            if (
+                not live_sched.empty
+                and "game_pk" in live_sched.columns
+                and "status" in live_sched.columns
+            ):
+                live_status = live_sched.set_index("game_pk")["status"]
+                schedule["status"] = (
+                    schedule["game_pk"]
+                    .map(live_status)
+                    .fillna(schedule["status"])
+                )
+        except Exception:
+            pass  # keep cached status on API failure
+    elif is_tomorrow and cache_has_tomorrow:
+        # Once today's slate is underway, update_in_season.py extends
+        # the refresh to tomorrow, writing those rows into the same
+        # parquets. Use them instead of falling back to a sim-less
+        # live fetch.
+        schedule = cached_all[cached_all["game_date"] == tomorrow.isoformat()].copy()
+        sims = load_game_props()
+        lineups = load_todays_lineups()
+        if not lineups.empty and "game_pk" in lineups.columns and not schedule.empty:
+            lineups = lineups[lineups["game_pk"].isin(schedule["game_pk"])]
+        lineups = backfill_missing_lineups(schedule, lineups)
+    elif is_today:
+        # Parquets are stale (e.g. past midnight), fetch live
+        schedule = fetch_live_schedule(today.isoformat())
+        lineups = (
+            fetch_live_lineups(schedule)
+            if not schedule.empty
+            else pd.DataFrame()
         )
-        if cached_date == today.isoformat():
-            sims = load_game_props()
-            lineups = load_todays_lineups()
-            lineups = backfill_missing_lineups(schedule, lineups)
-            # Overlay live game status from MLB API so cards reflect
-            # current state (In Progress / Final) between refreshes
-            try:
-                live_sched = fetch_live_schedule(today.isoformat())
-                if (
-                    not live_sched.empty
-                    and "game_pk" in live_sched.columns
-                    and "status" in live_sched.columns
-                ):
-                    live_status = live_sched.set_index("game_pk")["status"]
-                    schedule["status"] = (
-                        schedule["game_pk"]
-                        .map(live_status)
-                        .fillna(schedule["status"])
-                    )
-            except Exception:
-                pass  # keep cached status on API failure
-        else:
-            # Parquets are stale (e.g. past midnight), fetch live
-            schedule = fetch_live_schedule(today.isoformat())
-            lineups = (
-                fetch_live_lineups(schedule)
-                if not schedule.empty
-                else pd.DataFrame()
-            )
-            sims = load_game_props()
+        sims = load_game_props()
     else:
         # Other dates: fetch schedule from MLB API, no sims
         schedule = fetch_live_schedule(selected_date.isoformat())

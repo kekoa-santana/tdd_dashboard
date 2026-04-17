@@ -3,7 +3,10 @@ primaryColor = "#C8A96E"
 backgroundColor = "#0F1117"
 secondaryBackgroundColor = "#181b23"
 textColor = "#F5F2EE"
-font = "sans serif"
+font = "monospace"
+
+[client]
+toolbarMode = "minimal"
 
 [server]
 headless = true

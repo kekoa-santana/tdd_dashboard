@@ -10,6 +10,7 @@ from config import (
     POSITIVE, NEGATIVE,
     CURRENT_SEASON, PRIOR_SEASON,
 )
+from utils.alerts import tdd_info, tdd_warn
 from services.data_loader import (
     load_projections, load_counting, load_roster,
     load_preseason_injuries,
@@ -18,6 +19,7 @@ from services.data_loader import (
     load_team_elo_history,
     load_standings,
 )
+from utils.html import esc, esc_attr
 
 # ── Constants ─────────────────────────────────────────────────────────
 _HITTER_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"]
@@ -28,11 +30,11 @@ _PILL_COLORS = {
     # Pitcher archetypes
     "Command Specialist": SAGE, "Breaking-Ball Heavy": EMBER,
     "Balanced Mix": SLATE, "Power Arm": GOLD,
-    "Fastball Dominant": "#3498DB", "Ground-Ball Artist": "#9B59B6",
+    "Fastball Dominant": POSITIVE, "Ground-Ball Artist": NEGATIVE,
     # Hitter archetypes
     "Patient Power": GOLD, "Contact-Over-Power": SAGE,
-    "Speed Threat": "#3498DB", "Power Slugger": EMBER,
-    "Balanced All-Around": SLATE, "Free Swinger": "#9B59B6",
+    "Speed Threat": POSITIVE, "Power Slugger": EMBER,
+    "Balanced All-Around": SLATE, "Free Swinger": NEGATIVE,
 }
 
 _HEALTH_COLORS = {
@@ -80,7 +82,7 @@ def _render_team_profile_tab(
     elo_history = load_team_elo_history()
 
     if rankings.empty and profiles.empty and elo_df.empty:
-        st.info("No team intelligence data available. Run precompute first.")
+        tdd_info("No team intelligence data available. Run precompute first.")
         return
 
     # Find this team's data
@@ -89,7 +91,7 @@ def _render_team_profile_tab(
     team_elo = elo_df[elo_df["abbreviation"] == selected_team] if not elo_df.empty else pd.DataFrame()
 
     if team_rank.empty and team_elo.empty:
-        st.info(f"No profile data for {selected_team}.")
+        tdd_info(f"No profile data for {selected_team}.")
         return
 
     tr = team_rank.iloc[0] if not team_rank.empty else pd.Series(dtype=float)
@@ -170,7 +172,7 @@ def _render_team_profile_tab(
                 f'<span class="tdd-stat-value" style="color:{color}; min-width:2.5rem; '
                 f'font-weight:700;">#{league_rank}</span>'
                 f'<span class="tdd-meta" style="min-width:2rem; color:{SLATE};">{pos}</span>'
-                f'<span style="color:var(--tdd-cream); flex:1;">{name}</span>'
+                f'<span style="color:var(--tdd-cream); flex:1;">{esc(name)}</span>'
                 f'<span class="tdd-stat-value" style="color:var(--tdd-gold);">{diamonds:.1f}</span>'
                 f'</div>'
             )
@@ -218,7 +220,7 @@ def _render_team_profile_tab(
         styles = []
         off_style = tr.get("offense_style")
         if pd.notna(off_style):
-            s_color = GOLD if off_style == "Power" else SAGE if off_style == "Contact" else "#3498DB" if off_style == "Smallball" else SLATE
+            s_color = GOLD if off_style == "Power" else SAGE if off_style == "Contact" else POSITIVE if off_style == "Smallball" else SLATE
             styles.append(_pill(f"\u26be {off_style}", s_color))
         pit_style = tr.get("pitching_style")
         if pd.notna(pit_style):
@@ -458,7 +460,7 @@ def _render_team_profile_tab(
             styled = display.style.apply(_highlight_team, axis=1).format(
                 {c: "{:.2f}" for c in ["Score", "Off", "Pit", "Def"] if c in display.columns}
             )
-            st.dataframe(styled, width='stretch', hide_index=True, height=500)
+            st.dataframe(styled, use_container_width=True, hide_index=True, height=500)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -515,7 +517,7 @@ def _player_row_html(
         f'margin-bottom:2px; display:flex; align-items:center; gap:8px; '
         f'flex-wrap:wrap; opacity:{opacity};">'
         f'<span class="tdd-player-name" style="font-weight:{"700" if is_first else "400"}; '
-        f'min-width:6rem; flex-shrink:1;">{name}</span>'
+        f'min-width:6rem; flex-shrink:1;">{esc(name)}</span>'
         f'{hand_html}'
         f'{rank_html}'
         f'<span class="tdd-stat-value" style="color:var(--tdd-gold); min-width:2.5rem;">{score * 10:.1f}</span>'
@@ -541,12 +543,12 @@ def _render_depth_chart_tab(
     # actual current-season lineups (set by precompute run_roster).
     roster = load_roster()
     if roster.empty:
-        st.info("No roster data available.")
+        tdd_info("No roster data available.")
         return
 
     team_roster = roster[roster["team_abbr"] == selected_team].copy()
     if team_roster.empty:
-        st.info("No roster data for this team.")
+        tdd_info("No roster data for this team.")
         return
 
     team_pids = set(team_roster["player_id"].astype(int))
@@ -604,11 +606,11 @@ def _render_depth_chart_tab(
             name = starter_row["player_name"]
             player_parts.append(
                 f'<span style="color:var(--tdd-cream); font-weight:600; '
-                f'font-size:0.88rem;">{name}</span>'
+                f'font-size:0.88rem;">{esc(name)}</span>'
             )
         for brow in bench_at_pos[:3]:
             player_parts.append(
-                f'<span class="tdd-context">{brow["player_name"]}</span>'
+                f'<span class="tdd-context">{esc(brow["player_name"])}</span>'
             )
 
         st.markdown(
@@ -646,6 +648,7 @@ def _render_depth_chart_tab(
 def _render_pitching_depth(team_p: pd.DataFrame) -> None:
     """Render pitching depth — rotation + bullpen."""
     if team_p.empty:
+        tdd_info("No ranked pitchers found for this team.")
         return
     st.markdown("### Pitching Depth")
 
@@ -866,7 +869,7 @@ def _render_trade_simulator_tab(
             })
 
     if not assets:
-        st.info("No ranked players available for trade selection.")
+        tdd_info("No ranked players available for trade selection.")
         return
 
     selected_assets = st.multiselect(
@@ -899,7 +902,7 @@ def _render_trade_simulator_tab(
             offered_positions=offered_positions,
         )
         if matches.empty:
-            st.info(f"No trade candidates found at {target_pos}.")
+            tdd_info(f"No trade candidates found at {target_pos}.")
         else:
             _render_trade_results(matches, trade_capital, target_pos, selected_team, teams_df)
 
@@ -951,8 +954,8 @@ def _render_trade_results(
 
         rows_html += (
             f'<tr>'
-            f'<td class="tdd-player-name" style="padding:6px 10px;">{name}</td>'
-            f'<td class="tdd-stat-label" style="padding:6px 10px;" data-team="{team}">{team}</td>'
+            f'<td class="tdd-player-name" style="padding:6px 10px;">{esc(name)}</td>'
+            f'<td class="tdd-stat-label" style="padding:6px 10px;" data-team="{esc_attr(team)}">{esc(team)}</td>'
             f'<td style="padding:6px 10px;">{arch_html}</td>'
             f'<td class="tdd-stat-value" style="padding:6px 10px;color:var(--tdd-gold);">{score:.2f}</td>'
             f'<td style="padding:6px 10px;">#{rank}</td>'
@@ -1066,7 +1069,7 @@ def page_team_overview() -> None:
 
     teams_df = load_roster()
     if teams_df.empty:
-        st.warning("No team data found. Run precompute first.")
+        tdd_warn("No team data found. Run precompute first.")
         return
 
     all_teams = sorted(

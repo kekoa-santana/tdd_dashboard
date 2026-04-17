@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from config import GOLD, EMBER, SAGE, SLATE, DARK_BORDER
+from utils.alerts import tdd_info, tdd_warn
 
 from components.expandable_card import EXPANDABLE_CARD_CSS, expandable_card_html
 from components.team_logo import team_logo_html
@@ -68,25 +69,6 @@ _CSS = f"""
 .tr-view-link:hover {{ text-decoration: underline; }}
 .tr-style-pills {{ margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 4px; }}
 
-/* ── leaderboard cards (reuse lb- naming) ─────────── */
-.lb-title-row {{ display: flex; justify-content: space-between; align-items: baseline;
-                margin-bottom: 0.5rem; padding-bottom: 0.4rem;
-                border-bottom: 1px solid var(--tdd-dark-border); }}
-.lb-title {{ color: var(--tdd-gold); font-size: 1.0rem; font-weight: 700; letter-spacing: 0.5px; }}
-.lb-scroll {{ overflow-y: auto; }}
-.lb-scroll::-webkit-scrollbar {{ width: 6px; }}
-.lb-scroll::-webkit-scrollbar-track {{ background: transparent; }}
-.lb-scroll::-webkit-scrollbar-thumb {{ background: rgba(200,169,110,0.3); border-radius: 3px; }}
-.lb-row {{ display: flex; align-items: center; padding: 0.28rem 0;
-          border-bottom: 1px solid var(--tdd-dark-border-faint); }}
-.lb-row:last-child {{ border-bottom: none; }}
-.lb-rank {{ color: var(--tdd-slate); font-size: 0.82rem; min-width: 1.6rem;
-           text-align: right; margin-right: 0.5rem; }}
-.lb-rank-top {{ color: var(--tdd-gold); font-weight: 700; }}
-.lb-name {{ color: var(--tdd-cream); font-size: 0.90rem; font-weight: 600; flex: 1; }}
-.lb-elo-val {{ color: var(--tdd-cream); font-size: 0.85rem; font-weight: 700; min-width: 3rem;
-              text-align: right; }}
-
 /* ── tier group grid ──────────────────────────────── */
 .tr-tier-card {{ background: transparent; border: none;
                 border-bottom: 1px solid var(--tdd-dark-border); border-radius: 0; padding: 0.8rem 0; }}
@@ -106,18 +88,6 @@ _CSS = f"""
     font-size: 1.2rem !important; font-weight: 800 !important;
     color: var(--tdd-gold) !important; cursor: pointer !important; }}
 
-/* ── responsive ───────────────────────────────────── */
-@media (max-width: 1024px) {{
-    .tr-diamonds {{ display: none; }}
-    .tr-stat {{ display: none; }}
-}}
-@media (max-width: 1024px) {{
-    .tr-detail-grid {{ flex-direction: column; }}
-    .tr-detail-left, .tr-detail-right {{ width: 100%; }}
-}}
-@media (max-width: 480px) {{
-    .tr-name {{ font-size: 0.85rem; }}
-}}
 </style>
 """
 
@@ -430,7 +400,7 @@ def _render_diamond_leaderboard(
 ) -> None:
     """Scrollable TDD Diamond Rating leaderboard card for teams."""
     if diamond_col not in df.columns:
-        st.info(f"No {title} data available.")
+        tdd_info(f"No {title} data available.")
         return
 
     sorted_df = df.dropna(subset=[diamond_col]).sort_values(
@@ -522,7 +492,7 @@ def page_team_rankings() -> None:
     _standings = load_standings()
 
     if rankings.empty:
-        st.warning("No team rankings data found. Run precompute first.")
+        tdd_warn("No team rankings data found. Run precompute first.")
         return
 
     # ── category filter ──
@@ -541,7 +511,7 @@ def page_team_rankings() -> None:
         filtered = filtered[mask]
 
     if filtered.empty:
-        st.info("No matching teams found.")
+        tdd_info("No matching teams found.")
         return
 
     # ── Section 1: Power Rankings ──
