@@ -5,6 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from utils.alerts import tdd_info, tdd_warn
 from config import GOLD, SAGE, SLATE, DARK_BORDER, DASHBOARD_DIR
 from components.team_logo import team_logo_html
 from services.data_loader import load_team_rankings
@@ -143,14 +144,14 @@ def page_division_standings() -> None:
     with tab_current:
         rankings = load_team_rankings()
         if rankings.empty:
-            st.warning("No team rankings data found. Run precompute first.")
+            tdd_warn("No team rankings data found. Run precompute first.")
         else:
             _render_divisions(rankings, _standings)
 
     with tab_preseason:
         preseason = _load_preseason_rankings()
         if preseason.empty:
-            st.warning("No preseason snapshot found.")
+            tdd_warn("No preseason snapshot found.")
         else:
             st.markdown(
                 '<div class="tdd-meta" style="margin-bottom:0.8rem;">'

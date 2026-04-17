@@ -27,6 +27,7 @@ from services.data_loader import (
     load_pitcher_sim_log,
     load_batter_sim_log,
 )
+from utils.alerts import tdd_info, tdd_warn
 from utils.formatters import fmt_stat, delta_html
 from utils.helpers import strip_accents
 
@@ -108,7 +109,7 @@ def _render_in_season_accuracy_tab() -> None:
         name_col = "batter_name"
 
     if df.empty:
-        st.info(
+        tdd_info(
             "No in-season prediction data yet. The accuracy log is populated "
             "daily once the season starts and games have been played."
         )
@@ -148,12 +149,12 @@ def _render_in_season_accuracy_tab() -> None:
     pred_col, act_col = stat_map[stat_label]
 
     if pred_col not in df.columns or act_col not in df.columns:
-        st.warning(f"No {stat_label} data available in the log.")
+        tdd_warn(f"No {stat_label} data available in the log.")
         return
 
     valid = df[[pred_col, act_col]].dropna()
     if valid.empty:
-        st.warning(f"No valid {stat_label} predictions with actuals.")
+        tdd_warn(f"No valid {stat_label} predictions with actuals.")
         return
 
     predicted = valid[pred_col]
@@ -297,7 +298,7 @@ def _render_backtest_top10_tab() -> None:
 
     bip_df = load_backtest("bip_backtest_results")
     if bip_df.empty:
-        st.info("No player-level backtest data available.")
+        tdd_info("No player-level backtest data available.")
         return
 
     # Deduplicate: keep one variant per player per season (K/BB/HR are identical across variants)
@@ -312,7 +313,7 @@ def _render_backtest_top10_tab() -> None:
     )
 
     if player_type == "Pitcher":
-        st.info("Pitcher-level backtest leaderboards coming soon. Use the Game Sim Backtests tab for pitcher accuracy.")
+        tdd_info("Pitcher-level backtest leaderboards coming soon. Use the Game Sim Backtests tab for pitcher accuracy.")
         return
 
     # Stat selector based on player type
@@ -338,7 +339,7 @@ def _render_backtest_top10_tab() -> None:
 
     df = bip_df[bip_df["test_season"] == season].copy()
     if pred_col not in df.columns or act_col not in df.columns:
-        st.info(f"No data for {stat_label}.")
+        tdd_info(f"No data for {stat_label}.")
         return
 
     df = df[["batter_id", "batter_name", pred_col, act_col]].dropna().copy()
@@ -416,7 +417,7 @@ def _render_game_sim_backtest_tab() -> None:
     game_k = load_backtest("game_k_backtest")
 
     if summary.empty and game_k.empty:
-        st.info("No game simulation backtest data available.")
+        tdd_info("No game simulation backtest data available.")
         return
 
     # Stat selector from summary columns
@@ -544,7 +545,7 @@ def _render_hits_misses_tab() -> None:
 
     current = load_projections(ptype)
     if current.empty:
-        st.info("No projection data available.")
+        tdd_info("No projection data available.")
         return
 
     stat_col = st.selectbox(
@@ -555,7 +556,7 @@ def _render_hits_misses_tab() -> None:
     observed_col = stat_col.replace("projected_", "observed_")
 
     if observed_col not in current.columns:
-        st.info(
+        tdd_info(
             f"No observed data for {stat_col.replace('projected_', '')} yet. "
             "This tab populates as 2026 games are played and projections update."
         )
@@ -567,7 +568,7 @@ def _render_hits_misses_tab() -> None:
     ).copy()
 
     if df.empty:
-        st.info("No players with both projected and observed values.")
+        tdd_info("No players with both projected and observed values.")
         return
 
     df["error"] = df[stat_col] - df[observed_col]
@@ -608,7 +609,7 @@ def _render_hits_misses_tab() -> None:
                 f"Actual {stat_label}",
                 "Error (pp)",
             ]
-            st.dataframe(display, width='stretch', hide_index=True)
+            st.dataframe(display, use_container_width=True, hide_index=True)
 
     with chart_col2:
         st.markdown(
@@ -634,7 +635,7 @@ def _render_hits_misses_tab() -> None:
                 f"Actual {stat_label}",
                 "Error (pp)",
             ]
-            st.dataframe(display, width='stretch', hide_index=True)
+            st.dataframe(display, use_container_width=True, hide_index=True)
 
     # Summary stats
     cols = st.columns(3)
@@ -679,14 +680,14 @@ def _render_movers_tab() -> None:
         options.append(f"vs {date_str}")
 
     if not options:
-        st.info(
+        tdd_info(
             "No comparison snapshots available yet. Preseason snapshots and "
             "weekly snapshots will appear here as the season progresses."
         )
         return
 
     if current.empty:
-        st.warning("Current projections not loaded.")
+        tdd_warn("Current projections not loaded.")
         return
 
     comparison = st.selectbox("Compare to", options, key="movers_comparison")
@@ -705,7 +706,7 @@ def _render_movers_tab() -> None:
         previous = weekly_snaps.get(date_str, pd.DataFrame())
 
     if previous.empty:
-        st.warning("Selected snapshot is empty.")
+        tdd_warn("Selected snapshot is empty.")
         return
 
     # Compute movers
@@ -766,7 +767,7 @@ def _render_movers_tab() -> None:
             display.columns = [c.replace("projected_", "").replace("_prev", " (prev)")
                                .replace("delta", "Change").replace("_", " ").title()
                                for c in display.columns]
-            st.dataframe(display, width='stretch', hide_index=True)
+            st.dataframe(display, use_container_width=True, hide_index=True)
         else:
             st.caption("No data")
 
@@ -783,7 +784,7 @@ def _render_movers_tab() -> None:
             display.columns = [c.replace("projected_", "").replace("_prev", " (prev)")
                                .replace("delta", "Change").replace("_", " ").title()
                                for c in display.columns]
-            st.dataframe(display, width='stretch', hide_index=True)
+            st.dataframe(display, use_container_width=True, hide_index=True)
         else:
             st.caption("No data")
 
@@ -892,7 +893,7 @@ def _render_weekly_snapshots_tab() -> None:
         all_snapshots[f"Week {i} ({date_str})"] = df
 
     if not all_snapshots:
-        st.info("No snapshots available yet. Preseason and weekly snapshots will appear here as the season progresses.")
+        tdd_info("No snapshots available yet. Preseason and weekly snapshots will appear here as the season progresses.")
         return
 
     # Snapshot selector
@@ -918,7 +919,7 @@ def _render_weekly_snapshots_tab() -> None:
         curr_df = current
 
     if prev_df.empty or curr_df.empty:
-        st.warning("Selected snapshots are empty.")
+        tdd_warn("Selected snapshots are empty.")
         return
 
     # Sub-tabs: Comparison Table | Biggest Movers | Player Lookup
@@ -931,7 +932,7 @@ def _render_weekly_snapshots_tab() -> None:
         merged = _build_comparison_df(prev_df, curr_df, id_col, name_col, stat_configs)
 
         if merged.empty:
-            st.warning("No matching players between selected snapshots.")
+            tdd_warn("No matching players between selected snapshots.")
             return
 
         st.markdown(
@@ -978,7 +979,7 @@ def _render_weekly_snapshots_tab() -> None:
             display_rows.append(r)
 
         display_df = pd.DataFrame(display_rows)
-        st.dataframe(display_df, width='stretch', hide_index=True, height=600)
+        st.dataframe(display_df, use_container_width=True, hide_index=True, height=600)
 
     # --- Biggest Movers ---
     with sub_movers:
@@ -994,7 +995,7 @@ def _render_weekly_snapshots_tab() -> None:
         delta_col = f"delta_{stat_key}"
 
         if delta_col not in merged_full.columns or merged_full[delta_col].isna().all():
-            st.info(f"No delta data available for {stat_choice}.")
+            tdd_info(f"No delta data available for {stat_choice}.")
         else:
             merged_sorted = merged_full.dropna(subset=[delta_col])
             n_show = min(10, len(merged_sorted) // 2)

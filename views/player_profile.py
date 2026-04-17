@@ -15,6 +15,7 @@ from config import (
     PITCHER_TRAD_STATS, PITCHER_TRAD_COUNTING,
     PITCH_DISPLAY,
 )
+from utils.alerts import tdd_info, tdd_warn
 from services.data_loader import (
     load_projections, load_counting, load_player_teams, load_rankings,
     load_k_samples, load_traditional_stats_all,
@@ -107,18 +108,20 @@ def render_approach_efficiency(
                 _agg_pop = _agg_all[_agg_all["season"] == _season]
             else:
                 _agg_pop = _agg_all
-            _a_cols = st.columns(len(_agg_items))
-            for _ac, (_albl, _acol, _is_pct, _hib) in zip(_a_cols, _agg_items):
-                _aval = _agg_data.get(_acol)
-                if pd.notna(_aval):
-                    _disp = f"{_aval:.1%}" if _is_pct else f"{_aval:.1f}"
-                else:
-                    _disp = ""
-                _pct = None
-                if pd.notna(_aval) and _hib is not None and _acol in _agg_pop.columns:
-                    _pct = percentile_rank(_agg_pop[_acol], float(_aval), _hib)
-                with _ac:
-                    st.markdown(metric_card(_albl, _disp, pctile=_pct), unsafe_allow_html=True)
+            for _chunk_start in range(0, len(_agg_items), 3):
+                _chunk = _agg_items[_chunk_start:_chunk_start + 3]
+                _a_cols = st.columns(len(_chunk))
+                for _ac, (_albl, _acol, _is_pct, _hib) in zip(_a_cols, _chunk):
+                    _aval = _agg_data.get(_acol)
+                    if pd.notna(_aval):
+                        _disp = f"{_aval:.1%}" if _is_pct else f"{_aval:.1f}"
+                    else:
+                        _disp = ""
+                    _pct = None
+                    if pd.notna(_aval) and _hib is not None and _acol in _agg_pop.columns:
+                        _pct = percentile_rank(_agg_pop[_acol], float(_aval), _hib)
+                    with _ac:
+                        st.markdown(metric_card(_albl, _disp, pctile=_pct), unsafe_allow_html=True)
     else:
         _eff_all = load_pitcher_efficiency_all()
         if _eff_all.empty:
@@ -278,7 +281,7 @@ def render_pitch_profiles(
                 if arch_rows:
                     st.markdown(f'<div class="tdd-section-hdr">Arsenal Archetype Map</div>',
                                 unsafe_allow_html=True)
-                    st.dataframe(pd.DataFrame(arch_rows), width='stretch', hide_index=True)
+                    st.dataframe(pd.DataFrame(arch_rows), use_container_width=True, hide_index=True)
 
         # Location heatmap |prefer raw coordinates, fall back to grid
         from services.data_loader import load_pitcher_pitch_locations
@@ -476,7 +479,7 @@ def render_pitch_profiles(
                             })
                             .map(_color_delta, subset=["Whiff Δ", "Chase Δ"])
                         )
-                        st.dataframe(styled, width='stretch', hide_index=True)
+                        st.dataframe(styled, use_container_width=True, hide_index=True)
 
         # Hitter zone grid
         if is_career:
@@ -558,6 +561,7 @@ def render_season_trends(
     """Render year-over-year trend charts for key stats."""
     full_df = load_full_stats(player_type.lower())
     if full_df.empty:
+        tdd_info("No historical stats available for season trends.")
         return
 
     id_col = "pitcher_id" if player_type == "Pitcher" else "batter_id"
@@ -571,7 +575,8 @@ def render_season_trends(
 
     player_data = full_df[full_df[id_col] == player_id].sort_values("season")
     if len(player_data) < 2:
-        return  # Need at least 2 seasons for a trend
+        tdd_info("Not enough seasons to display trends (need at least two).")
+        return
 
     seasons = player_data["season"].values
 
@@ -755,6 +760,7 @@ def render_arsenal_evolution(
     """Show pitcher arsenal changes vs prior year."""
     arsenal_all = load_pitcher_arsenal_all()
     if arsenal_all.empty or "season" in arsenal_all.columns and selected_season <= 2018:
+        tdd_info("No arsenal data available for comparison.")
         return
 
     curr = arsenal_all[
@@ -765,6 +771,7 @@ def render_arsenal_evolution(
     ]
 
     if curr.empty or prev.empty:
+        tdd_info(f"No arsenal comparison available (need data for both {selected_season} and {selected_season - 1}).")
         return
 
     # Merge on pitch_type
@@ -828,7 +835,7 @@ def render_arsenal_evolution(
             unsafe_allow_html=True,
         )
         delta_df = pd.DataFrame(rows)
-        st.dataframe(delta_df, width='stretch', hide_index=True)
+        st.dataframe(delta_df, use_container_width=True, hide_index=True)
         st.caption(
             f"Year-over-year arsenal evolution. "
             f"NEW = pitch added in {selected_season}. "
@@ -876,7 +883,7 @@ def page_player_profile() -> None:
             _all_players.append((f"{pname} ({team})" if team else pname, pid, "Hitter"))
 
     if not _all_players:
-        st.warning("No projection data found.")
+        tdd_warn("No projection data found.")
         return
 
     # Collect all teams for filter
@@ -1737,6 +1744,6 @@ def page_player_profile() -> None:
                 "Description": desc,
             })
     if detail_rows:
-        st.dataframe(pd.DataFrame(detail_rows), width='stretch', hide_index=True)
+        st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
 
     return  # End of profile page

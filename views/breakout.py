@@ -4,6 +4,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from utils.alerts import tdd_info, tdd_warn
 from config import GOLD, SAGE, SLATE, EMBER, DARK_CARD
 from services.data_loader import (
     load_hitter_breakout_candidates,
@@ -285,7 +286,7 @@ def _render_position_bests(
             pos_best[pos] = pos_df.nlargest(1, "breakout_score").iloc[0]
 
     if not pos_best:
-        st.info("No position data available.")
+        tdd_info("No position data available.")
         return
 
     positions = list(pos_best.keys())
@@ -376,7 +377,7 @@ def _render_hitters() -> None:
     """Render hitter breakout section."""
     df = load_hitter_breakout_candidates()
     if df.empty:
-        st.warning("No hitter breakout data. Run `precompute_dashboard_data.py`.")
+        tdd_warn("No hitter breakout data. Run `precompute_dashboard_data.py`.")
         return
 
     df, teams_lookup = _merge_teams(df, "batter_id")
@@ -399,7 +400,7 @@ def _render_pitchers(is_starter: bool) -> None:
     """Render pitcher breakout section (SP or RP)."""
     df = load_pitcher_breakout_candidates()
     if df.empty:
-        st.warning("No pitcher breakout data. Run `precompute_dashboard_data.py`.")
+        tdd_warn("No pitcher breakout data. Run `precompute_dashboard_data.py`.")
         return
 
     # Filter by role
@@ -411,7 +412,7 @@ def _render_pitchers(is_starter: bool) -> None:
 
     if df.empty:
         role_label = "SP" if is_starter else "RP"
-        st.info(f"No {role_label} breakout candidates found.")
+        tdd_info(f"No {role_label} breakout candidates found.")
         return
 
     df, teams_lookup = _merge_teams(df, "pitcher_id")

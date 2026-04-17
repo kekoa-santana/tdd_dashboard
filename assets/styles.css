@@ -1,22 +1,30 @@
 /* TDD Dashboard — Brand Styles
-   CSS custom properties (--tdd-*) are injected by app.py at runtime.
-   Sizing tokens (--tdd-logo-*, --tdd-headshot-*, --tdd-fs-*) are also
-   in :root — change them once to resize globally.
-   ALL pure CSS lives here. app.py only injects :root color variables. */
+   Single source of truth for design tokens and component CSS.
+   app.py only injects :root overrides for dynamic values (palette, font pairing).
+   See docs/frontend_style_system.md for the token catalog and naming rules. */
 
 /* ================================================================
-   Streamlit overrides — hide defaults, apply palette
+   Design tokens (:root)
    ================================================================ */
 
-/* Sizing tokens — static, no Python dependency */
 :root {
-    /* Logos & headshots */
-    --tdd-logo-sm: 24px;
-    --tdd-logo-md: 36px;
-    --tdd-logo-lg: 100px;
-    --tdd-headshot-sm: 32px;
-    --tdd-headshot-md: 50px;
-    --tdd-headshot-lg: 80px;
+    /* Color: default palette (Original Gold & Cream).
+       app.py overrides these when a non-default palette is selected. */
+    --tdd-gold: #C8A96E;
+    --tdd-ember: #D4562A;
+    --tdd-sage: #6BA38E;
+    --tdd-slate: #7B8FA6;
+    --tdd-cream: #F5F2EE;
+    --tdd-dark: #0F1117;
+    --tdd-dark-card: #181b23;
+    --tdd-dark-border: #2a2e3a;
+    --tdd-dark-border-faint: #2a2e3a22;
+    --tdd-positive: #6BA38E;
+    --tdd-negative: #D4562A;
+
+    /* Typography: font families (overridden by app.py for the active pairing) */
+    --tdd-font-heading: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --tdd-font-body: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
     /* Typography — contextual font sizes */
     --tdd-fs-team-abbr: 1.2rem;
@@ -28,7 +36,85 @@
     --tdd-fs-badge: 0.68rem;
     --tdd-fs-section-header: 1rem;
     --tdd-fs-context: 0.78rem;
+
+    /* Spacing scale, 4px base. Use these instead of inline rem values. */
+    --tdd-space-0: 0;
+    --tdd-space-1: 0.25rem;   /* 4px */
+    --tdd-space-2: 0.5rem;    /* 8px */
+    --tdd-space-3: 0.75rem;   /* 12px */
+    --tdd-space-4: 1rem;      /* 16px */
+    --tdd-space-5: 1.5rem;    /* 24px */
+    --tdd-space-6: 2rem;      /* 32px */
+    --tdd-space-7: 3rem;      /* 48px */
+    --tdd-space-8: 4rem;      /* 64px */
+
+    /* Radius */
+    --tdd-radius-sm: 3px;
+    --tdd-radius-md: 6px;
+    --tdd-radius-lg: 10px;
+    --tdd-radius-pill: 999px;
+
+    /* Elevation / shadow */
+    --tdd-shadow-sm: 0 1px 2px rgba(0,0,0,0.08);
+    --tdd-shadow-md: 0 4px 16px rgba(0,0,0,0.12);
+    --tdd-shadow-lg: 0 8px 24px rgba(0,0,0,0.18);
+
+    /* Z-index scale: named layers so stacking order is intentional */
+    --tdd-z-base: 1;
+    --tdd-z-sticky: 100;
+    --tdd-z-dropdown: 500;
+    --tdd-z-nav: 9999;
+    --tdd-z-nav-menu: 10000;
+    --tdd-z-mobile-nav: 10001;
+    --tdd-z-modal: 20000;
+
+    /* Logos & headshots */
+    --tdd-logo-sm: 24px;
+    --tdd-logo-md: 36px;
+    --tdd-logo-lg: 100px;
+    --tdd-headshot-sm: 32px;
+    --tdd-headshot-md: 50px;
+    --tdd-headshot-lg: 80px;
 }
+
+/* Breakpoints: CSS media queries cannot use custom properties,
+   so these values are referenced directly in @media rules below.
+   Phone:   480px
+   Tablet:  768px
+   Desktop: 1024px */
+
+/* ================================================================
+   Typography: apply fonts across the app via CSS variables
+   ================================================================ */
+
+html, body, .stApp, .stMarkdown, .stMarkdown p,
+div, td, th, li, label, input, select, textarea, button,
+[data-testid="stAppViewContainer"],
+[data-baseweb] {
+    font-family: var(--tdd-font-body) !important;
+}
+
+.topbar-brand-text,
+.tdd-section-hdr,
+.tdd-team-abbr,
+.tdd-player-name,
+.tdd-player-name-lg,
+.tdd-edge-label,
+.brand-title,
+.lb-title,
+.lb-name,
+.proj-title,
+h1, h2, h3 {
+    font-family: var(--tdd-font-heading) !important;
+}
+
+.tdd-stat-value, .lb-val, .metric-value, .dd-headline-val, .lb-watch-val {
+    font-variant-numeric: tabular-nums;
+}
+
+/* ================================================================
+   Streamlit overrides — hide defaults, apply palette
+   ================================================================ */
 
 /* Hide Streamlit's default chrome */
 [data-testid="stSidebar"] { display: none; }
@@ -36,6 +122,8 @@
 [data-testid="stToolbar"] { display: none; }
 [data-testid="stDecoration"] { display: none; }
 header[data-testid="stHeader"] { display: none; }
+[data-testid="stFooter"] { display: none; }
+footer { display: none; }
 
 /* Disable drag-to-zoom and pinch-to-zoom on all Plotly charts.
    The .nsewdrag overlay handles drag interactions; disabling pointer
@@ -59,6 +147,69 @@ header[data-testid="stHeader"] { display: none; }
 }
 hr {
     border-color: var(--tdd-dark-border) !important;
+}
+
+/* Markdown links — brand gold instead of Streamlit default blue */
+.stMarkdown a, .stMarkdown p a {
+    color: var(--tdd-gold) !important;
+    text-decoration: none !important;
+}
+.stMarkdown a:hover, .stMarkdown p a:hover {
+    opacity: 0.8 !important;
+    text-decoration: underline !important;
+}
+
+/* Buttons — dark theme */
+.stButton button {
+    background-color: var(--tdd-dark-card) !important;
+    border: 1px solid var(--tdd-dark-border) !important;
+    color: var(--tdd-cream) !important;
+    transition: background 0.15s !important;
+}
+.stButton button:hover {
+    background-color: var(--tdd-dark-border) !important;
+    color: var(--tdd-cream) !important;
+}
+.stButton button:focus {
+    box-shadow: 0 0 0 2px var(--tdd-gold) !important;
+}
+
+/* Text and number inputs */
+.stTextInput input,
+.stNumberInput input {
+    background-color: var(--tdd-dark-card) !important;
+    border: 1px solid var(--tdd-dark-border) !important;
+    color: var(--tdd-cream) !important;
+}
+.stTextInput input:focus,
+.stNumberInput input:focus {
+    border-color: var(--tdd-gold) !important;
+    box-shadow: 0 0 0 1px var(--tdd-gold) !important;
+}
+
+/* Checkbox and radio — dark backgrounds */
+.stCheckbox label span[data-baseweb="checkbox"] {
+    background-color: transparent !important;
+    border-color: var(--tdd-dark-border) !important;
+}
+.stRadio div[role="radiogroup"] label {
+    color: var(--tdd-cream) !important;
+}
+
+/* Toggle switch — gold accent when on */
+.stToggle label span[data-baseweb="toggle"] {
+    background-color: var(--tdd-dark-border) !important;
+}
+.stToggle label input:checked + span[data-baseweb="toggle"] {
+    background-color: var(--tdd-gold) !important;
+}
+
+/* Expander — dark theme borders */
+[data-testid="stExpander"] summary {
+    color: var(--tdd-cream) !important;
+}
+[data-testid="stExpander"] summary:hover {
+    color: var(--tdd-gold) !important;
 }
 
 /* Transparent selectbox / input backgrounds */
@@ -210,8 +361,14 @@ hr {
     padding: 0.3rem 0.55rem;
     border-radius: 4px;
     transition: opacity 0.15s;
+    background: none;
+    border: none;
+    font-family: inherit;
+    line-height: inherit;
+    letter-spacing: inherit;
 }
-.topbar-dropdown:hover > .topbar-btn {
+.topbar-dropdown:hover > .topbar-btn,
+.topbar-dropdown:focus-within > .topbar-btn {
     opacity: 1;
 }
 .topbar-arrow {
@@ -236,7 +393,8 @@ hr {
     box-shadow: 0 4px 16px rgba(0,0,0,0.12);
     margin-top: 0.2rem;
 }
-.topbar-dropdown:hover .topbar-dd-menu {
+.topbar-dropdown:hover .topbar-dd-menu,
+.topbar-dropdown:focus-within .topbar-dd-menu {
     visibility: visible;
     opacity: 1;
     transition: visibility 0s, opacity 0.15s;
@@ -282,7 +440,53 @@ hr {
     text-decoration: none !important;
 }
 
-/* Desktop nav wrapper — keeps buttons in a flex row */
+/* Focus states: visible outline for keyboard navigation */
+.topbar-home:focus-visible,
+.topbar a.topbar-btn:focus-visible,
+.topbar-dropdown > .topbar-btn:focus-visible,
+.topbar-dd-menu a.topbar-dd-item:focus-visible,
+.topbar-socials a.topbar-social:focus-visible,
+.topbar-mob-item:focus-visible,
+.topbar-hamburger:focus-visible {
+    outline: 2px solid var(--tdd-dark);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* Focus styles that mirror hover (opacity) */
+.topbar a.topbar-btn:focus-visible {
+    opacity: 1 !important;
+    background: rgba(0,0,0,0.07) !important;
+}
+.topbar-dd-menu a.topbar-dd-item:focus-visible {
+    opacity: 1 !important;
+    background: rgba(0,0,0,0.06) !important;
+}
+.topbar-socials a.topbar-social:focus-visible {
+    opacity: 1 !important;
+}
+.topbar-mob-item:focus-visible {
+    opacity: 1 !important;
+    background: rgba(0,0,0,0.05);
+}
+
+/* Reduced motion: disable transitions for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+    .topbar a.topbar-btn,
+    .topbar-dropdown > .topbar-btn,
+    .topbar-dd-menu,
+    .topbar-dd-menu a.topbar-dd-item,
+    .topbar-socials a.topbar-social,
+    .topbar-mob-item,
+    .topbar-home {
+        transition: none !important;
+    }
+    .topbar-dd-menu {
+        transition: none !important;
+    }
+}
+
+/* Desktop nav wrapper: keeps buttons in a flex row */
 .topbar-nav-desktop {
     display: flex;
     align-items: center;
@@ -483,7 +687,7 @@ hr {
 /* Section header (gold, bold) */
 .tdd-section-hdr {
     color: var(--tdd-gold);
-    font-size: var(--tdd-fs-section-header);
+    font-size: clamp(0.85rem, 2.2vw, 1rem);
     font-weight: 700;
     margin: 0.8rem 0 0.4rem;
 }
@@ -550,6 +754,113 @@ hr {
     border-bottom: 1px solid rgba(42, 46, 58, 0.13);
 }
 
+/* ================================================================
+   Page-level patterns — consistent header, filter row, states
+   ================================================================ */
+
+/* Page header: centered title + optional subtitle */
+.tdd-page-header {
+    text-align: center;
+    margin-bottom: var(--tdd-space-3);
+}
+.tdd-page-title {
+    color: var(--tdd-cream);
+    font-family: var(--tdd-font-heading);
+    font-size: clamp(1.2rem, 4vw, 1.7rem);
+    font-weight: 800;
+    letter-spacing: 1.5px;
+}
+.tdd-page-subtitle {
+    color: var(--tdd-slate);
+    font-size: 0.82rem;
+    margin-top: var(--tdd-space-1);
+}
+
+/* Selectbox gold styling — use on pages with branded dropdowns */
+.tdd-gold-select .stSelectbox div[data-baseweb="select"] > div {
+    background-color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding-left: 0 !important;
+}
+.tdd-gold-select .stSelectbox div[data-baseweb="select"] {
+    font-size: 1.2rem !important;
+    font-weight: 800 !important;
+    color: var(--tdd-gold) !important;
+    cursor: pointer !important;
+}
+.tdd-gold-select .stSelectbox div[data-baseweb="select"] > div:hover {
+    background-color: transparent !important;
+}
+
+/* Empty / no-data state */
+.tdd-empty-state {
+    color: var(--tdd-slate);
+    font-size: 0.85rem;
+    text-align: center;
+    padding: var(--tdd-space-6) var(--tdd-space-4);
+    opacity: 0.7;
+}
+
+/* Status callout — left-accent banner */
+.tdd-callout {
+    background: var(--tdd-dark-border);
+    border-left: 3px solid var(--tdd-gold);
+    padding: var(--tdd-space-2) var(--tdd-space-3);
+    margin-bottom: var(--tdd-space-2);
+    font-size: 0.8rem;
+    color: var(--tdd-gold);
+    border-radius: 0 var(--tdd-radius-sm) var(--tdd-radius-sm) 0;
+}
+.tdd-callout-info,
+.tdd-callout-warn {
+    background: var(--tdd-dark-border);
+    border-left: 3px solid;
+    padding: var(--tdd-space-2) var(--tdd-space-3);
+    margin-bottom: var(--tdd-space-2);
+    font-size: 0.8rem;
+    border-radius: 0 var(--tdd-radius-sm) var(--tdd-radius-sm) 0;
+}
+.tdd-callout-info {
+    border-left-color: var(--tdd-slate);
+    color: var(--tdd-slate);
+}
+.tdd-callout-warn {
+    border-left-color: var(--tdd-ember);
+    color: var(--tdd-ember);
+}
+
+/* Game status badges */
+.tdd-status-live {
+    color: var(--tdd-sage);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+.tdd-status-final {
+    color: var(--tdd-slate);
+    font-size: 0.75rem;
+}
+
+/* Game count / sim summary text */
+.tdd-game-count {
+    color: var(--tdd-slate);
+    font-size: 0.9rem;
+    margin-bottom: var(--tdd-space-4);
+}
+.tdd-sim-summary {
+    color: var(--tdd-slate);
+    font-size: 0.8rem;
+}
+
+/* Props section header */
+.tdd-props-header {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--tdd-sage);
+    margin: var(--tdd-space-3) 0 var(--tdd-space-1);
+    letter-spacing: 0.3px;
+}
+
 /* ================================================================ */
 
 /* Leaderboard cards — shared across projections, rankings, stats */
@@ -575,6 +886,7 @@ hr {
     .lb-card .lb-stat-cell,
     .lb-diamonds,
     .tr-diamonds,
+    .tr-stat,
     .lineup-diamonds,
     .lineup-hs {
         display: none;
@@ -584,26 +896,17 @@ hr {
     .tdd-game-teams {
         justify-content: center;
     }
+
+    /* Team rankings detail grid — stack on tablets */
+    .tr-detail-grid {
+        flex-direction: column;
+    }
+    .tr-detail-left,
+    .tr-detail-right {
+        width: 100%;
+    }
 }
 
-/* Mobile: stack columns, extra card padding */
-@media (max-width: 768px) {
-    /* Force Streamlit columns to stack vertically on mobile */
-    div[data-testid="stHorizontalBlock"] {
-        flex-direction: column !important;
-    }
-    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
-        width: 100% !important;
-        flex: 1 1 100% !important;
-    }
-
-    /* Extra padding around leaderboard cards for easier finger scrolling */
-    .lb-card {
-        margin-bottom: 2.5rem;
-        padding-bottom: 1.2rem;
-    }
-
-}
 .lb-title-row {
     padding: 0 0 0.4rem;
     border-bottom: 1px solid var(--tdd-dark-border);
@@ -626,7 +929,6 @@ hr {
     align-items: center;
     padding: 0.28rem 0;
     border-bottom: 1px solid var(--tdd-dark-border-faint);
-    gap: 0.3rem;
 }
 .lb-row:last-child { border-bottom: none; }
 .lb-rank {
@@ -634,13 +936,13 @@ hr {
     font-size: 0.82rem;
     min-width: 1.6rem;
     text-align: right;
-    margin-right: 0.2rem;
+    margin-right: 0.5rem;
 }
 .lb-rank-top { color: var(--tdd-gold); font-weight: 700; }
 .lb-rank-good { color: var(--tdd-gold); font-weight: 700; }
 .lb-rank-bad { color: var(--tdd-slate); font-weight: 600; }
 .lb-headshot {
-    margin: 0 0.3rem;
+    margin: 0 0.5rem;
 }
 .lb-name {
     color: var(--tdd-cream);
@@ -736,7 +1038,7 @@ hr {
 }
 .brand-title {
     color: var(--tdd-gold);
-    font-size: 1.8rem;
+    font-size: clamp(1.2rem, 4.5vw, 1.8rem);
     font-weight: 700;
     letter-spacing: 1px;
 }
@@ -897,59 +1199,21 @@ hr {
     margin-top: 0.25rem;
 }
 
-/* Sidebar branding */
-[data-testid="stSidebar"] {
-    padding-top: 0;
-}
-[data-testid="stSidebar"] [data-testid="stImage"] {
-    display: flex;
-    justify-content: center;
-    padding-top: 1rem;
-}
-.sidebar-brand {
+/* Site-wide footer / disclaimer */
+.tdd-footer-disclaimer {
     text-align: center;
-    padding: 0.5rem 0 1rem 0;
-}
-.sidebar-brand-name {
-    color: var(--tdd-gold);
-    font-size: 1.3rem;
-    font-weight: 700;
-    letter-spacing: 2px;
-}
-.sidebar-brand-sub {
     color: var(--tdd-slate);
-    font-size: 0.75rem;
-    margin-top: 4px;
-}
-
-/* Sidebar nav buttons */
-div[data-testid="stSidebar"] .nav-container .stButton > button {
-    background: none;
-    border: none;
-    color: var(--tdd-slate);
-    font-size: 0.95rem;
-    font-weight: 500;
-    padding: 0.45rem 0.8rem;
-    width: 100%;
-    text-align: left;
-    cursor: pointer;
-    border-radius: 6px;
-    transition: background 0.15s, color 0.15s;
-}
-div[data-testid="stSidebar"] .nav-container .stButton > button:hover {
-    background: var(--tdd-dark-border);
-    color: var(--tdd-cream);
-}
-div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
-    background: var(--tdd-dark-border);
-    color: var(--tdd-gold);
-    font-weight: 600;
+    font-size: 0.7rem;
+    margin-top: 3rem;
+    padding: 1rem 0;
+    border-top: 1px solid var(--tdd-dark-border);
+    opacity: 0.6;
 }
 
 /* Section dividers */
 .section-header {
     color: var(--tdd-gold);
-    font-size: 1.15rem;
+    font-size: clamp(0.92rem, 2.5vw, 1.15rem);
     font-weight: 600;
     margin: 1.5rem 0 0.8rem 0;
     padding-bottom: 0.4rem;
@@ -1096,6 +1360,73 @@ div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
     border-radius: 5px;
 }
 
+/* ================================================================
+   Utility classes — layout, spacing, alignment
+   ================================================================ */
+
+/* Flexbox */
+.flex-center {
+    display: flex;
+    align-items: center;
+}
+.flex-center-gap-sm {
+    display: flex;
+    align-items: center;
+    gap: var(--tdd-space-1);
+}
+.flex-center-gap-md {
+    display: flex;
+    align-items: center;
+    gap: var(--tdd-space-2);
+}
+.flex-center-gap-lg {
+    display: flex;
+    align-items: center;
+    gap: var(--tdd-space-3);
+}
+.flex-between {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.flex-wrap-gap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--tdd-space-2);
+}
+
+/* Text alignment */
+.text-center { text-align: center; }
+.text-left { text-align: left; }
+.text-right { text-align: right; }
+
+/* Spacing: margin-top */
+.mt-2 { margin-top: var(--tdd-space-2); }
+.mt-3 { margin-top: var(--tdd-space-3); }
+.mt-4 { margin-top: var(--tdd-space-4); }
+.mt-5 { margin-top: var(--tdd-space-5); }
+
+/* Spacing: margin-bottom */
+.mb-1 { margin-bottom: var(--tdd-space-1); }
+.mb-2 { margin-bottom: var(--tdd-space-2); }
+.mb-3 { margin-bottom: var(--tdd-space-3); }
+.mb-4 { margin-bottom: var(--tdd-space-4); }
+
+/* Table cell padding — standard for custom HTML tables */
+.tdd-table-cell {
+    padding: 6px 10px;
+}
+.tdd-table-header {
+    color: var(--tdd-slate);
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--tdd-dark-border);
+    text-align: left;
+}
+
 /* Responsive show/hide helpers */
 .hide-mobile { display: block; }
 .hide-desktop { display: none; }
@@ -1178,12 +1509,6 @@ div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
         margin: 1rem 0 0.5rem 0;
     }
 
-    /* Sidebar brand */
-    .sidebar-brand-name {
-        font-size: 1.1rem;
-        letter-spacing: 1px;
-    }
-
     /* Streamlit dataframes — allow horizontal scroll */
     .stDataFrame {
         font-size: 0.78rem;
@@ -1213,6 +1538,24 @@ div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
     [data-testid="stPyplotFigure"] img {
         max-width: 100% !important;
         height: auto !important;
+    }
+
+    /* Plotly charts — cap height on tablets */
+    .js-plotly-plot .plot-container,
+    .js-plotly-plot .main-svg {
+        max-height: 420px !important;
+    }
+
+    /* Dataframes — reduce fixed heights */
+    [data-testid="stDataFrame"] iframe,
+    [data-testid="stDataFrame"] > div > div {
+        max-height: 380px !important;
+    }
+
+    /* Matplotlib charts — scale down */
+    [data-testid="stPyplotFigure"] {
+        max-height: 350px !important;
+        overflow: hidden;
     }
 
     /* Better spacing for mobile stacked charts */
@@ -1248,9 +1591,20 @@ div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
         padding-right: 0.75rem !important;
     }
 
-    /* Leaderboard cards — fill width on mobile */
+    /* Leaderboard cards — fill width, extra touch padding */
     .lb-card {
         max-width: 100%;
+        margin-bottom: 2.5rem;
+        padding-bottom: 1.2rem;
+    }
+    .lb-scroll {
+        max-height: 380px !important;
+    }
+
+    /* Horizontal radios — wrap on tablets */
+    div[data-testid="stRadio"] > div[role="radiogroup"] {
+        flex-wrap: wrap !important;
+        gap: 0.25rem 0.75rem !important;
     }
 
     /* Plotly charts — respect container width */
@@ -1262,6 +1616,9 @@ div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
     [data-testid="stImage"] {
         display: flex !important;
         justify-content: center !important;
+    }
+    .img-no-center [data-testid="stImage"] {
+        justify-content: flex-start !important;
     }
     .brand-header {
         text-align: center;
@@ -1276,6 +1633,11 @@ div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
     /* Stack ALL Streamlit columns vertically on phones */
     [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
         flex: 1 1 100% !important;
+    }
+
+    /* Team rankings — smaller name text */
+    .tr-name {
+        font-size: 0.85rem;
     }
 
     /* Even tighter metric cards */
@@ -1347,5 +1709,30 @@ div[data-testid="stSidebar"] .nav-container .stButton > button[kind="primary"] {
     .lb-card {
         max-width: 100%;
         margin-bottom: 1rem;
+    }
+    .lb-scroll {
+        max-height: 280px !important;
+    }
+
+    /* Horizontal radios — stack on phones */
+    div[data-testid="stRadio"] > div[role="radiogroup"] {
+        flex-direction: column !important;
+    }
+
+    /* Plotly charts — tighter cap on phones */
+    .js-plotly-plot .plot-container,
+    .js-plotly-plot .main-svg {
+        max-height: 280px !important;
+    }
+
+    /* Dataframes — compact on phones */
+    [data-testid="stDataFrame"] iframe,
+    [data-testid="stDataFrame"] > div > div {
+        max-height: 260px !important;
+    }
+
+    /* Matplotlib charts — smaller on phones */
+    [data-testid="stPyplotFigure"] {
+        max-height: 240px !important;
     }
 }

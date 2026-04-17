@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from utils.alerts import tdd_info, tdd_warn
 from config import GOLD, EMBER, SAGE, SLATE, CREAM, DASHBOARD_DIR
 from lib.fantasy_report import (
     load_report_data,
@@ -123,7 +124,7 @@ def page_daily_preview() -> None:
     data = load_report_data(DASHBOARD_DIR)
 
     if data.games.empty:
-        st.info("No games scheduled today.")
+        tdd_info("No games scheduled today.")
         return
 
     st.markdown(

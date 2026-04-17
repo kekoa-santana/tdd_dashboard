@@ -5,13 +5,14 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from utils.alerts import tdd_info, tdd_warn
 from config import (
     AVAILABLE_SEASONS, UNRELIABLE_BB_SEASONS, PRIOR_SEASON,
 )
 from services.data_loader import (
     load_player_teams, load_traditional_stats, load_traditional_stats_all,
 )
-from components.headshot import headshot_html
+from components.leaderboard import render_card
 
 
 # ── Leaderboard definitions ─────────────────────────────────────────
@@ -54,101 +55,7 @@ PITCHER_LEADERBOARDS = [
 
 # ── CSS ────────────────────────────────────────────────────────────────
 
-_CSS = f"""
-<style>
-.stats-header {{
-    text-align: center;
-    margin-bottom: 0.8rem;
-}}
-.stats-title {{
-    color: var(--tdd-cream);
-    font-size: 1.7rem;
-    font-weight: 800;
-    letter-spacing: 1.5px;
-}}
-.lb-title-row {{
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 0.5rem;
-    padding-bottom: 0.4rem;
-    border-bottom: 1px solid var(--tdd-dark-border);
-}}
-.lb-title {{
-    color: var(--tdd-gold);
-    font-size: 2.0rem;
-    font-weight: 700;
-    letter-spacing: 0.75px;
-}}
-.lb-subtitle {{
-    color: var(--tdd-slate);
-    font-size: 0.70rem;
-    font-weight: 400;
-    margin-left: 0.4rem;
-}}
-.lb-row {{
-    display: flex;
-    align-items: center;
-    padding: 0.28rem 0;
-    border-bottom: 1px solid var(--tdd-dark-border-faint);
-}}
-.lb-row:last-child {{ border-bottom: none; }}
-.lb-rank {{
-    color: var(--tdd-slate);
-    font-size: 0.82rem;
-    min-width: 1.6rem;
-    text-align: right;
-    margin-right: 0.5rem;
-}}
-.lb-rank-top {{ color: var(--tdd-gold); font-weight: 700; }}
-.lb-headshot {{
-    margin-left: 0.5rem;
-    margin-right: 0.5rem;
-}}
-.lb-name {{
-    color: var(--tdd-cream);
-    font-size: 0.95rem;
-    font-weight: 600;
-    flex: 1;
-}}
-.lb-name a {{
-    color: inherit;
-    text-decoration: none;
-}}
-.lb-name a:hover {{
-    color: var(--tdd-gold);
-    text-decoration: underline;
-}}
-.lb-team {{
-    color: var(--tdd-slate);
-    font-size: 0.80rem;
-    margin-right: 0.5rem;
-}}
-.lb-val {{
-    color: var(--tdd-sage);
-    font-size: 1rem;
-    font-weight: 700;
-    min-width: 2.5rem;
-    text-align: right;
-}}
-
-.stSelectbox div[data-baseweb="select"] > div {{
-    background-color: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    padding-left: 0 !important;
-}}
-.stSelectbox div[data-baseweb="select"] {{
-    font-size: 1.2rem !important;
-    font-weight: 800 !important;
-    color: #C8A96E !important;
-    cursor: pointer !important;
-}}
-.stSelectbox div[data-baseweb="select"] > div:hover {{
-    background-color: transparent !important;
-}}
-</style>
-"""
+_CSS = ""
 
 
 # ── Helpers ────────────────────────────────────────────────────────────
@@ -203,87 +110,64 @@ def _render_stat_leaderboard(
         elif "< 3" in fn_str:
             subtitle = "RP"
 
-    rows_html = []
-    for i, (_, row) in enumerate(top.iterrows(), 1):
-        name = row[name_col]
-        pid = int(row[id_col])
-        team = teams_lookup.get(pid, "")
-        val = _fmt_stat(row[col], fmt)
-        rank_class = "lb-rank-top lb-rank" if i <= 5 else "lb-rank"
+    rows = [
+        {
+            "player_id": int(row[id_col]),
+            "name": row[name_col],
+            "value": _fmt_stat(row[col], fmt),
+            "team": teams_lookup.get(int(row[id_col]), ""),
+            "link_type": link_type,
+        }
+        for _, row in top.iterrows()
+    ]
 
-        hs = f'<span class="lb-headshot">{headshot_html(pid, size=50)}</span>'
-
-        if link_type:
-            profile_url = f"?page=player_profile&player_id={pid}&player_type={link_type}"
-            name_html = f'<a href="{profile_url}">{name}</a>'
-        else:
-            name_html = name
-
-        team_html = f'<span class="lb-team" data-team="{team}">{team}</span>' if team else ""
-
-        rows_html.append(
-            f'<div class="lb-row">'
-            f'<span class="{rank_class}">{i}.</span>'
-            f'{hs}'
-            f'<span class="lb-name">{name_html}</span>'
-            f'{team_html}'
-            f'<span class="lb-val">{val}</span>'
-            f'</div>'
-        )
-
-    subtitle_html = f'<span class="lb-subtitle">{subtitle}</span>' if subtitle else ""
-
-    html = (
-        f'<div class="lb-card">'
-        f'<div class="lb-title-row">'
-        f'<span class="lb-title">{title}{subtitle_html}</span>'
-        f'</div>'
-        + "".join(rows_html)
-        + '</div>'
+    st.markdown(
+        render_card(title, rows, subtitle=subtitle),
+        unsafe_allow_html=True,
     )
-    st.markdown(html, unsafe_allow_html=True)
 
 
 # ── Main page ─────────────────────────────────────────────────────────
 
 def page_stats() -> None:
     """Traditional stat leaderboards for any season."""
-    st.markdown(_CSS, unsafe_allow_html=True)
-
     # ── Title ─────────────────────────────────────────────────────
     season_display = st.session_state.get("stats_season", PRIOR_SEASON)
     st.markdown(
-        f'<div class="stats-header">'
-        f'<div class="stats-title">{season_display} STATS</div>'
+        f'<div class="tdd-page-header">'
+        f'<div class="tdd-page-title">{season_display} STATS</div>'
+        f'<div class="tdd-page-subtitle">Traditional stat leaderboards</div>'
         f'</div>',
         unsafe_allow_html=True,
     )
 
     # ── Filters ───────────────────────────────────────────────────
-    filter_cols = st.columns([2, 2, 2, 2, 2])
+    fc1, fc2, fc3 = st.columns(3)
 
-    with filter_cols[0]:
+    with fc1:
         player_type = st.selectbox(
             "Player Type",
             ["Hitter", "Pitcher"],
             key="stats_player_type",
             label_visibility="collapsed",
         )
-    with filter_cols[1]:
+    with fc2:
         season = st.selectbox(
             "Season",
             AVAILABLE_SEASONS,
             key="stats_season",
             label_visibility="collapsed",
         )
-    with filter_cols[2]:
+    with fc3:
         league_filter = st.selectbox(
             "League",
             ["All", "American League", "National League"],
             key="stats_league",
             label_visibility="collapsed",
         )
-    with filter_cols[3]:
+
+    fc4, fc5, _ = st.columns(3)
+    with fc4:
         n_show = st.selectbox(
             "Show Top",
             [5, 10, 15],
@@ -292,7 +176,7 @@ def page_stats() -> None:
             format_func=lambda x: f"Top {x}",
             label_visibility="collapsed",
         )
-    with filter_cols[4]:
+    with fc5:
         if player_type == "Hitter":
             min_qual = st.selectbox(
                 "Min PA",
@@ -321,7 +205,7 @@ def page_stats() -> None:
         df = load_traditional_stats(pt_key)
 
     if df.empty:
-        st.info(f"No {season} stats data found.")
+        tdd_info(f"No {season} stats data found.")
         return
 
     if player_type == "Hitter":

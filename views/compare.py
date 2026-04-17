@@ -4,6 +4,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from utils.alerts import tdd_info, tdd_warn
 from config import (
     GOLD, SLATE, CREAM, DARK, DARK_BORDER,
     CURRENT_SEASON, PROJECTION_LABEL,
@@ -19,6 +20,7 @@ from services.data_loader import (
     load_pitcher_archetypes,
 )
 from utils.helpers import get_team_lookup
+from utils.html import esc, esc_attr
 from utils.formatters import fmt_stat
 from components.headshot import headshot_html
 from components.metric_cards import percentile_rank, pctile_color
@@ -106,7 +108,7 @@ def page_compare() -> None:
 
     proj_df = load_projections(player_type.lower())
     if proj_df.empty:
-        st.info("No projection data available.")
+        tdd_info("No projection data available.")
         return
 
     if player_type == "Pitcher":
@@ -148,7 +150,7 @@ def page_compare() -> None:
     )
 
     if len(selected) < 2:
-        st.info("Select at least 2 players to compare.")
+        tdd_info("Select at least 2 players to compare.")
         return
 
     selected_ids = [display_map[s] for s in selected]
@@ -183,7 +185,7 @@ def page_compare() -> None:
     _rank_id_col = "pitcher_id" if player_type == "Pitcher" else "batter_id"
 
     # ----- Player header cards -----
-    cols = st.columns(len(selected))
+    cols = st.columns(min(len(selected), 3))
     for col_st, display_name in zip(cols, selected):
         pid = display_map[display_name]
         match = players[players[id_col] == pid]
@@ -202,8 +204,8 @@ def page_compare() -> None:
             )
             st.markdown(
                 f'<div style="text-align:center;">'
-                f'<div class="tdd-player-name">{row[name_col]}</div>'
-                f'<div class="tdd-meta" data-team="{team}">{team}</div>'
+                f'<div class="tdd-player-name">{esc(row[name_col])}</div>'
+                f'<div class="tdd-meta" data-team="{esc_attr(team)}">{esc(team)}</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )

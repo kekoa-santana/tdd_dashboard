@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from config import GOLD, SAGE, EMBER, SLATE, CREAM
+from utils.alerts import tdd_info, tdd_warn
 from services.data_loader import (
     load_projections, load_game_props, load_dk_props, load_pp_props,
     load_todays_games, fetch_live_schedule, load_stat_tier_thresholds,
@@ -14,6 +15,7 @@ from services.data_loader import (
 )
 from components.headshot import headshot_html
 from utils.helpers import format_game_time
+from utils.html import esc, esc_attr
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +173,12 @@ def _today_et() -> str:
     utc_now = datetime.now(timezone.utc)
     et_now = utc_now - timedelta(hours=4)
     return et_now.date().isoformat()
+
+
+def _tomorrow_et() -> str:
+    utc_now = datetime.now(timezone.utc)
+    et_now = utc_now - timedelta(hours=4)
+    return (et_now.date() + timedelta(days=1)).isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -350,9 +358,9 @@ def _render_stat_leaderboard(
         matchup_html = ""
         if team and opp:
             matchup_html = (
-                f'<span class="lb-team" data-team="{team}">{team}'
+                f'<span class="lb-team" data-team="{esc_attr(team)}">{esc(team)}'
                 f'<span style="color:var(--tdd-slate); font-size:0.7rem;"> v </span>'
-                f'{opp}</span>'
+                f'{esc(opp)}</span>'
             )
 
         rows_html += (
@@ -362,7 +370,7 @@ def _render_stat_leaderboard(
             f'<span style="font-size:0.6rem; color:{SLATE}; '
             f'border:1px solid var(--tdd-dark-border); border-radius:3px; '
             f'padding:0 0.2rem; margin-right:0.2rem;">{type_badge}</span>'
-            f'<span class="lb-name" style="font-size:0.85rem;">{name}</span>'
+            f'<span class="lb-name" style="font-size:0.85rem;">{esc(name)}</span>'
             f'{matchup_html}'
             f'{conf_tier_html}'
             f'{tier_html}'
@@ -428,7 +436,7 @@ def page_projected_performers() -> None:
 
     all_props = load_game_props()
     if all_props.empty:
-        st.warning("No game props data found.")
+        tdd_warn("No game props data found.")
         return
 
     # Compat
@@ -444,37 +452,42 @@ def page_projected_performers() -> None:
                 all_props["p_over_mid"]
             )
 
-    # Today's props
     today = _today_et()
+    tomorrow = _tomorrow_et()
     today_props = all_props[all_props["game_date"] == today].copy()
+    tomorrow_props = all_props[all_props["game_date"] == tomorrow].copy()
 
-    if today_props.empty:
-        st.info("No props for today's games.")
+    if today_props.empty and tomorrow_props.empty:
+        tdd_info("No props for today's or tomorrow's games.")
         return
 
-    # Fetch live game status from MLB API so toggles reflect
-    # real-time state (the props parquet status is stale).
-    try:
-        live_schedule = fetch_live_schedule(today)
-        if (
-            not live_schedule.empty
-            and "game_pk" in live_schedule.columns
-            and "status" in live_schedule.columns
-            and "game_pk" in today_props.columns
-        ):
-            live_status = live_schedule.set_index("game_pk")["status"]
-            today_props["game_status"] = (
-                today_props["game_pk"].map(live_status).fillna(today_props["game_status"])
-            )
-    except Exception:
-        pass  # fall back to parquet status on API failure
+    # Overlay live status on today's rows so filters reflect real-time
+    # state. Tomorrow's rows stay "Scheduled" in the parquet — no live
+    # state to overlay.
+    if not today_props.empty:
+        try:
+            live_schedule = fetch_live_schedule(today)
+            if (
+                not live_schedule.empty
+                and "game_pk" in live_schedule.columns
+                and "status" in live_schedule.columns
+                and "game_pk" in today_props.columns
+            ):
+                live_status = live_schedule.set_index("game_pk")["status"]
+                today_props["game_status"] = (
+                    today_props["game_pk"].map(live_status).fillna(today_props["game_status"])
+                )
+        except Exception:
+            pass  # fall back to parquet status on API failure
 
     name_lookup = _build_name_lookup()
-    today_props["player_name"] = today_props["player_id"].map(
-        lambda pid: name_lookup.get(int(pid), str(pid))
-    )
+    for _dfi in (today_props, tomorrow_props):
+        if not _dfi.empty:
+            _dfi["player_name"] = _dfi["player_id"].map(
+                lambda pid: name_lookup.get(int(pid), str(pid))
+            )
 
-    # --- Inline toolbar ---
+    # --- Inline toolbar (shared across today + tomorrow) ---
     col_game, col_type, col_conf, col_tier = st.columns([1, 1, 1, 1])
     col_t1, col_t2 = st.columns([1, 1])
 
@@ -483,33 +496,29 @@ def page_projected_performers() -> None:
     with col_t2:
         include_live = st.toggle("Include in-progress", value=True, key="lab_live")
 
-    # Filter by game status using live status values:
-    # "Scheduled", "Pre-Game", "In Progress", "Final", etc.
-    _status_lower = today_props["game_status"].str.lower().str.strip().fillna("")
-    is_scheduled = _status_lower.isin(["scheduled", "pre-game", ""])  | _status_lower.isna()
-    is_live = _status_lower == "in progress"
-    is_final = _status_lower == "final"
+    # Today-only status filter. Tomorrow's rows all pass — they're
+    # pre-game by definition.
+    if not today_props.empty:
+        _status_lower = today_props["game_status"].str.lower().str.strip().fillna("")
+        is_scheduled = _status_lower.isin(["scheduled", "pre-game", ""]) | _status_lower.isna()
+        is_live = _status_lower == "in progress"
+        is_final = _status_lower == "final"
+        mask = is_scheduled
+        if include_live:
+            mask = mask | is_live
+        if include_final:
+            mask = mask | is_final
+        today_props = today_props[mask].copy()
 
-    mask = is_scheduled
-    if include_live:
-        mask = mask | is_live
-    if include_final:
-        mask = mask | is_final
-    props = today_props[mask].copy()
+    # Build game dropdown options from both dates, with a "Tmrw" prefix
+    # so users can tell which slate a game belongs to.
+    combined_for_games = pd.concat(
+        [d for d in (today_props, tomorrow_props) if not d.empty],
+        ignore_index=True,
+    ) if not (today_props.empty and tomorrow_props.empty) else pd.DataFrame()
 
-    if props.empty:
-        st.info("No props match the current filters.")
-        return
-
-    all_picks = _build_all_picks(props)
-    if all_picks.empty:
-        st.info("No book lines matched to model projections.")
-        return
-
-    # --- Build game dropdown options ---
     game_options: dict[str, int | None] = {"All Games": None}
-    if "game_pk" in props.columns:
-        # Get game times from schedule data for sorting + display
+    if not combined_for_games.empty and "game_pk" in combined_for_games.columns:
         _sched = load_todays_games()
         _time_lookup: dict[int, str] = {}
         if not _sched.empty and "game_datetime_utc" in _sched.columns:
@@ -518,20 +527,23 @@ def page_projected_performers() -> None:
                 if pd.notna(_gpk):
                     _time_lookup[int(_gpk)] = str(_sg["game_datetime_utc"])
 
-        game_matchups = props.drop_duplicates("game_pk")[["game_pk", "team", "opponent"]].copy()
+        _cols_for_games = ["game_pk", "team", "opponent", "game_date"]
+        game_matchups = combined_for_games.drop_duplicates("game_pk")[_cols_for_games].copy()
         game_matchups["_sort_time"] = game_matchups["game_pk"].map(
             lambda gpk: _time_lookup.get(int(gpk), "")
         )
-        game_matchups = game_matchups.sort_values("_sort_time", na_position="last")
+        game_matchups = game_matchups.sort_values(
+            ["game_date", "_sort_time"], na_position="last",
+        )
 
         for _, g in game_matchups.iterrows():
             gpk_int = int(g["game_pk"])
             utc_str = _time_lookup.get(gpk_int, "")
             time_str = format_game_time(utc_str)
+            prefix = "[Tmrw] " if str(g.get("game_date")) == tomorrow else ""
+            label = f"{prefix}{g['team']} vs {g['opponent']}"
             if time_str:
-                label = f"{g['team']} vs {g['opponent']} - {time_str}"
-            else:
-                label = f"{g['team']} vs {g['opponent']}"
+                label += f" - {time_str}"
             game_options[label] = gpk_int
 
     with col_game:
@@ -555,82 +567,95 @@ def page_projected_performers() -> None:
             index=1, key="lab_tier", label_visibility="collapsed",
         )
 
-    # --- Apply filters ---
-    filtered = all_picks.copy()
-
-    # Game filter
     selected_gpk = game_options[game_choice]
-    if selected_gpk is not None and "game_pk" in filtered.columns:
-        filtered = filtered[filtered["game_pk"] == selected_gpk]
-
-    # Player type filter
-    if type_choice == "Pitchers":
-        filtered = filtered[filtered["player_type"] == "pitcher"]
-    elif type_choice == "Hitters":
-        filtered = filtered[filtered["player_type"] != "pitcher"]
-
-    # Confidence tier filter (per-stat calibrated)
     tier_include = _TIER_FILTER_OPTIONS[conf_choice]
-    if tier_include is not None:
-        filtered = filtered[filtered["conf_tier"].isin(tier_include)]
-
-    # Tier filter
     tier_key = _TIER_OPTIONS[tier_choice]
-    if tier_key == "market":
-        filtered = filtered[filtered["tier"].isin(["market", "standard"])]
-    elif tier_key is not None:
-        filtered = filtered[filtered["tier"] == tier_key]
 
-    if filtered.empty:
+    def _render_date_section(props_df: pd.DataFrame, heading: str) -> bool:
+        """Render one date's leaderboards. Returns True if anything shown."""
+        if props_df.empty:
+            return False
+
+        all_picks = _build_all_picks(props_df)
+        if all_picks.empty:
+            return False
+
+        filtered = all_picks.copy()
+        if selected_gpk is not None and "game_pk" in filtered.columns:
+            filtered = filtered[filtered["game_pk"] == selected_gpk]
+        if type_choice == "Pitchers":
+            filtered = filtered[filtered["player_type"] == "pitcher"]
+        elif type_choice == "Hitters":
+            filtered = filtered[filtered["player_type"] != "pitcher"]
+        if tier_include is not None:
+            filtered = filtered[filtered["conf_tier"].isin(tier_include)]
+        if tier_key == "market":
+            filtered = filtered[filtered["tier"].isin(["market", "standard"])]
+        elif tier_key is not None:
+            filtered = filtered[filtered["tier"] == tier_key]
+
+        if filtered.empty:
+            return False
+
+        st.markdown(
+            f'<div class="section-subheader" style="margin-top:1rem;">{heading}</div>'
+            f'<div class="tdd-meta" style="margin-bottom:0.5rem;">'
+            f'{len(filtered)} picks across {filtered["stat"].nunique()} stats</div>',
+            unsafe_allow_html=True,
+        )
+
+        _SPLIT_STATS = {"K", "H", "HR", "BB"}
+        boards: list[tuple[str, pd.DataFrame]] = []
+        for s in _STAT_ORDER:
+            s_picks = filtered[filtered["stat"] == s]
+            if s_picks.empty:
+                continue
+            if s in _SPLIT_STATS and "player_type" in s_picks.columns:
+                p_picks = s_picks[s_picks["player_type"] == "pitcher"]
+                h_picks = s_picks[s_picks["player_type"] != "pitcher"]
+                if not p_picks.empty:
+                    boards.append((s, p_picks.sort_values("model_p", ascending=False)))
+                if not h_picks.empty:
+                    boards.append((s, h_picks.sort_values("model_p", ascending=False)))
+            else:
+                boards.append((s, s_picks.sort_values("model_p", ascending=False)))
+
+        _tier_rank = {t: i for i, t in enumerate(_CONFIDENCE_TIER_ORDER)}
+        boards = [
+            (
+                s,
+                df.assign(_tier_rank=df["conf_tier"].map(_tier_rank).fillna(99))
+                .sort_values(["_tier_rank", "model_p"], ascending=[True, False])
+                .drop(columns="_tier_rank"),
+            )
+            for s, df in boards
+        ]
+
+        for row_start in range(0, len(boards), 3):
+            row_boards = boards[row_start:row_start + 3]
+            cols = st.columns(len(row_boards), gap="large")
+            for col, (stat, stat_picks) in zip(cols, row_boards):
+                with col:
+                    _render_stat_leaderboard(stat, stat_picks)
+        return True
+
+    today_shown = _render_date_section(today_props, "Today")
+
+    if not tomorrow_props.empty:
+        if today_shown:
+            st.markdown(
+                '<hr style="margin:2rem 0 1rem 0; border:0; '
+                'border-top:1px solid var(--tdd-dark-border);">',
+                unsafe_allow_html=True,
+            )
+        tomorrow_shown = _render_date_section(tomorrow_props, "Tomorrow")
+        if not today_shown and not tomorrow_shown:
+            st.markdown(
+                '<div class="tdd-meta">No picks match the selected filters.</div>',
+                unsafe_allow_html=True,
+            )
+    elif not today_shown:
         st.markdown(
             '<div class="tdd-meta">No picks match the selected filters.</div>',
             unsafe_allow_html=True,
         )
-        return
-
-    st.markdown(
-        f'<div class="tdd-meta" style="margin-bottom:0.5rem;">'
-        f'{len(filtered)} picks across '
-        f'{filtered["stat"].nunique()} stats</div>',
-        unsafe_allow_html=True,
-    )
-
-    # --- Render leaderboards by stat in 3-column grid ---
-    # Stats where pitcher/hitter labels differ -- split into separate boards
-    _SPLIT_STATS = {"K", "H", "HR", "BB"}
-
-    # Build list of (stat, picks_df) tuples, splitting shared stats by type
-    boards: list[tuple[str, pd.DataFrame]] = []
-    for s in _STAT_ORDER:
-        s_picks = filtered[filtered["stat"] == s]
-        if s_picks.empty:
-            continue
-        if s in _SPLIT_STATS and "player_type" in s_picks.columns:
-            p_picks = s_picks[s_picks["player_type"] == "pitcher"]
-            h_picks = s_picks[s_picks["player_type"] != "pitcher"]
-            if not p_picks.empty:
-                boards.append((s, p_picks.sort_values("model_p", ascending=False)))
-            if not h_picks.empty:
-                boards.append((s, h_picks.sort_values("model_p", ascending=False)))
-        else:
-            boards.append((s, s_picks.sort_values("model_p", ascending=False)))
-
-    # Sort each board by tier rank, then by model confidence
-    _tier_rank = {t: i for i, t in enumerate(_CONFIDENCE_TIER_ORDER)}
-    boards = [
-        (
-            s,
-            df.assign(_tier_rank=df["conf_tier"].map(_tier_rank).fillna(99))
-            .sort_values(["_tier_rank", "model_p"], ascending=[True, False])
-            .drop(columns="_tier_rank"),
-        )
-        for s, df in boards
-    ]
-
-    # Render in rows of 3 with padding between columns
-    for row_start in range(0, len(boards), 3):
-        row_boards = boards[row_start:row_start + 3]
-        cols = st.columns(len(row_boards), gap="large")
-        for col, (stat, stat_picks) in zip(cols, row_boards):
-            with col:
-                _render_stat_leaderboard(stat, stat_picks)

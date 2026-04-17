@@ -13,6 +13,7 @@ from services.data_loader import (
 )
 from components.diamond_rating import diamond_rating_html
 from lib.diamond_rating import score_to_diamonds
+from utils.alerts import tdd_warn
 
 _POSITIONS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"]
 
@@ -188,7 +189,7 @@ def page_lineup_creator() -> None:
 
     pool = _load_hitter_pool()
     if pool.empty:
-        st.warning("Hitter rankings not available. Run precompute first.")
+        tdd_warn("Hitter rankings not available. Run precompute first.")
         return
 
     teams = sorted(pool["team_abbr"].dropna().unique())

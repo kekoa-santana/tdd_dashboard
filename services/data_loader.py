@@ -708,6 +708,38 @@ def load_rankings(player_type: str) -> pd.DataFrame:
     return pd.read_parquet(path)
 
 
+@st.cache_data(ttl=_DATA_TTL)
+def load_hitters_daily_standouts() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "hitters_daily_standouts.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_pitchers_daily_standouts() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "pitchers_daily_standouts.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_hitters_weekly_form() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "hitters_weekly_form.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_pitchers_weekly_form() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "pitchers_weekly_form.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
 _CORE_RANKING_FILES = {
     "hitters": "hitters_core_rankings.parquet",
     "pitchers": "pitchers_core_rankings.parquet",

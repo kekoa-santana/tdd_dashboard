@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from config import EMBER, SAGE, SLATE, PITCH_DISPLAY
+from utils.alerts import tdd_info, tdd_warn
 from services.data_loader import (
     load_baselines_arch,
     load_cluster_metadata,
@@ -79,7 +80,7 @@ def page_matchup_explorer() -> None:
     )
 
     if arsenal_df.empty or vuln_df.empty:
-        st.warning(
+        tdd_warn(
             "Matchup data not found. Re-run "
             "`python scripts/precompute_dashboard_data.py` to generate it."
         )
@@ -92,7 +93,7 @@ def page_matchup_explorer() -> None:
     col1, col2 = st.columns(2)
     with col1:
         if pitcher_proj.empty:
-            st.warning("No pitcher projections available.")
+            tdd_warn("No pitcher projections available.")
             return
         p_display = {}
         for _, pr in pitcher_proj.iterrows():
@@ -117,7 +118,7 @@ def page_matchup_explorer() -> None:
         selected_pitcher = p_display[selected_pitcher_display]
     with col2:
         if hitter_proj.empty:
-            st.warning("No hitter projections available.")
+            tdd_warn("No hitter projections available.")
             return
         h_display = {}
         for _, hr_ in hitter_proj.iterrows():
@@ -402,7 +403,7 @@ def page_matchup_explorer() -> None:
         p_off = offerings_df[offerings_df["pitcher_id"] == pitcher_id].copy()
         p_off = p_off[p_off["pitches"] >= 20].copy()
         if p_off.empty:
-            st.info("Insufficient archetype offering data for detailed breakdown.")
+            tdd_info("Insufficient archetype offering data for detailed breakdown.")
         else:
             # Build archetype label map from cluster metadata
             arch_label_map: dict[int, str] = {}
@@ -486,11 +487,11 @@ def page_matchup_explorer() -> None:
             arch_table_html = (
                 '<table style="width:100%; border-collapse:collapse; font-size:0.9rem;">'
                 "<thead><tr>"
-                '<th style="text-align:left; padding:6px 10px; border-bottom:1px solid #333;">Archetype</th>'
-                '<th style="text-align:center; padding:6px 10px; border-bottom:1px solid #333;">Usage</th>'
-                '<th style="text-align:center; padding:6px 10px; border-bottom:1px solid #333;">P Whiff%</th>'
-                '<th style="text-align:center; padding:6px 10px; border-bottom:1px solid #333;">H Whiff%</th>'
-                '<th style="text-align:center; padding:6px 10px; border-bottom:1px solid #333;">Edge</th>'
+                '<th style="text-align:left; padding:6px 10px; border-bottom:1px solid var(--tdd-dark-border);">Archetype</th>'
+                '<th style="text-align:center; padding:6px 10px; border-bottom:1px solid var(--tdd-dark-border);">Usage</th>'
+                '<th style="text-align:center; padding:6px 10px; border-bottom:1px solid var(--tdd-dark-border);">P Whiff%</th>'
+                '<th style="text-align:center; padding:6px 10px; border-bottom:1px solid var(--tdd-dark-border);">H Whiff%</th>'
+                '<th style="text-align:center; padding:6px 10px; border-bottom:1px solid var(--tdd-dark-border);">Edge</th>'
                 "</tr></thead>"
                 f"<tbody>{rows_html}</tbody></table>"
             )
@@ -505,7 +506,7 @@ def page_matchup_explorer() -> None:
                 f"Edge: green = pitcher advantage, red = hitter advantage.{platoon_note}"
             )
     elif p_arsenal.empty:
-        st.info("Insufficient arsenal data for detailed breakdown.")
+        tdd_info("Insufficient arsenal data for detailed breakdown.")
     else:
         _whiff_fig = create_matchup_whiff_bars_fig(
             p_arsenal, h_vuln, h_str, selected_pitcher, selected_hitter,
@@ -516,7 +517,10 @@ def page_matchup_explorer() -> None:
                 "Whiff% by pitch — bar opacity scales with usage; dashed line = league whiff.</div>",
                 unsafe_allow_html=True,
             )
-            st.pyplot(_whiff_fig, clear_figure=True)
+            st.plotly_chart(
+                _whiff_fig, use_container_width=True,
+                config={"displayModeBar": False, "scrollZoom": False},
+            )
 
         matchup_html = build_matchup_table(p_arsenal, h_vuln, h_str)
         if matchup_html:

@@ -31,6 +31,7 @@ from components.charts import apply_dark_mpl  # noqa: E402
 from views.schedule import page_schedule  # noqa: E402
 from views.projections import page_projections  # noqa: E402
 from views.stats import page_stats  # noqa: E402
+from views.diamond_daily import page_diamond_daily  # noqa: E402
 from views.player_profile import page_player_profile  # noqa: E402
 from views.team_overview import page_team_overview  # noqa: E402
 from views.matchup_explorer import page_matchup_explorer  # noqa: E402
@@ -57,33 +58,15 @@ st.set_page_config(
     page_title="The Data Diamond | MLB Projections",
     page_icon=str(ICON_PATH) if ICON_PATH.exists() else "",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ---------------------------------------------------------------------------
-# CSS — load styles.css, then inject :root variables (only dynamic values)
+# CSS: load styles.css (owns defaults); app.py only injects dynamic overrides
 # ---------------------------------------------------------------------------
 _css_path = PROJECT_ROOT / "assets" / "styles.css"
 with open(_css_path) as _f:
     st.markdown(f"<style>{_f.read()}</style>", unsafe_allow_html=True)
-
-st.markdown(f"""
-<style>
-    :root {{
-        --tdd-gold: {GOLD};
-        --tdd-ember: {EMBER};
-        --tdd-sage: {SAGE};
-        --tdd-slate: {SLATE};
-        --tdd-cream: {CREAM};
-        --tdd-dark: {DARK};
-        --tdd-dark-card: {DARK_CARD};
-        --tdd-dark-border: {DARK_BORDER};
-        --tdd-dark-border-faint: {DARK_BORDER}22;
-        --tdd-positive: {POSITIVE};
-        --tdd-negative: {NEGATIVE};
-    }}
-</style>
-""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Color palettes — switch via sidebar dropdown
@@ -185,7 +168,7 @@ _FONT_PAIRINGS = {
 _font_name = st.session_state.get("tdd_font", "Inter + IBM Plex Mono")
 _font_pair = _FONT_PAIRINGS.get(_font_name, _FONT_PAIRINGS["System Default"])
 
-# Load Google Fonts
+# Load Google Fonts for the active pairing
 if _font_pair["imports"]:
     families = "&family=".join(_font_pair["imports"])
     st.markdown(
@@ -194,47 +177,13 @@ if _font_pair["imports"]:
         unsafe_allow_html=True,
     )
 
-# Apply fonts via CSS variables — wildcard selectors to override Streamlit
-st.markdown(f"""
-<style>
-    :root {{
-        --tdd-font-heading: {_font_pair["heading"]};
-        --tdd-font-body: {_font_pair["body"]};
-    }}
-    /* Body font — everything by default */
-    html, body, .stApp, .stMarkdown, .stMarkdown p,
-    div, td, th, li, label, input, select, textarea, button,
-    [data-testid="stAppViewContainer"],
-    [data-baseweb] {{
-        font-family: var(--tdd-font-body) !important;
-    }}
-    /* Heading font — brand, section headers, player/team names */
-    .topbar-brand-text,
-    .tdd-section-hdr,
-    .tdd-team-abbr,
-    .tdd-player-name,
-    .tdd-player-name-lg,
-    .tdd-edge-label,
-    .brand-title,
-    .lb-title,
-    .lb-name,
-    .proj-title,
-    h1, h2, h3 {{
-        font-family: var(--tdd-font-heading) !important;
-    }}
-    /* Tabular nums for stat values */
-    .tdd-stat-value, .lb-val, .metric-value {{
-        font-variant-numeric: tabular-nums;
-    }}
-</style>
-""", unsafe_allow_html=True)
-
 _palette_name = st.session_state.get("tdd_palette", "Press Box")
 _pal = _PALETTES.get(_palette_name, _PALETTES["Original (Gold & Cream)"])
 
-# Override :root variables for the active palette
-# (styles.css uses var(--tdd-*) everywhere, so this recolors the whole site)
-if _palette_name != "Original (Gold & Cream)":
+# Override :root vars for the active palette + font pairing.
+# styles.css owns the default values and all structural rules; this block
+# only pushes dynamic values (user-selected theme) into CSS variables.
+if _palette_name != "Original (Gold & Cream)" or _font_name != "Inter + IBM Plex Mono":
     st.markdown(f"""
     <style>
         :root {{
@@ -249,6 +198,8 @@ if _palette_name != "Original (Gold & Cream)":
             --tdd-dark-border-faint: {_pal["dark_border"]}22;
             --tdd-positive: {_pal["positive"]};
             --tdd-negative: {_pal["negative"]};
+            --tdd-font-heading: {_font_pair["heading"]};
+            --tdd-font-body: {_font_pair["body"]};
         }}
     </style>
     """, unsafe_allow_html=True)
@@ -262,6 +213,7 @@ PAGES = {
     "Player Profile": page_player_profile,
     "Player Rankings": page_player_rankings,
     "Stats": page_stats,
+    "The Diamond Daily": page_diamond_daily,
     "Projections": page_projections,
     "Breakout Candidates": page_breakout,
     "Team Overview": page_team_overview,
@@ -285,7 +237,7 @@ _NAV = [
     ("Games", ["Schedule", "Game Analysis", "Daily Preview", "Props Lab"]),
     ("Players", [
         "Player Profile", "Player Rankings", "Stats",
-        "Projections", "Breakout Candidates",
+        "The Diamond Daily", "Projections", "Breakout Candidates",
     ]),
     ("Teams", ["Team Overview", "Team Rankings", "Division Standings"]),
     ("Tools", ["Matchup Explorer", "Compare Players", "Lineup Creator"]),
@@ -312,42 +264,49 @@ def main() -> None:
         if children is None:
             # Standalone button
             slug = label.lower().replace(" ", "_")
+            active_attr = ' aria-current="page"' if page == label else ""
             cls = "topbar-btn topbar-btn-active" if page == label else "topbar-btn"
-            nav_html += f'<a href="?page={slug}" target="_self" class="{cls}">{label}</a>'
+            nav_html += f'<a href="?page={slug}" target="_self" class="{cls}"{active_attr}>{label}</a>'
         else:
-            # Dropdown group — highlight if any child is active
+            # Dropdown group: trigger is a <button> so it is keyboard-focusable.
+            # :focus-within on the wrapper keeps the menu visible while tabbing.
             group_active = page in children
             parent_cls = "topbar-btn topbar-btn-active" if group_active else "topbar-btn"
             items = ""
             for child in children:
                 slug = child.lower().replace(" ", "_")
+                active_attr = ' aria-current="page"' if page == child else ""
                 child_cls = "topbar-dd-item topbar-dd-active" if page == child else "topbar-dd-item"
-                items += f'<a href="?page={slug}" target="_self" class="{child_cls}">{child}</a>'
+                items += f'<a href="?page={slug}" target="_self" class="{child_cls}" role="menuitem"{active_attr}>{child}</a>'
             nav_html += (
                 f'<div class="topbar-dropdown">'
-                f'<span class="{parent_cls}">{label} <span class="topbar-arrow">&#9662;</span></span>'
-                f'<div class="topbar-dd-menu">{items}</div>'
+                f'<button type="button" class="{parent_cls}" aria-haspopup="true">'
+                f'{label} <span class="topbar-arrow">&#9662;</span>'
+                f'</button>'
+                f'<div class="topbar-dd-menu" role="menu">{items}</div>'
                 f'</div>'
             )
 
-    # Mobile navigation — flat list for details/summary menu
+    # Mobile navigation: flat list inside details/summary
     mobile_nav_html = ""
     for label, children in _NAV:
         if children is None:
             slug = label.lower().replace(" ", "_")
             active = " topbar-mob-active" if page == label else ""
+            aria = ' aria-current="page"' if page == label else ""
             mobile_nav_html += (
                 f'<a href="?page={slug}" target="_self"'
-                f' class="topbar-mob-item{active}">{label}</a>'
+                f' class="topbar-mob-item{active}"{aria}>{label}</a>'
             )
         else:
             mobile_nav_html += f'<div class="topbar-mob-group">{label}</div>'
             for child in children:
                 slug = child.lower().replace(" ", "_")
                 active = " topbar-mob-active" if page == child else ""
+                aria = ' aria-current="page"' if page == child else ""
                 mobile_nav_html += (
                     f'<a href="?page={slug}" target="_self"'
-                    f' class="topbar-mob-item{active}">{child}</a>'
+                    f' class="topbar-mob-item{active}"{aria}>{child}</a>'
                 )
 
     # Social links
@@ -364,13 +323,13 @@ def main() -> None:
         _logo_b64 = base64.b64encode(ICON_PATH.read_bytes()).decode()
 
     _logo_html = (
-        f'<img src="data:image/png;base64,{_logo_b64}" class="topbar-logo">'
+        f'<img src="data:image/png;base64,{_logo_b64}" class="topbar-logo" alt="The Data Diamond">'
         if _logo_b64 else ""
     )
 
     st.markdown(f"""
     <div class="topbar-wrap">
-    <div class="topbar">
+    <nav class="topbar" aria-label="Main navigation">
         <a href="?page=schedule" target="_self" class="topbar-home">
             {_logo_html}
             <span class="topbar-brand-text">The Data Diamond</span>
@@ -388,7 +347,7 @@ def main() -> None:
                 <div class="topbar-mob-socials">{socials_html}</div>
             </div>
         </details>
-    </div>
+    </nav>
     </div>
     """, unsafe_allow_html=True)
 
@@ -410,9 +369,7 @@ def main() -> None:
 
     # Site-wide disclaimer
     st.markdown(
-        '<div style="text-align:center; color:var(--tdd-slate); font-size:0.7rem; '
-        'margin-top:3rem; padding:1rem 0; border-top:1px solid var(--tdd-dark-border); '
-        'opacity:0.6;">For entertainment and research purposes. Not financial advice.</div>',
+        '<div class="tdd-footer-disclaimer">For entertainment and research purposes. Not financial advice.</div>',
         unsafe_allow_html=True,
     )
 

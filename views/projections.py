@@ -5,7 +5,8 @@ import pandas as pd
 import streamlit as st
 
 from services.data_loader import load_counting_sim, load_roster
-from components.headshot import headshot_html
+from components.leaderboard import render_card
+from utils.alerts import tdd_warn
 
 
 # ── Leaderboard definitions ───────────────────────────────────────────
@@ -43,164 +44,7 @@ _NL_TEAMS = {"ATL", "MIA", "NYM", "PHI", "WSH",
 
 # ── CSS ────────────────────────────────────────────────────────────────
 
-_CSS = f"""
-<style>
-.proj-header {{
-    text-align: center;
-    margin-bottom: 0.8rem;
-}}
-.proj-title {{
-    color: var(--tdd-cream);
-    font-size: 1.7rem;
-    font-weight: 800;
-    letter-spacing: 1.5px;
-}}
-.proj-nav {{
-    display: flex;
-    justify-content: center;
-    gap: 1.2rem;
-    margin: 0.6rem 0;
-}}
-.proj-nav-btn {{
-    color: var(--tdd-slate);
-    font-size: 0.88rem;
-    font-weight: 600;
-    cursor: pointer;
-    padding: 0.25rem 0.6rem;
-    border-radius: 4px;
-    text-decoration: none;
-    transition: color 0.15s;
-}}
-.proj-nav-active {{
-    color: var(--tdd-gold);
-    border-bottom: 2px solid var(--tdd-gold);
-}}
-.lb-title-row {{
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 0.5rem;
-    padding-bottom: 0.4rem;
-    border-bottom: 1px solid var(--tdd-dark-border);
-}}
-.lb-title {{
-    color: var(--tdd-gold);
-    font-size: 1.0rem;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-}}
-.lb-subtitle {{
-    color: var(--tdd-slate);
-    font-size: 0.70rem;
-    font-weight: 400;
-    margin-left: 0.4rem;
-}}
-.lb-row {{
-    display: flex;
-    align-items: center;
-    padding: 0.28rem 0;
-    border-bottom: 1px solid var(--tdd-dark-border-faint);
-}}
-.lb-row:last-child {{ border-bottom: none; }}
-.lb-rank {{
-    color: var(--tdd-slate);
-    font-size: 0.82rem;
-    min-width: 1.6rem;
-    text-align: right;
-    margin-right: 0.5rem;
-}}
-.lb-rank-top {{ color: var(--tdd-gold); font-weight: 700; }}
-.lb-headshot {{
-    margin-left: 0.5rem;
-    margin-right: 0.5rem;
-}}
-.lb-name {{
-    color: var(--tdd-cream);
-    font-size: 0.95rem;
-    font-weight: 600;
-    flex: 1;
-}}
-.lb-name a {{
-    color: inherit;
-    text-decoration: none;
-}}
-.lb-name a:hover {{
-    color: var(--tdd-gold);
-    text-decoration: underline;
-}}
-.lb-team {{
-    color: var(--tdd-slate);
-    font-size: 0.80rem;
-    margin-right: 0.5rem;
-}}
-.lb-val {{
-    color: var(--tdd-sage);
-    font-size: 1rem;
-    font-weight: 700;
-    min-width: 2.5rem;
-    text-align: right;
-}}
-.lb-range {{
-    color: var(--tdd-slate);
-    font-size: 0.7rem;
-    min-width: 4.2rem;
-    text-align: right;
-    margin-left: 0.3rem;
-}}
-.lb-watch-header {{
-    color: var(--tdd-slate);
-    font-size: 0.78rem;
-    font-weight: 500;
-    margin: 0.6rem 0 0.3rem 0;
-    padding-top: 0.4rem;
-    border-top: 1px solid var(--tdd-dark-border);
-    font-style: italic;
-}}
-.lb-watch-row {{
-    display: flex;
-    align-items: center;
-    padding: 0.18rem 0;
-    opacity: 0.75;
-}}
-.lb-watch-name {{
-    color: var(--tdd-slate);
-    font-size: 0.9rem;
-    flex: 1;
-}}
-.lb-watch-val {{
-    color: var(--tdd-slate);
-    font-size: 0.78rem;
-    font-weight: 800;
-    min-width: 2.5rem;
-    text-align: right;
-}}
-.lb-watch-range {{
-    color: var(--tdd-slate);
-    font-size: 0.62rem;
-    min-width: 4.2rem;
-    text-align: right;
-    margin-left: 0.3rem;
-    opacity: 0.8;
-}}
-
-.stSelectbox div[data-baseweb="select"] > div {{
-    background-color: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    padding-left: 0 !important;
-}}
-
-.stSelectbox div[data-baseweb="select"] {{
-    font-size: 1.2rem !important;
-    font-weight: 800 !important;
-    color: #C8A96E !important;
-    cursor: pointer !important;
-}}
-.stSelectbox div[data-baseweb="select"] > div:hover {{
-    background-color: transparent !important;
-}}
-</style>
-"""
+_CSS = ""
 
 
 # ── Helpers ────────────────────────────────────────────────────────────
@@ -274,98 +118,53 @@ def _render_leaderboard(
         elif "CL" in fn_str or "SU" in fn_str:
             subtitle = "RP"
 
-    # Build rows
-    rows_html = []
-    for i, (_, row) in enumerate(top.iterrows(), 1):
-        name = row[name_col]
+    def _row_dict(row: pd.Series) -> dict:
         pid = int(row[id_col])
-        team = teams_lookup.get(pid, "")
-        val = _fmt(row[mean_col], fmt)
-        rank_class = "lb-rank-top lb-rank" if i <= 5 else "lb-rank"
-
-        hs = f'<span class="lb-headshot">{headshot_html(pid, size=50)}</span>'
-
-        if link_type:
-            profile_url = f"?page=player_profile&player_id={pid}&player_type={link_type}"
-            name_html = f'<a href="{profile_url}">{name}</a>'
-        else:
-            name_html = name
-
-        team_html = f'<span class="lb-team" data-team="{team}">{team}</span>' if team else ""
-
-        range_html = ""
+        d = {
+            "player_id": pid,
+            "name": row[name_col],
+            "value": _fmt(row[mean_col], fmt),
+            "team": teams_lookup.get(pid, ""),
+            "link_type": link_type,
+        }
         if has_range and pd.notna(row.get(p10_col)) and pd.notna(row.get(p90_col)):
             lo = _fmt(row[p10_col], fmt)
             hi = _fmt(row[p90_col], fmt)
-            range_html = f'<span class="lb-range">({lo}-{hi})</span>'
+            d["range"] = f"({lo}-{hi})"
+        return d
 
-        rows_html.append(
-            f'<div class="lb-row">'
-            f'<span class="{rank_class}">{i}.</span>'
-            f'{hs}'
-            f'<span class="lb-name">{name_html}</span>'
-            f'{team_html}'
-            f'<span class="lb-val">{val}</span>'
-            f'{range_html}'
-            f'</div>'
-        )
+    rows = [_row_dict(row) for _, row in top.iterrows()]
 
-    subtitle_html = f'<span class="lb-subtitle">{subtitle}</span>' if subtitle else ""
-
-    html = (
-        f'<div class="lb-card">'
-        f'<div class="lb-title-row">'
-        f'<span class="lb-title">Top {n_show} {title}{subtitle_html}</span>'
-        f'</div>'
-        + "".join(rows_html)
-    )
-
-    # Players to Watch (only when toggled)
+    watch_rows: list[dict] = []
     if show_watch and not work_watch_df.empty:
-        watch = work_watch_df.sort_values(mean_col, ascending=ascending).head(5)
-        if not watch.empty:
-            watch_rows = []
-            for _, row in watch.iterrows():
-                name = row[name_col]
-                pid = int(row[id_col])
-                team = teams_lookup.get(pid, "")
-                val = _fmt(row[mean_col], fmt)
-                range_html = ""
-                if has_range and pd.notna(row.get(p10_col)) and pd.notna(row.get(p90_col)):
-                    lo = _fmt(row[p10_col], fmt)
-                    hi = _fmt(row[p90_col], fmt)
-                    range_html = f'<span class="lb-watch-range">({lo}-{hi})</span>'
-                watch_rows.append(
-                    f'<div class="lb-watch-row">'
-                    f'<span class="lb-watch-name">{name}'
-                    f' (<span data-team="{team}">{team}</span>)</span>'
-                    f'<span class="lb-watch-val">{val}</span>'
-                    f'{range_html}'
-                    f'</div>'
-                )
-            html += (
-                '<div class="lb-watch-header">Players to Watch</div>'
-                + "".join(watch_rows)
-            )
+        watch_df = work_watch_df.sort_values(mean_col, ascending=ascending).head(5)
+        watch_rows = [_row_dict(row) for _, row in watch_df.iterrows()]
 
-    html += '</div>'
-    st.markdown(html, unsafe_allow_html=True)
+    st.markdown(
+        render_card(
+            title=f"Top {n_show} {title}",
+            rows=rows,
+            subtitle=subtitle,
+            watch_rows=watch_rows or None,
+        ),
+        unsafe_allow_html=True,
+    )
 
 
 # ── Main page ─────────────────────────────────────────────────────────
 
 def page_projections() -> None:
     """Leaderboard-style projections page."""
-    st.markdown(_CSS, unsafe_allow_html=True)
-
     # ── Title ─────────────────────────────────────────────────────
     st.markdown(
-        f'<div class="proj-header">'
-        f'<div class="proj-title">2026 PROJECTIONS</div>'
-        f'</div>',
+        '<div class="tdd-page-header">'
+        '<div class="tdd-page-title">2026 PROJECTIONS</div>'
+        '<div class="tdd-page-subtitle">'
+        'PA-by-PA game simulator with Bayesian hierarchical rate models'
+        '</div>'
+        '</div>',
         unsafe_allow_html=True,
     )
-
 
     # ── Dropdown Filters ──────────────────────────────────────────────
     if "proj_player_type" not in st.session_state:
@@ -373,41 +172,38 @@ def page_projections() -> None:
     if "proj_league" not in st.session_state:
         st.session_state.proj_league = "All"
 
-    filter_cols = st.columns([2, 2, 2, 3])
-    
-    with filter_cols[0]:
+    fc1, fc2, fc3 = st.columns(3)
+
+    with fc1:
         player_type = st.selectbox(
             "Player Type",
             options=["Batter", "Pitcher"],
             key="proj_player_type",
-            label_visibility="collapsed"
+            label_visibility="collapsed",
         )
-    with filter_cols[1]:
+    with fc2:
         st.selectbox(
             "League",
             options=["All", "American League", "National League"],
             key="proj_league",
-            label_visibility="collapsed"
+            label_visibility="collapsed",
         )
-    with filter_cols[2]:
+    with fc3:
         n_show = st.selectbox(
-            "Show Top", 
-            [5, 10, 15], 
-            index=1, 
+            "Show Top",
+            [5, 10, 15],
+            index=1,
             key="proj_n",
-            jel_visibility="collapsed"
+            label_visibility="collapsed",
         )
-    with filter_cols[3]:
-        # Add a tiny bit of margin so the checkbox vertically aligns with the text
-        st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
-        show_watch = st.checkbox("Show Players to Watch", value=False, key="proj_watch")
+    show_watch = st.checkbox("Show Players to Watch", value=False, key="proj_watch")
 
     pt_key = "hitter" if player_type == "Batter" else "pitcher"
 
     # ── Load data ─────────────────────────────────────────────────
     df = load_counting_sim(pt_key)
     if df.empty:
-        st.warning("No sim projection data found. Run precompute first.")
+        tdd_warn("No sim projection data found. Run precompute first.")
         return
 
     id_col = "batter_id" if player_type == "Batter" else "pitcher_id"
