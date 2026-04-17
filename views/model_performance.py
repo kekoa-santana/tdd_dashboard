@@ -1,4 +1,4 @@
-"""Model Performance page -- backtest results, game K model, projection movers, preseason comparison."""
+"""Model Performance page -- backtest results, game sim validation, projection movers, preseason comparison."""
 from __future__ import annotations
 
 import pandas as pd
@@ -187,7 +187,7 @@ def _render_in_season_accuracy_tab() -> None:
                     labels_list.append(f"{line_val}")
         if probs_list:
             st.markdown(f'<div style="color:{GOLD}; font-weight:600; margin-top:1rem;">'
-                        f'K Prop Calibration</div>', unsafe_allow_html=True)
+                        f'Prop Calibration (K)</div>', unsafe_allow_html=True)
             fig = create_prop_calibration_chart(probs_list, overs_list, labels_list)
             st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key="mp_L197")
 
@@ -491,7 +491,7 @@ def _render_game_sim_backtest_tab() -> None:
     # K-specific: model tier comparison and coverage from game_k_backtest
     if stat_key == "k" and not game_k.empty:
         if "full_model_avg_brier" in game_k.columns:
-            st.markdown('<div class="tdd-section-hdr">Model Tier Comparison (K Props)</div>',
+            st.markdown('<div class="tdd-section-hdr">Model Tier Comparison (Legacy K Backtest)</div>',
                         unsafe_allow_html=True)
             fig = create_game_k_model_comparison(game_k)
             st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key="gsim_tier")
@@ -500,7 +500,7 @@ def _render_game_sim_backtest_tab() -> None:
         cov_labels = ["50% CI", "80% CI", "90% CI"]
         existing = [(c, l) for c, l in zip(cov_cols, cov_labels) if c in game_k.columns]
         if existing:
-            st.markdown('<div class="tdd-section-hdr">K Interval Coverage</div>',
+            st.markdown('<div class="tdd-section-hdr">Interval Coverage (Legacy K Backtest)</div>',
                         unsafe_allow_html=True)
             fig = create_coverage_chart(game_k, [c for c, _ in existing], [l for _, l in existing])
             st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key="gsim_cov")

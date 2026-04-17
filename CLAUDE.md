@@ -1,7 +1,7 @@
 # CLAUDE.md — The Data Diamond Dashboard
 
 ## Project Overview
-Interactive Streamlit dashboard for MLB player analytics, powered by Bayesian projections from the `player_profiles` projection engine. Displays season-level projections, traditional stats, matchup analysis, game-level K predictions, and daily game coverage. Built by The Data Diamond (Koa).
+Interactive Streamlit dashboard for MLB player analytics, powered by Bayesian projections from the `player_profiles` projection engine. Displays season-level projections, traditional stats, matchup analysis, game-level multi-stat predictions (K/BB/HR/H/Outs), and daily game coverage. Built by The Data Diamond (Koa).
 
 **This is the display/presentation layer.** All Bayesian model training, backtesting, and precomputation happens in the sibling `player_profiles` repo. This repo consumes pre-computed parquet/npz files and handles live updates + UI.
 
@@ -33,7 +33,7 @@ tdd-dashboard/
 │   ├── theme.py                  # TDD brand colors + watermark
 │   ├── matchup.py                # Pitch-type matchup scoring (log-odds)
 │   ├── bf_model.py               # Batters-faced distribution lookup
-│   ├── game_k_model.py           # Game K Monte Carlo simulator
+│   ├── game_k_model.py           # DEPRECATED — legacy K-only game simulator
 │   ├── zone_charts.py            # Pitcher location + hitter zone heatmaps
 │   ├── rest_adjustment.py        # Days-rest K/BB/BF adjustments
 │   ├── in_season_updater.py      # Beta-Binomial conjugate updating
@@ -45,7 +45,7 @@ tdd-dashboard/
 │   ├── player_profile.py         # Full player analytics page
 │   ├── team_overview.py          # Team identity and roster analysis
 │   ├── matchup_explorer.py       # Pitcher vs batter matchup scoring
-│   ├── game_k_sim.py             # Interactive K prop simulator
+│   ├── game_k_sim.py             # Interactive game prop simulator (K/BB/HR/H/Outs)
 │   ├── preseason_snapshot.py     # Preseason vs current comparison
 │   ├── prospects.py              # MiLB translated prospect stats
 │   ├── data_health.py            # Data freshness and manifest validation
@@ -79,7 +79,7 @@ tdd-dashboard/
 3. **Player Profile** — Full player page: projections, percentiles, scouting report, approach/efficiency, arsenal/vulnerability, zone charts, season trends
 4. **Team Overview** — Team identity, roster strengths, injury list
 5. **Matchup Explorer** — Pitcher vs batter matchup scoring with zone overlay
-6. **Game K Simulator** — Interactive K prop simulator (lineup, umpire, weather controls)
+6. **Game Simulator** — Interactive multi-stat prop simulator (K/BB/HR/H/Outs, lineup, umpire, weather controls)
 7. **Preseason Snapshot** — Compare current vs preseason projections
 8. **Prospects** — MiLB translated stats, MLB-equivalent projections by level
 9. **Data Health** — Data freshness, artifact inventory, manifest validation
