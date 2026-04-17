@@ -533,6 +533,18 @@ def run_schedule_refresh(game_date: str) -> bool:
     else:
         logger.warning("No exit model — using fallback sigmoid")
 
+    # BF priors for BF-anchored exit logic
+    bf_priors_path = DASHBOARD_DIR / "bf_priors.parquet"
+    bf_lookup: dict[int, tuple[float, float]] = {}
+    if bf_priors_path.exists():
+        _bf_df = pd.read_parquet(bf_priors_path)
+        _bf_latest = _bf_df.sort_values("season").groupby("pitcher_id").last().reset_index()
+        bf_lookup = {
+            int(r["pitcher_id"]): (float(r["mu_bf"]), float(r["sigma_bf"]))
+            for _, r in _bf_latest.iterrows()
+        }
+        logger.info("BF priors: %d pitchers", len(bf_lookup))
+
     pitcher_pc_path = DASHBOARD_DIR / "pitcher_pitch_count_features.parquet"
     batter_pc_path = DASHBOARD_DIR / "batter_pitch_count_features.parquet"
     pitcher_pc = pd.read_parquet(pitcher_pc_path) if pitcher_pc_path.exists() else pd.DataFrame()
@@ -805,6 +817,9 @@ def run_schedule_refresh(game_date: str) -> bool:
                 for bid in (lineup_batter_ids + [0] * 9)[:9]
             ], axis=0).astype(np.float64) if lineup_batter_ids else None
 
+            # BF prior for this pitcher
+            _bf_prior = bf_lookup.get(pid)
+
             # Run PA-by-PA simulation
             result = simulate_game(
                 pitcher_k_rate_samples=k_samp,
@@ -820,6 +835,8 @@ def run_schedule_refresh(game_date: str) -> bool:
                     umpire_k_lift=ump_k_lift,
                     weather_k_lift=wx_k_lift,
                 ),
+                mu_bf=_bf_prior[0] if _bf_prior else None,
+                sigma_bf=_bf_prior[1] if _bf_prior else None,
                 bullpen_profile=team_bullpen_profile,
                 lineup_bip_probs=lineup_bip_probs_arr,
                 **bp_kwargs,
