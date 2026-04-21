@@ -174,6 +174,71 @@ PITCHER_TRAD_COUNTING = [
     ("K", "k"), ("BB", "bb"), ("HBP", "hbp"),
 ]
 
+# Advanced stat configs (from *_advanced.parquet, Statcast + observed profiles)
+# (label, column, higher_is_better, format_key)
+HITTER_ADVANCED_STATS = [
+    ("wRC+", "wrc_plus", True, "int"),
+    ("xwOBA", "xwoba", True, "xwoba"),
+    ("Brl%", "barrel_pct", True, "pct"),
+    ("HH%", "hard_hit_pct", True, "pct"),
+    ("Whiff%", "whiff_rate", False, "pct"),
+    ("Chase%", "chase_rate", False, "pct"),
+    ("Z-Con%", "z_contact_pct", True, "pct"),
+    ("Avg EV", "avg_exit_velo", True, "avg_exit_velo"),
+    ("SwSp%", "sweet_spot_pct", True, "pct"),
+]
+PITCHER_ADVANCED_STATS = [
+    ("xwOBA", "xwoba_against", False, "xwoba"),
+    ("Whiff%", "whiff_rate", True, "pct"),
+    ("CSW%", "csw_pct", True, "pct"),
+    ("Chase%", "chase_pct", True, "pct"),
+    ("Brl%", "barrel_pct_against", False, "pct"),
+    ("HH%", "hard_hit_pct_against", False, "pct"),
+    ("Avg Velo", "avg_velo", True, "avg_velo"),
+    ("GB%", "gb_pct", True, "pct"),
+]
+
+# EOS delta configs: (label, trad_col, sim_prefix, higher_is_better)
+HITTER_EOS_DELTA_STATS = [
+    ("HR", "hr", "total_hr", True),
+    ("H", "hits", "total_h", True),
+    ("R", "runs", "total_r", True),
+    ("RBI", "rbi", "total_rbi", True),
+    ("K", "k", "total_k", False),
+    ("BB", "bb", "total_bb", True),
+    ("SB", "sb", "total_sb", True),
+]
+PITCHER_EOS_DELTA_STATS = [
+    ("K", "k", "total_k", True),
+    ("BB", "bb", "total_bb", False),
+    ("IP", "ip", "projected_ip", True),
+]
+
+# Scouting card helpers
+GRADE_LABELS: dict[int, str] = {
+    80: "elite", 75: "plus-plus", 70: "plus", 65: "above-average",
+    60: "above-average", 55: "average", 50: "average",
+    45: "below-average", 40: "below-average",
+    35: "well below-average", 30: "well below-average",
+    25: "poor", 20: "poor",
+}
+
+PITCH_FAMILY_DISPLAY: dict[str, str] = {
+    "fastball": "fastball", "breaking": "breaking ball", "offspeed": "offspeed",
+}
+
+HITTER_GRADE_SKILLS: list[tuple[str, str]] = [
+    ("grade_hit", "contact ability"),
+    ("grade_power", "power"),
+    ("grade_speed", "speed"),
+    ("grade_discipline", "plate discipline"),
+]
+PITCHER_GRADE_SKILLS: list[tuple[str, str]] = [
+    ("grade_stuff", "stuff"),
+    ("grade_command", "command"),
+    ("grade_durability", "durability"),
+]
+
 # Scouting report helpers
 GOOD_DIRECTION_LABEL = {
     ("k_rate", True): "miss more bats",

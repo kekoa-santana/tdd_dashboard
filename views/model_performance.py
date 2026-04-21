@@ -420,15 +420,18 @@ def _render_game_sim_backtest_tab() -> None:
         tdd_info("No game simulation backtest data available.")
         return
 
-    # Stat selector from summary columns
+    # Stat selector from summary columns -- check for _mae OR _bias (schema varies)
     if not summary.empty:
-        stat_names = ["K", "BB", "H", "HR", "BF", "Pitches", "IP"]
-        stat_keys = ["k", "bb", "h", "hr", "bf", "pitches", "ip"]
+        stat_names = ["K", "BB", "H", "HR", "BF", "Pitches", "IP", "Outs", "Runs"]
+        stat_keys = ["k", "bb", "h", "hr", "bf", "pitches", "ip", "outs", "runs"]
         available = [
             (name, key) for name, key in zip(stat_names, stat_keys)
-            if f"{key}_mae" in summary.columns
+            if f"{key}_mae" in summary.columns or f"{key}_bias" in summary.columns
         ]
     else:
+        available = [("K", "k")]
+
+    if not available:
         available = [("K", "k")]
 
     stat_choice = st.radio(
@@ -436,7 +439,7 @@ def _render_game_sim_backtest_tab() -> None:
         horizontal=True, key="gsim_stat",
         label_visibility="collapsed",
     )
-    stat_key = next(k for n, k in available if n == stat_choice)
+    stat_key = next((k for n, k in available if n == stat_choice), available[0][1])
 
     # Summary cards from the summary table
     if not summary.empty:

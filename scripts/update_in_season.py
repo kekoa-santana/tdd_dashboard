@@ -1133,8 +1133,8 @@ def save_weekly_snapshot(game_date: str) -> None:
 def run_batter_sims(game_date: str) -> None:
     """Run batter-level game sims for today's lineups and save to parquet.
 
-    Requires todays_sims.parquet (pitcher context) and todays_lineups.parquet
-    to already exist from run_schedule_refresh().
+    Requires game_props.parquet (pitcher context) and todays_lineups.parquet
+    to already exist from precompute / run_schedule_refresh().
     """
     import numpy as np
     import pandas as pd
@@ -1142,13 +1142,16 @@ def run_batter_sims(game_date: str) -> None:
     from lib.matchup import score_matchup, score_matchup_bb, score_matchup_hr
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
 
-    sims_path = DASHBOARD_DIR / "todays_sims.parquet"
+    gp_path = DASHBOARD_DIR / "game_props.parquet"
     lu_path = DASHBOARD_DIR / "todays_lineups.parquet"
-    if not sims_path.exists() or not lu_path.exists():
-        logger.warning("Missing sims or lineups parquet, cannot run batter sims")
+    if not gp_path.exists() or not lu_path.exists():
+        logger.warning("Missing game_props or lineups parquet, cannot run batter sims")
         return
 
-    pitcher_sims = pd.read_parquet(sims_path)
+    # Build pitcher sims from game_props (single source of truth)
+    gp = pd.read_parquet(gp_path)
+    from lib.fantasy_report import _build_sims_from_game_props
+    pitcher_sims = _build_sims_from_game_props(gp)
     lineups = pd.read_parquet(lu_path)
     if lineups.empty or pitcher_sims.empty:
         logger.info("No lineups or pitcher sims available for batter sims")
@@ -1395,11 +1398,11 @@ def archive_yesterdays_predictions(game_date: str) -> None:
     yesterday = (date.fromisoformat(game_date) - timedelta(days=1)).isoformat()
 
     # Check if we have yesterday's predictions
-    sims_path = DASHBOARD_DIR / "todays_sims.parquet"
+    gp_path = DASHBOARD_DIR / "game_props.parquet"
     games_path = DASHBOARD_DIR / "todays_games.parquet"
     batter_sims_path = DASHBOARD_DIR / "todays_batter_sims.parquet"
 
-    if not sims_path.exists() or not games_path.exists():
+    if not gp_path.exists() or not games_path.exists():
         logger.info("No predictions to archive (files missing)")
         return
 
@@ -1460,7 +1463,12 @@ def archive_yesterdays_predictions(game_date: str) -> None:
         return
 
     # --- Archive pitcher predictions ---
-    pitcher_sims = pd.read_parquet(sims_path)
+    gp = pd.read_parquet(gp_path)
+    from lib.fantasy_report import _build_sims_from_game_props
+    pitcher_sims = _build_sims_from_game_props(gp, game_date=yesterday)
+    if pitcher_sims.empty:
+        logger.info("No pitcher predictions for %s in game_props. Skipping archive.", yesterday)
+        return
     pitcher_sims["prediction_date"] = yesterday
 
     pitcher_merged = pitcher_sims.merge(
