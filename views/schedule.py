@@ -21,11 +21,10 @@ from services.data_loader import (
     fetch_live_schedule, fetch_live_lineups, backfill_missing_lineups,
     load_pitcher_game_sim_samples, load_batter_game_sim_samples,
 )
-from utils.helpers import format_ip, format_game_time
+from utils.helpers import format_game_time
 from utils.html import esc, esc_attr
 from components.diamond_rating import diamond_rating_html
 from components.expandable_card import EXPANDABLE_CARD_CSS, expandable_card_html
-from components.team_logo import team_logo_html
 from components.headshot import headshot_html
 from lib.fantasy_report import load_report_data, get_pitcher_scouting, ReportData
 
@@ -279,272 +278,6 @@ def _build_schedule_lookups() -> dict:
         "standings": standings,
         "name_lookup": name_lookup,
     }
-
-
-def _render_schedule_cards(
-    schedule: pd.DataFrame,
-    sims: pd.DataFrame,
-    lineups: pd.DataFrame,
-    meta: dict,
-    *,
-    live_stats: pd.DataFrame | None = None,
-) -> None:
-    """Render game cards from schedule + sim + lineup data."""
-    # Cached lookup dicts (eliminates ~180 lines of iterrows on every rerender)
-    _lookups = _build_schedule_lookups()
-    _h_arch_lookup = _lookups["h_arch_lookup"]
-    _p_arch_lookup = _lookups["p_arch_lookup"]
-    _h_stat_lookup = _lookups["h_stat_lookup"]
-    _pos_lookup = _lookups["pos_lookup"]
-    proj_lookup = _lookups["proj_lookup"]
-    _standings = _lookups["standings"]
-
-    # Drilldown data is loaded lazily -- only when a game toggle is active.
-    # This avoids ~20 cached-but-expensive data loads on every page render.
-    _drilldown_data: dict | None = None
-
-    def _get_drilldown_data() -> dict:
-        nonlocal _drilldown_data
-        if _drilldown_data is not None:
-            return _drilldown_data
-        _game_props = load_game_props()
-        if not _game_props.empty:
-            _name_lookup = dict(_lookups["name_lookup"])
-            if not lineups.empty and "batter_name" in lineups.columns:
-                for _, _r in lineups.iterrows():
-                    pid = int(_r.get("batter_id", 0))
-                    if pid and pid not in _name_lookup:
-                        _name_lookup[pid] = _r["batter_name"]
-            _game_props["player_name"] = _game_props["player_id"].map(
-                lambda pid: _name_lookup.get(int(pid), str(pid))
-            )
-        _drilldown_data = {
-            "bf_priors": load_bf_priors(),
-            "arsenal_df": load_pitcher_arsenal(),
-            "vuln_df": load_hitter_vulnerability(career=True),
-            "str_df": load_hitter_strength(career=True),
-            "batter_sims_df": load_todays_batter_sims(),
-            "pitcher_sim_samples": load_pitcher_game_sim_samples(),
-            "batter_sim_samples": load_batter_game_sim_samples(),
-            "game_props": _game_props,
-        }
-        return _drilldown_data
-
-    if schedule.empty:
-        tdd_info("No games scheduled for this date.")
-        return
-
-    n_games = len(schedule)
-
-    # Check if sims are stale (different date than schedule)
-    sims_stale = False
-    if not sims.empty and "game_pk" in sims.columns:
-        sims_gpks = set(sims["game_pk"].tolist())
-        sched_gpks = set(schedule["game_pk"].tolist())
-        sims_stale = len(sims_gpks & sched_gpks) == 0
-
-    if sims_stale:
-        st.markdown(
-            '<div class="tdd-callout-warn">'
-            'Simulations are from a previous date | showing base projections only.'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-
-    st.markdown(
-        f'<div class="tdd-game-count">{n_games} games</div>',
-        unsafe_allow_html=True,
-    )
-
-    # Pre-group pitcher sims by game_pk (one pass instead of N per-game filters)
-    _pitcher_sims_by_gpk: dict[int, pd.DataFrame] = {}
-    if not sims.empty and "game_pk" in sims.columns and "player_type" in sims.columns:
-        _p_sims = sims[sims["player_type"] == "pitcher"]
-        for _gpk_val, _grp in _p_sims.groupby("game_pk"):
-            _pitcher_sims_by_gpk[int(_gpk_val)] = _grp
-
-    # Sort games chronologically by start time
-    if "game_datetime_utc" in schedule.columns:
-        schedule = schedule.sort_values("game_datetime_utc", na_position="last")
-
-    for _, game in schedule.iterrows():
-        gpk = game["game_pk"]
-        away_abbr = game.get("away_abbr", "?")
-        home_abbr = game.get("home_abbr", "?")
-        away_tid = game.get("away_team_id")
-        home_tid = game.get("home_team_id")
-        game_time = format_game_time(
-            game.get("game_datetime_utc"), fallback=game.get("game_time", ""),
-        )
-        game_dt = game.get("game_date", "")
-        status = game.get("status", "")
-
-        game_sims = _pitcher_sims_by_gpk.get(int(gpk), pd.DataFrame())
-
-        def _extract_pitcher_sim(side_label: str) -> dict | None:
-            side_rows = game_sims[game_sims["side"] == side_label] if not game_sims.empty else pd.DataFrame()
-            if side_rows.empty:
-                return None
-            k_row = side_rows[side_rows["stat"] == "K"]
-            outs_row = side_rows[side_rows["stat"] == "Outs"]
-            result = {}
-            if not k_row.empty:
-                result["expected_k"] = float(k_row.iloc[0]["expected"])
-            if not outs_row.empty:
-                result["expected_ip"] = float(outs_row.iloc[0]["expected"]) / 3.0
-            # Pass through metadata from any row
-            first = side_rows.iloc[0]
-            for col in ("dk_mean", "espn_mean", "umpire_k_lift", "weather_k_lift",
-                         "expected_ip", "expected_pitches", "expected_bf"):
-                if col in first.index and pd.notna(first.get(col)):
-                    result.setdefault(col, first[col])
-            return result if result else None
-
-        away_sim = _extract_pitcher_sim("away")
-        home_sim = _extract_pitcher_sim("home")
-
-        # Status badge
-        status_badge = ""
-        if status:
-            if status in ("In Progress", "Live"):
-                status_badge = '<span class="tdd-status-live">● LIVE</span>'
-            elif "Final" in status:
-                status_badge = f'<span class="tdd-status-final">{status}</span>'
-            elif "Scheduled" not in status:
-                status_badge = f'<span class="tdd-status-final">{status}</span>'
-
-        # Game context
-        venue_name = game.get("venue_name", "")
-        hp_ump = game.get("hp_umpire_name", "")
-        wx_temp = game.get("weather_temp", "")
-        wx_cond = game.get("weather_condition", "")
-        ctx_parts = []
-        if venue_name:
-            ctx_parts.append(venue_name)
-        if hp_ump:
-            ctx_parts.append(f"HP: {hp_ump}")
-        if wx_temp:
-            wx_str = f"{wx_temp}°F"
-            if wx_cond:
-                wx_str += f", {wx_cond}"
-            ctx_parts.append(wx_str)
-
-        # Build condensed pitcher summary for each side
-        def _pitcher_summary(sim, pitcher_name_field, pitcher_id_field, abbr):
-            pp_name = game.get(pitcher_name_field, "TBD") or "TBD"
-            _pp_id = game.get(pitcher_id_field)
-            _pp_arch = _p_arch_lookup.get(int(_pp_id)) if pd.notna(_pp_id) else None
-            arch_tag = f'<span class="tdd-stat-label"> · {_pp_arch}</span>' if _pp_arch else ""
-
-            if sim is not None:
-                exp_k = sim.get("expected_k")
-                exp_ip = sim.get("expected_ip")
-                stats = f'E[K] {exp_k:.1f}' if exp_k is not None else ""
-                if exp_ip is not None:
-                    ip_str = format_ip(exp_ip)
-                    stats += f' · IP {ip_str}' if stats else f'IP {ip_str}'
-                return (
-                    f'<span class="tdd-player-name">{pp_name}</span>'
-                    f'{arch_tag}'
-                    f'<span class="tdd-stat-label" style="margin-left:0.4rem;">{stats}</span>'
-                )
-            else:
-                pid = game.get(pitcher_id_field)
-                proj_info = proj_lookup.get(int(pid)) if pd.notna(pid) else None
-                k_str = ""
-                if proj_info and pd.notna(proj_info.get("projected_k_rate")):
-                    k_str = f'K% {proj_info["projected_k_rate"]*100:.1f}%'
-                return (
-                    f'<span class="tdd-player-name">{pp_name}</span>'
-                    f'{arch_tag}'
-                    f'<span class="tdd-stat-label" style="margin-left:0.4rem;">{k_str}</span>'
-                )
-
-        away_sp_html = _pitcher_summary(away_sim, "away_pitcher_name", "away_pitcher_id", away_abbr)
-        home_sp_html = _pitcher_summary(home_sim, "home_pitcher_name", "home_pitcher_id", home_abbr)
-
-        # Team logos
-        away_logo = team_logo_html(int(away_tid), size=80) if pd.notna(away_tid) else ""
-        home_logo = team_logo_html(int(home_tid), size=80) if pd.notna(home_tid) else ""
-
-        # Build game card header HTML
-        ctx_html = (
-            f'<div class="tdd-meta" style="margin-top:0.3rem;">'
-            f'{" · ".join(ctx_parts)}</div>'
-        ) if ctx_parts else ""
-
-        # Date/time/status line
-        dt_parts = []
-        if game_dt:
-            dt_parts.append(game_dt)
-        if game_time:
-            dt_parts.append(game_time)
-        dt_line = " · ".join(dt_parts)
-        if status_badge:
-            dt_line += f'  {status_badge}'
-
-        # Game card with logos
-        card_html = (
-            f'<div class="tdd-game-card">'
-            # Date/time/status row
-            f'<div class="tdd-meta" style="margin-bottom:0.4rem;">{dt_line}</div>'
-            # Team row: logos + abbreviations
-            f'<div class="tdd-game-teams" style="display:flex; align-items:center; gap:0.6rem;">'
-            f'{away_logo}'
-            f'<span class="tdd-team-abbr" data-team="{away_abbr}">{away_abbr}</span>'
-            f'{f"""<span class="tdd-meta" style="font-size:0.72rem; margin-left:-0.3rem;">{_standings[away_abbr][0]}-{_standings[away_abbr][1]}</span>""" if away_abbr in _standings else ""}'
-            f'<span style="color:var(--tdd-slate); font-size:0.9rem; margin:0 0.3rem;">@</span>'
-            f'<span class="tdd-team-abbr" data-team="{home_abbr}">{home_abbr}</span>'
-            f'{f"""<span class="tdd-meta" style="font-size:0.72rem; margin-left:-0.3rem;">{_standings[home_abbr][0]}-{_standings[home_abbr][1]}</span>""" if home_abbr in _standings else ""}'
-            f'{home_logo}'
-            f'</div>'
-            # Pitcher summaries
-            f'<div style="display:flex; gap:2rem; margin-top:0.5rem;">'
-            f'<div>{away_sp_html}</div>'
-            f'<div>{home_sp_html}</div>'
-            f'</div>'
-            f'{ctx_html}'
-            f'</div>'
-        )
-
-        st.markdown(card_html, unsafe_allow_html=True)
-
-        _toggle_col, _link_col = st.columns([3, 1])
-        with _link_col:
-            st.markdown(
-                f'<a href="?page=game_analysis&game_pk={gpk}" target="_self" '
-                f'style="color:var(--tdd-gold); font-size:0.78rem; '
-                f'text-decoration:none; float:right;">Full Analysis &#8594;</a>',
-                unsafe_allow_html=True,
-            )
-        with _toggle_col:
-            _expanded = st.toggle("Matchups & Projections", key=f"expand_{gpk}", value=False)
-
-        if _expanded:
-            _dd = _get_drilldown_data()
-            _render_game_drilldown(
-                game, lineups, _h_arch_lookup, _p_arch_lookup, _h_stat_lookup,
-                _dd["bf_priors"], _dd["arsenal_df"], _dd["vuln_df"],
-                proj_lookup, gpk,
-                pos_lookup=_pos_lookup,
-                str_df=_dd["str_df"],
-                game_props=_dd["game_props"],
-                live_stats=live_stats,
-                batter_sims_df=_dd["batter_sims_df"],
-                pitcher_sim_samples=_dd["pitcher_sim_samples"],
-                batter_sim_samples=_dd["batter_sim_samples"],
-            )
-
-    if not sims.empty and not sims_stale:
-        pitcher_sims = sims[(sims["player_type"] == "pitcher") & (sims["stat"] == "K")]
-        n_pitchers = len(pitcher_sims)
-        st.markdown("---")
-        st.markdown(
-            f'<div class="tdd-sim-summary">'
-            f'{n_pitchers} pitchers simulated | '
-            f'10,000 Monte Carlo draws per pitcher</div>',
-            unsafe_allow_html=True,
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -1265,15 +998,205 @@ def _parse_wind_category(wind_str: object) -> str:
     return "none"
 
 
-def page_schedule() -> None:
-    """Schedule page | browse games by date with projections."""
+def _schedule_masthead_html(selected_date, n_games: int, n_hitters: int) -> str:
+    """Shared masthead for layout A and B."""
+    d = selected_date
+    date_str = d.strftime("%a %b %d")
+    year_str = d.strftime("%Y")
+    return (
+        f'<div class="sched-a-masthead">'
+        f'<div class="sched-a-date">{date_str}'
+        f'<span class="sched-a-date-year">&#183; {year_str}</span></div>'
+        f'<div class="sched-a-stats">'
+        f'<div><div class="sched-a-stat-v">{n_games}</div>'
+        f'<div class="sched-a-stat-l">Games</div></div>'
+        f'<div><div class="sched-a-stat-v">{n_hitters}</div>'
+        f'<div class="sched-a-stat-l">Hitters</div></div>'
+        f'</div></div>'
+    )
+
+
+def _render_layout_a(
+    schedule: pd.DataFrame,
+    sims: pd.DataFrame,
+    lineups: pd.DataFrame,
+    meta: dict,
+    selected_date,
+    batter_sims: pd.DataFrame,
+) -> None:
+    """Direction A: Home-First Mirror -- compact, scannable cards."""
+    n_games = len(schedule)
+    n_hitters = len(batter_sims) if not batter_sims.empty else 0
+
+    st.markdown(_schedule_masthead_html(selected_date, n_games, n_hitters), unsafe_allow_html=True)
+
+    if schedule.empty:
+        tdd_info("No games scheduled for this date.")
+        return
+
+    # Sort chronologically
+    if "game_datetime_utc" in schedule.columns:
+        schedule = schedule.sort_values("game_datetime_utc", na_position="last")
+
+    # Build hitter count per game_pk for badge
+    hitters_per_game: dict[int, int] = {}
+    if not batter_sims.empty:
+        for gpk, grp in batter_sims.groupby("game_pk"):
+            hitters_per_game[int(gpk)] = len(grp)
+
+    # Lookups + drilldown data (lazy, shared across all games)
+    _lookups = _build_schedule_lookups()
+    _drilldown_data: dict | None = None
+
+    def _get_dd() -> dict:
+        nonlocal _drilldown_data
+        if _drilldown_data is not None:
+            return _drilldown_data
+        _game_props = load_game_props()
+        if not _game_props.empty:
+            _name_lookup = dict(_lookups["name_lookup"])
+            if not lineups.empty and "batter_name" in lineups.columns:
+                for _, _r in lineups.iterrows():
+                    pid = int(_r.get("batter_id", 0))
+                    if pid and pid not in _name_lookup:
+                        _name_lookup[pid] = _r["batter_name"]
+            _game_props["player_name"] = _game_props["player_id"].map(
+                lambda pid: _name_lookup.get(int(pid), str(pid))
+            )
+        _drilldown_data = {
+            "bf_priors": load_bf_priors(),
+            "arsenal_df": load_pitcher_arsenal(),
+            "vuln_df": load_hitter_vulnerability(career=True),
+            "str_df": load_hitter_strength(career=True),
+            "batter_sims_df": load_todays_batter_sims(),
+            "pitcher_sim_samples": load_pitcher_game_sim_samples(),
+            "batter_sim_samples": load_batter_game_sim_samples(),
+            "game_props": _game_props,
+        }
+        return _drilldown_data
+
+    # Layout A: styled game cards with button-driven drilldown
     st.markdown(
-        '<div class="section-header">Schedule</div>'
-        '<div class="tdd-meta" style="margin-top:-0.5rem; margin-bottom:0.8rem;">'
-        'Pregame analytics &amp; projections | not a live scores app.</div>',
+        '<style>'
+        '[data-testid="stButton"] button {'
+        '  background: transparent !important;'
+        '  border: 1px solid var(--tdd-dark-border) !important;'
+        '  border-top: none !important;'
+        '  border-radius: 0 0 8px 8px !important;'
+        '  margin-top: -0.5rem !important;'
+        '  padding: 0.3rem 1rem !important;'
+        '  font-size: 0.7rem !important;'
+        '  color: var(--tdd-slate) !important;'
+        '  font-weight: 500 !important;'
+        '  letter-spacing: 0.3px !important;'
+        '  transition: border-color 0.15s, color 0.15s !important;'
+        '}'
+        '[data-testid="stButton"] button:hover {'
+        '  border-color: var(--tdd-gold) !important;'
+        '  color: var(--tdd-gold) !important;'
+        '  background: rgba(255,255,255,0.03) !important;'
+        '}'
+        '</style>',
         unsafe_allow_html=True,
     )
 
+    # Track which games are expanded
+    if "sched_a_open" not in st.session_state:
+        st.session_state["sched_a_open"] = set()
+
+    for _, game in schedule.iterrows():
+        gpk = int(game["game_pk"])
+        away = game.get("away_abbr", "?")
+        home = game.get("home_abbr", "?")
+        away_name = game.get("away_team_name", away)
+        home_name = game.get("home_team_name", home)
+        time_str = format_game_time(
+            game.get("game_datetime_utc"), fallback=game.get("game_time", ""),
+        )
+        status = game.get("status", "")
+        away_sp = game.get("away_pitcher_name", "") or "TBD"
+        home_sp = game.get("home_pitcher_name", "") or "TBD"
+        nh = hitters_per_game.get(gpk, 0)
+        is_open = gpk in st.session_state["sched_a_open"]
+
+        # Status badge
+        if "Progress" in status or "Live" in status:
+            status_html = '<span style="color:var(--tdd-sage); font-weight:700;">&#9679; LIVE</span>'
+        elif "Final" in status:
+            status_html = '<span style="color:var(--tdd-slate);">FINAL</span>'
+        else:
+            status_html = f'<span style="color:var(--tdd-slate);">{esc(time_str)}</span>'
+
+        nh_html = f'<span style="color:var(--tdd-gold); font-size:0.65rem;">{nh} hitters</span>' if nh else ""
+
+        border_color = "var(--tdd-gold)" if is_open else "var(--tdd-dark-border)"
+        card_html = (
+            f'<div style="border:1px solid {border_color}; border-bottom:none; '
+            f'border-radius:8px 8px 0 0; padding:0.7rem 1rem 0.5rem; '
+            f'background:rgba(255,255,255,0.015); display:block !important;">'
+            # Row 1: teams + time
+            f'<div style="display:flex; justify-content:space-between; align-items:baseline;">'
+            f'<div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">'
+            f'<span data-team="{esc_attr(away)}" style="font-family:var(--tdd-font-heading); '
+            f'font-weight:800; font-size:1.05rem;">{esc(away)}</span>'
+            f' <span style="color:var(--tdd-slate); font-size:0.72rem;">{esc(away_name)}</span>'
+            f' <span style="color:var(--tdd-slate); font-size:0.72rem;">@</span> '
+            f'<span data-team="{esc_attr(home)}" style="font-family:var(--tdd-font-heading); '
+            f'font-weight:800; font-size:1.05rem;">{esc(home)}</span>'
+            f' <span style="color:var(--tdd-slate); font-size:0.72rem;">{esc(home_name)}</span>'
+            f'</div>'
+            f'<div style="flex-shrink:0; text-align:right; margin-left:1rem;">'
+            f'<div style="font-size:0.65rem;">{status_html}</div>'
+            f'{nh_html}'
+            f'</div>'
+            f'</div>'
+            # Row 2: pitchers
+            f'<div style="color:var(--tdd-slate); font-size:0.72rem; margin-top:0.2rem;">'
+            f'{esc(away_sp)} vs {esc(home_sp)}'
+            f'</div>'
+            f'</div>'
+        )
+        st.markdown(card_html, unsafe_allow_html=True)
+
+        # Toggle button fused to bottom of card
+        if st.button(
+            f"{'Hide' if is_open else 'Show'} Matchups & Projections",
+            key=f"a_btn_{gpk}",
+            use_container_width=True,
+        ):
+            if is_open:
+                st.session_state["sched_a_open"].discard(gpk)
+            else:
+                st.session_state["sched_a_open"].add(gpk)
+            st.rerun()
+
+        # Drilldown content when open
+        if is_open:
+            st.markdown(
+                f'<a href="?page=game_analysis&game_pk={gpk}" target="_self" '
+                f'style="color:var(--tdd-gold); font-size:0.75rem; '
+                f'text-decoration:none; font-weight:600; display:inline-block; '
+                f'margin-bottom:0.5rem;">Full Analysis &#8594;</a>',
+                unsafe_allow_html=True,
+            )
+            _dd = _get_dd()
+            _render_game_drilldown(
+                game, lineups,
+                _lookups["h_arch_lookup"], _lookups["p_arch_lookup"],
+                _lookups["h_stat_lookup"],
+                _dd["bf_priors"], _dd["arsenal_df"], _dd["vuln_df"],
+                _lookups["proj_lookup"], gpk,
+                pos_lookup=_lookups["pos_lookup"],
+                str_df=_dd["str_df"],
+                game_props=_dd["game_props"],
+                batter_sims_df=_dd["batter_sims_df"],
+                pitcher_sim_samples=_dd["pitcher_sim_samples"],
+                batter_sim_samples=_dd["batter_sim_samples"],
+            )
+
+
+def page_schedule() -> None:
+    """Schedule page | browse games by date with projections."""
     # Use ET date as "today" (MLB games are scheduled in ET)
     meta = load_update_metadata()
 
@@ -1350,10 +1273,6 @@ def page_schedule() -> None:
         except Exception:
             pass  # keep cached status on API failure
     elif is_tomorrow and cache_has_tomorrow:
-        # Once today's slate is underway, update_in_season.py extends
-        # the refresh to tomorrow, writing those rows into the same
-        # parquets. Use them instead of falling back to a sim-less
-        # live fetch.
         schedule = cached_all[cached_all["game_date"] == tomorrow.isoformat()].copy()
         sims = load_game_props()
         lineups = load_todays_lineups()
@@ -1375,4 +1294,6 @@ def page_schedule() -> None:
         lineups = fetch_live_lineups(schedule) if not schedule.empty else pd.DataFrame()
         sims = pd.DataFrame()
 
-    _render_schedule_cards(schedule, sims, lineups, meta)
+    batter_sims = load_todays_batter_sims()
+
+    _render_layout_a(schedule, sims, lineups, meta, selected_date, batter_sims)

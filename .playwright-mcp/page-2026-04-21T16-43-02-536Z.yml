@@ -1,0 +1,247 @@
+- generic [ref=e6]:
+  - navigation "Main navigation" [ref=e8]:
+    - link "The Data Diamond The Data Diamond" [ref=e9] [cursor=pointer]:
+      - /url: "?page=home"
+      - img "The Data Diamond" [ref=e10]
+      - generic [ref=e11]: The Data Diamond
+    - generic [ref=e12]:
+      - button "Games ▾" [ref=e14] [cursor=pointer]
+      - button "Players ▾" [ref=e16] [cursor=pointer]
+      - button "Teams ▾" [ref=e18] [cursor=pointer]
+      - button "Tools ▾" [ref=e20] [cursor=pointer]
+      - button "About ▾" [ref=e22] [cursor=pointer]
+    - generic [ref=e24]:
+      - link "𝕏" [ref=e25] [cursor=pointer]:
+        - /url: https://x.com/TheDataDiamond
+      - link "⌘" [ref=e26] [cursor=pointer]:
+        - /url: https://instagram.com/TheDataDiamond
+  - radiogroup "button group" [ref=e29]:
+    - 'button "A: Home Mirror" [ref=e661] [cursor=pointer]':
+      - paragraph [ref=e665]: "A: Home Mirror"
+    - 'button "B: Hybrid" [ref=e666] [cursor=pointer]':
+      - paragraph [ref=e670]: "B: Hybrid"
+    - 'button "C: Command Center" [ref=e671] [cursor=pointer]':
+      - paragraph [ref=e675]: "C: Command Center"
+  - generic [ref=e48]:
+    - generic [ref=e49]:
+      - generic [ref=e50]: Tue, Apr 21 (Today)
+      - combobox "Selected Tue, Apr 21 (Today). Game Date" [ref=e52]
+    - img "open" [ref=e54]
+  - generic [ref=e60]:
+    - generic [ref=e61]: Tue Apr 21· 2026
+    - generic [ref=e62]:
+      - generic [ref=e63]:
+        - generic [ref=e64]: "15"
+        - generic [ref=e65]: Games
+      - generic [ref=e66]:
+        - generic [ref=e67]: "351"
+        - generic [ref=e68]: Hitters
+  - generic [ref=e90] [cursor=pointer]:
+    - generic [ref=e676]:
+      - generic [ref=e677]:
+        - generic [ref=e678]: HOU
+        - generic [ref=e679]: Houston Astros
+        - generic [ref=e680]: "@"
+        - generic [ref=e681]: CLE
+        - generic [ref=e682]: Cleveland Guardians
+      - generic [ref=e683]:
+        - generic [ref=e684]: 6:10 PM ET
+        - generic [ref=e685]: 27 hitters
+    - generic [ref=e686]: Ryan Weiss vs Parker Messick
+  - button "Show Matchups & Projections" [ref=e689] [cursor=pointer]:
+    - paragraph [ref=e693]: Show Matchups & Projections
+  - generic [ref=e698] [cursor=pointer]:
+    - generic [ref=e699]:
+      - generic [ref=e700]:
+        - generic [ref=e701]: CIN
+        - generic [ref=e702]: Cincinnati Reds
+        - generic [ref=e703]: "@"
+        - generic [ref=e704]: TB
+        - generic [ref=e705]: Tampa Bay Rays
+      - generic [ref=e706]:
+        - generic [ref=e707]: 6:40 PM ET
+        - generic [ref=e708]: 24 hitters
+    - generic [ref=e709]: Chase Burns vs Steven Matz
+  - button "Show Matchups & Projections" [ref=e712] [cursor=pointer]:
+    - paragraph [ref=e716]: Show Matchups & Projections
+  - generic [ref=e721] [cursor=pointer]:
+    - generic [ref=e722]:
+      - generic [ref=e723]:
+        - generic [ref=e724]: STL
+        - generic [ref=e725]: St. Louis Cardinals
+        - generic [ref=e726]: "@"
+        - generic [ref=e727]: MIA
+        - generic [ref=e728]: Miami Marlins
+      - generic [ref=e729]:
+        - generic [ref=e730]: 6:40 PM ET
+        - generic [ref=e731]: 26 hitters
+    - generic [ref=e732]: Dustin May vs Chris Paddack
+  - button "Show Matchups & Projections" [ref=e735] [cursor=pointer]:
+    - paragraph [ref=e739]: Show Matchups & Projections
+  - generic [ref=e744] [cursor=pointer]:
+    - generic [ref=e745]:
+      - generic [ref=e746]:
+        - generic [ref=e747]: MIL
+        - generic [ref=e748]: Milwaukee Brewers
+        - generic [ref=e749]: "@"
+        - generic [ref=e750]: DET
+        - generic [ref=e751]: Detroit Tigers
+      - generic [ref=e752]:
+        - generic [ref=e753]: 6:40 PM ET
+        - generic [ref=e754]: 26 hitters
+    - generic [ref=e755]: Kyle Harrison vs Keider Montero
+  - button "Show Matchups & Projections" [ref=e758] [cursor=pointer]:
+    - paragraph [ref=e762]: Show Matchups & Projections
+  - generic [ref=e767] [cursor=pointer]:
+    - generic [ref=e768]:
+      - generic [ref=e769]:
+        - generic [ref=e770]: ATL
+        - generic [ref=e771]: Atlanta Braves
+        - generic [ref=e772]: "@"
+        - generic [ref=e773]: WSH
+        - generic [ref=e774]: Washington Nationals
+      - generic [ref=e775]:
+        - generic [ref=e776]: 6:45 PM ET
+        - generic [ref=e777]: 26 hitters
+    - generic [ref=e778]: Reynaldo López vs Foster Griffin
+  - button "Show Matchups & Projections" [ref=e781] [cursor=pointer]:
+    - paragraph [ref=e785]: Show Matchups & Projections
+  - generic [ref=e790] [cursor=pointer]:
+    - generic [ref=e791]:
+      - generic [ref=e792]:
+        - generic [ref=e793]: NYY
+        - generic [ref=e794]: New York Yankees
+        - generic [ref=e795]: "@"
+        - generic [ref=e796]: BOS
+        - generic [ref=e797]: Boston Red Sox
+      - generic [ref=e798]:
+        - generic [ref=e799]: 6:45 PM ET
+        - generic [ref=e800]: 26 hitters
+    - generic [ref=e801]: Luis Gil vs Connelly Early
+  - button "Show Matchups & Projections" [ref=e804] [cursor=pointer]:
+    - paragraph [ref=e808]: Show Matchups & Projections
+  - generic [ref=e813] [cursor=pointer]:
+    - generic [ref=e814]:
+      - generic [ref=e815]:
+        - generic [ref=e816]: MIN
+        - generic [ref=e817]: Minnesota Twins
+        - generic [ref=e818]: "@"
+        - generic [ref=e819]: NYM
+        - generic [ref=e820]: New York Mets
+      - generic [ref=e821]:
+        - generic [ref=e822]: 7:10 PM ET
+        - generic [ref=e823]: 28 hitters
+    - generic [ref=e824]: Simeon Woods Richardson vs Nolan McLean
+  - button "Show Matchups & Projections" [ref=e827] [cursor=pointer]:
+    - paragraph [ref=e831]: Show Matchups & Projections
+  - generic [ref=e836] [cursor=pointer]:
+    - generic [ref=e837]:
+      - generic [ref=e838]:
+        - generic [ref=e839]: BAL
+        - generic [ref=e840]: Baltimore Orioles
+        - generic [ref=e841]: "@"
+        - generic [ref=e842]: KC
+        - generic [ref=e843]: Kansas City Royals
+      - generic [ref=e844]:
+        - generic [ref=e845]: 7:40 PM ET
+        - generic [ref=e846]: 25 hitters
+    - generic [ref=e847]: Shane Baz vs Kris Bubic
+  - button "Show Matchups & Projections" [ref=e850] [cursor=pointer]:
+    - paragraph [ref=e854]: Show Matchups & Projections
+  - generic [ref=e655] [cursor=pointer]:
+    - generic [ref=e855]:
+      - generic [ref=e856]:
+        - generic [ref=e857]: PHI
+        - generic [ref=e858]: Philadelphia Phillies
+        - generic [ref=e859]: "@"
+        - generic [ref=e860]: CHC
+        - generic [ref=e861]: Chicago Cubs
+      - generic [ref=e862]:
+        - generic [ref=e863]: 7:40 PM ET
+        - generic [ref=e864]: 26 hitters
+    - generic [ref=e865]: Jesús Luzardo vs Shota Imanaga
+  - button "Show Matchups & Projections" [ref=e868] [cursor=pointer]:
+    - paragraph [ref=e872]: Show Matchups & Projections
+  - generic [ref=e877] [cursor=pointer]:
+    - generic [ref=e878]:
+      - generic [ref=e879]:
+        - generic [ref=e880]: PIT
+        - generic [ref=e881]: Pittsburgh Pirates
+        - generic [ref=e882]: "@"
+        - generic [ref=e883]: TEX
+        - generic [ref=e884]: Texas Rangers
+      - generic [ref=e886]: 8:05 PM ET
+    - generic [ref=e887]: Carmen Mlodzinski vs TBD
+  - button "Show Matchups & Projections" [ref=e890] [cursor=pointer]:
+    - paragraph [ref=e894]: Show Matchups & Projections
+  - generic [ref=e899] [cursor=pointer]:
+    - generic [ref=e900]:
+      - generic [ref=e901]:
+        - generic [ref=e902]: SD
+        - generic [ref=e903]: San Diego Padres
+        - generic [ref=e904]: "@"
+        - generic [ref=e905]: COL
+        - generic [ref=e906]: Colorado Rockies
+      - generic [ref=e907]:
+        - generic [ref=e908]: 8:40 PM ET
+        - generic [ref=e909]: 13 hitters
+    - generic [ref=e910]: Randy Vásquez vs TBD
+  - button "Show Matchups & Projections" [ref=e913] [cursor=pointer]:
+    - paragraph [ref=e917]: Show Matchups & Projections
+  - generic [ref=e922] [cursor=pointer]:
+    - generic [ref=e923]:
+      - generic [ref=e924]:
+        - generic [ref=e925]: TOR
+        - generic [ref=e926]: Toronto Blue Jays
+        - generic [ref=e927]: "@"
+        - generic [ref=e928]: LAA
+        - generic [ref=e929]: Los Angeles Angels
+      - generic [ref=e930]:
+        - generic [ref=e931]: 9:38 PM ET
+        - generic [ref=e932]: 27 hitters
+    - generic [ref=e933]: Patrick Corbin vs Jack Kochanowicz
+  - button "Show Matchups & Projections" [ref=e936] [cursor=pointer]:
+    - paragraph [ref=e940]: Show Matchups & Projections
+  - generic [ref=e945] [cursor=pointer]:
+    - generic [ref=e946]:
+      - generic [ref=e947]:
+        - generic [ref=e948]: ATH
+        - generic [ref=e949]: Athletics
+        - generic [ref=e950]: "@"
+        - generic [ref=e951]: SEA
+        - generic [ref=e952]: Seattle Mariners
+      - generic [ref=e953]:
+        - generic [ref=e954]: 9:40 PM ET
+        - generic [ref=e955]: 26 hitters
+    - generic [ref=e956]: Jacob Lopez vs Luis Castillo
+  - button "Show Matchups & Projections" [ref=e959] [cursor=pointer]:
+    - paragraph [ref=e963]: Show Matchups & Projections
+  - generic [ref=e968] [cursor=pointer]:
+    - generic [ref=e969]:
+      - generic [ref=e970]:
+        - generic [ref=e971]: CWS
+        - generic [ref=e972]: Chicago White Sox
+        - generic [ref=e973]: "@"
+        - generic [ref=e974]: AZ
+        - generic [ref=e975]: Arizona Diamondbacks
+      - generic [ref=e976]:
+        - generic [ref=e977]: 9:40 PM ET
+        - generic [ref=e978]: 25 hitters
+    - generic [ref=e979]: Sean Burke vs Merrill Kelly
+  - button "Show Matchups & Projections" [ref=e982] [cursor=pointer]:
+    - paragraph [ref=e986]: Show Matchups & Projections
+  - generic [ref=e991] [cursor=pointer]:
+    - generic [ref=e992]:
+      - generic [ref=e993]:
+        - generic [ref=e994]: LAD
+        - generic [ref=e995]: Los Angeles Dodgers
+        - generic [ref=e996]: "@"
+        - generic [ref=e997]: SF
+        - generic [ref=e998]: San Francisco Giants
+      - generic [ref=e999]:
+        - generic [ref=e1000]: 9:45 PM ET
+        - generic [ref=e1001]: 26 hitters
+    - generic [ref=e1002]: Yoshinobu Yamamoto vs Landen Roupp
+  - button "Show Matchups & Projections" [ref=e1005] [cursor=pointer]:
+    - paragraph [ref=e1009]: Show Matchups & Projections
+  - generic [ref=e1014]: For entertainment and research purposes. Not financial advice.

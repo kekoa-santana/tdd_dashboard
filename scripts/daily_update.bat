@@ -93,6 +93,20 @@ if %ERRORLEVEL% NEQ 0 (
     echo [%date% %time%] Game props generated successfully >> "%LOG_FILE%" 2>&1
 )
 
+REM ── Step 3b: Live daily standouts + 14-day heat check ──
+REM   Fetches completed-game boxscores from MLB API and rebuilds
+REM   daily standout + weekly form parquets with today's results.
+if "%IS_SCHEDULE_ONLY%"=="1" (
+    echo [%date% %time%] Generating live standouts... >> "%LOG_FILE%" 2>&1
+    cd /d "%PROFILES_DIR%"
+    "%PROFILES_PYTHON%" -c "import sys; sys.path.insert(0, 'scripts/precompute'); sys.path.insert(0, 'scripts'); from rankings import run_live_standouts; run_live_standouts()" >> "%LOG_FILE%" 2>&1
+    if %ERRORLEVEL% NEQ 0 (
+        echo [%date% %time%] Live standouts FAILED >> "%LOG_FILE%" 2>&1
+    ) else (
+        echo [%date% %time%] Live standouts generated successfully >> "%LOG_FILE%" 2>&1
+    )
+)
+
 REM ── Step 4: Git commit + push data to GitHub ──
 echo [%date% %time%] Pushing updated data to GitHub... >> "%LOG_FILE%" 2>&1
 cd /d "%PROJECT_DIR%"

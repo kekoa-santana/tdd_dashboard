@@ -47,6 +47,7 @@ from views.methodology import page_methodology  # noqa: E402
 from views.projected_performers import page_projected_performers  # noqa: E402
 from views.daily_preview import page_daily_preview  # noqa: E402
 from views.game import page_game  # noqa: E402
+from views.home import page_home  # noqa: E402
 
 # Apply dark matplotlib theme at import time
 apply_dark_mpl()
@@ -209,6 +210,7 @@ if _palette_name != "Original (Gold & Cream)" or _font_name != "Inter + IBM Plex
 # Page registry
 # ---------------------------------------------------------------------------
 PAGES = {
+    "Home": page_home,
     "Schedule": page_schedule,
     "Player Profile": page_player_profile,
     "Player Rankings": page_player_rankings,
@@ -330,7 +332,7 @@ def main() -> None:
     st.markdown(f"""
     <div class="topbar-wrap">
     <nav class="topbar" aria-label="Main navigation">
-        <a href="?page=schedule" target="_self" class="topbar-home">
+        <a href="?page=home" target="_self" class="topbar-home">
             {_logo_html}
             <span class="topbar-brand-text">The Data Diamond</span>
         </a>

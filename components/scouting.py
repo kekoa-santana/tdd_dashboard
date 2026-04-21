@@ -6,8 +6,9 @@ import pandas as pd
 import streamlit as st
 
 from config import (
-    GOLD, EMBER, SAGE, SLATE, POSITIVE, NEGATIVE,
-    PITCH_DISPLAY,
+    GOLD, EMBER, SAGE, SLATE, CREAM, POSITIVE, NEGATIVE,
+    PITCH_DISPLAY, PITCH_FAMILY_DISPLAY,
+    GRADE_LABELS, HITTER_GRADE_SKILLS, PITCHER_GRADE_SKILLS,
     GOOD_DIRECTION_LABEL,
 )
 from components.metric_cards import percentile_rank
@@ -461,6 +462,478 @@ def build_matchup_scouting_bullets(
                 ))
 
     return bullets
+
+
+# ---------------------------------------------------------------------------
+# Scouting Card (casual-friendly narrative report)
+# ---------------------------------------------------------------------------
+
+def _grade_label(grade: float) -> str:
+    """Map a 20-80 scouting grade to a plain-english label."""
+    rounded = int(round(grade / 5) * 5)
+    return GRADE_LABELS.get(rounded, "average")
+
+
+def _family_name(family: str) -> str:
+    return PITCH_FAMILY_DISPLAY.get(family, family)
+
+
+def generate_scouting_card(
+    player_id: int,
+    player_type: str,
+    player_row: pd.Series,
+    trad_row: pd.Series | None,
+    counting_row: pd.Series | None,
+    stat_configs: list[tuple[str, str, bool, str]],
+    all_df: pd.DataFrame,
+    *,
+    archetype_df: pd.DataFrame | None = None,
+    grade_df: pd.DataFrame | None = None,
+    str_df: pd.DataFrame | None = None,
+    vuln_df: pd.DataFrame | None = None,
+    arsenal_df: pd.DataFrame | None = None,
+    adv_df: pd.DataFrame | None = None,
+    breakout_df: pd.DataFrame | None = None,
+) -> dict:
+    """Build a casual-friendly scouting card from available data.
+
+    Returns dict with keys: one_liner, strengths, weaknesses, outlook,
+    development.
+    """
+    is_hitter = player_type in ("Hitter", "Two-Way")
+    id_col = "batter_id" if is_hitter else "pitcher_id"
+
+    card: dict = {
+        "one_liner": "",
+        "strengths": [],
+        "weaknesses": [],
+        "outlook": [],
+        "development": None,
+    }
+
+    # ── ONE-LINER ────────────────────────────────────────────────────
+    desc = ""
+    if archetype_df is not None and not archetype_df.empty:
+        arch_match = archetype_df[archetype_df[id_col] == player_id]
+        if not arch_match.empty:
+            desc = str(arch_match.iloc[0].get("archetype_desc", ""))
+
+    grade_row = None
+    if grade_df is not None and not grade_df.empty:
+        gm = grade_df[grade_df["player_id"] == player_id]
+        if not gm.empty:
+            grade_row = gm.iloc[0]
+
+    if desc:
+        qualifiers: list[str] = []
+        skills = HITTER_GRADE_SKILLS if is_hitter else PITCHER_GRADE_SKILLS
+        if grade_row is not None:
+            for g_col, g_name in skills:
+                g_val = grade_row.get(g_col)
+                if pd.notna(g_val) and g_val >= 65:
+                    qualifiers.append(f"{_grade_label(g_val)} {g_name}")
+        if qualifiers:
+            card["one_liner"] = f"{desc}, with {' and '.join(qualifiers[:2])}."
+        else:
+            card["one_liner"] = f"{desc}."
+    elif grade_row is not None:
+        # No archetype -- build from grades alone
+        skills = HITTER_GRADE_SKILLS if is_hitter else PITCHER_GRADE_SKILLS
+        parts = []
+        for g_col, g_name in skills:
+            g_val = grade_row.get(g_col)
+            if pd.notna(g_val) and g_val >= 55:
+                parts.append(f"{_grade_label(g_val)} {g_name}")
+        if parts:
+            card["one_liner"] = f"Player profile features {', '.join(parts)}."
+
+    # ── STRENGTHS ────────────────────────────────────────────────────
+    strengths: list[str] = []
+
+    if is_hitter:
+        # Pitch-type strengths from career data
+        if str_df is not None and not str_df.empty:
+            ps = str_df[str_df["batter_id"] == player_id]
+            if not ps.empty:
+                # Aggregate by pitch_family for reliable signals
+                fam_agg = (
+                    ps[ps["bip"] >= 10]
+                    .groupby("pitch_family")
+                    .apply(
+                        lambda g: pd.Series({
+                            "xwoba": np.average(g["xwoba_contact"], weights=g["bip"]),
+                            "bip": g["bip"].sum(),
+                        }),
+                        include_groups=False,
+                    )
+                )
+                for fam, row in fam_agg[fam_agg["bip"] >= 20].iterrows():
+                    if row["xwoba"] >= 0.400:
+                        strengths.append(
+                            f"Punishes {_family_name(fam)} pitching -- does real damage on contact"
+                        )
+                    elif row["xwoba"] >= 0.360:
+                        strengths.append(
+                            f"Handles {_family_name(fam)} pitching well"
+                        )
+
+                # Specific standout pitch types (deduplicate by pitch_type)
+                standouts = (
+                    ps[ps["bip"] >= 15]
+                    .sort_values("xwoba_contact", ascending=False)
+                    .drop_duplicates(subset=["pitch_type"], keep="first")
+                )
+                standouts = standouts[standouts["xwoba_contact"] >= 0.450]
+                _seen_pts = set()
+                for _, sr in standouts.head(2).iterrows():
+                    pt_name = PITCH_DISPLAY.get(sr["pitch_type"], sr["pitch_type"])
+                    if pt_name not in _seen_pts:
+                        strengths.append(f"Especially dangerous against {pt_name}s")
+                        _seen_pts.add(pt_name)
+
+        # Grade-based strengths
+        if grade_row is not None:
+            for g_col, g_name in HITTER_GRADE_SKILLS:
+                g_val = grade_row.get(g_col)
+                if pd.notna(g_val) and g_val >= 60:
+                    strengths.append(f"{_grade_label(g_val).capitalize()} {g_name}")
+
+        # Advanced stat strengths
+        if adv_df is not None and not adv_df.empty:
+            adv_p = adv_df[adv_df["batter_id"] == player_id]
+            if not adv_p.empty:
+                ar = adv_p.iloc[0]
+                pop = adv_df[adv_df["pa"] >= 50]
+                if pd.notna(ar.get("chase_rate")) and len(pop) >= 20:
+                    chase_pct = percentile_rank(pop["chase_rate"], ar["chase_rate"], False)
+                    if chase_pct >= 75:
+                        strengths.append("Excellent plate discipline -- rarely chases pitches outside the zone")
+                if pd.notna(ar.get("avg_exit_velo")) and len(pop) >= 20:
+                    ev_pct = percentile_rank(pop["avg_exit_velo"], ar["avg_exit_velo"], True)
+                    if ev_pct >= 80:
+                        strengths.append("Hits the ball extremely hard when he makes contact")
+
+    else:
+        # Pitcher strengths from arsenal
+        if arsenal_df is not None and not arsenal_df.empty:
+            pa = arsenal_df[arsenal_df["pitcher_id"] == player_id]
+            pa = pa[pa["pitches"] >= 50] if not pa.empty else pa
+            if not pa.empty:
+                for _, row in pa.sort_values("whiff_rate", ascending=False).head(2).iterrows():
+                    pt_name = PITCH_DISPLAY.get(row["pitch_type"], row["pitch_type"])
+                    velo = row.get("avg_velo")
+                    velo_tag = f" ({velo:.0f} mph)" if pd.notna(velo) and velo >= 85 else ""
+                    if row["whiff_rate"] >= 0.30:
+                        strengths.append(
+                            f"Devastating {pt_name}{velo_tag} -- generates whiffs at an elite rate"
+                        )
+                    elif row["whiff_rate"] >= 0.24:
+                        strengths.append(
+                            f"Effective {pt_name}{velo_tag} with above-average swing-and-miss"
+                        )
+
+                # Primary pitch callout if high usage and effective
+                primary = pa.sort_values("usage_pct", ascending=False).iloc[0]
+                if primary["usage_pct"] >= 0.30:
+                    p_name = PITCH_DISPLAY.get(primary["pitch_type"], primary["pitch_type"])
+                    p_velo = primary.get("avg_velo")
+                    if pd.notna(p_velo) and p_velo >= 94:
+                        strengths.append(f"Brings heat -- primary {p_name} averages {p_velo:.0f} mph")
+
+        if grade_row is not None:
+            for g_col, g_name in PITCHER_GRADE_SKILLS:
+                g_val = grade_row.get(g_col)
+                if pd.notna(g_val) and g_val >= 60:
+                    strengths.append(f"{_grade_label(g_val).capitalize()} {g_name}")
+
+        if adv_df is not None and not adv_df.empty:
+            adv_p = adv_df[adv_df["pitcher_id"] == player_id]
+            if not adv_p.empty:
+                ar = adv_p.iloc[0]
+                pop = adv_df[adv_df["batters_faced"] >= 50]
+                if pd.notna(ar.get("chase_pct")) and len(pop) >= 20:
+                    chase_pct = percentile_rank(pop["chase_pct"], ar["chase_pct"], True)
+                    if chase_pct >= 75:
+                        strengths.append("Gets hitters to expand the zone consistently")
+                if pd.notna(ar.get("gb_pct")) and len(pop) >= 20:
+                    gb_pct = percentile_rank(pop["gb_pct"], ar["gb_pct"], True)
+                    if gb_pct >= 75:
+                        strengths.append("Elite ground ball rate -- keeps the ball on the ground")
+
+    card["strengths"] = strengths[:5]
+
+    # ── WEAKNESSES ───────────────────────────────────────────────────
+    weaknesses: list[str] = []
+
+    if is_hitter:
+        if vuln_df is not None and not vuln_df.empty:
+            pv = vuln_df[vuln_df["batter_id"] == player_id]
+            pv = pv[pv["pitches"] >= 50] if not pv.empty else pv
+            if not pv.empty:
+                fam_vuln = (
+                    pv.groupby("pitch_family")
+                    .apply(
+                        lambda g: pd.Series({
+                            "whiff": np.average(g["whiff_rate"], weights=g["pitches"]),
+                            "chase": np.average(g["chase_rate"], weights=g["pitches"]),
+                            "pitches": g["pitches"].sum(),
+                        }),
+                        include_groups=False,
+                    )
+                )
+                for fam, row in fam_vuln.iterrows():
+                    if row["pitches"] < 50:
+                        continue
+                    if row["whiff"] >= 0.30:
+                        weaknesses.append(
+                            f"{_family_name(fam).capitalize()} pitching gives him trouble -- high swing-and-miss rate"
+                        )
+                    elif row["chase"] >= 0.35:
+                        weaknesses.append(
+                            f"Tends to chase {_family_name(fam)} pitches outside the zone"
+                        )
+
+                # Specific pitch-type callouts
+                worst_pts = (
+                    pv[pv["pitches"] >= 40]
+                    .sort_values("whiff_rate", ascending=False)
+                    .drop_duplicates(subset=["pitch_type"], keep="first")
+                )
+                worst_pts = worst_pts[worst_pts["whiff_rate"] >= 0.32].head(2)
+                for _, wr in worst_pts.iterrows():
+                    pt_name = PITCH_DISPLAY.get(wr["pitch_type"], wr["pitch_type"])
+                    weaknesses.append(
+                        f"Struggles most against {pt_name}s"
+                    )
+
+        if grade_row is not None:
+            for g_col, g_name in HITTER_GRADE_SKILLS:
+                g_val = grade_row.get(g_col)
+                if pd.notna(g_val) and g_val <= 40:
+                    weaknesses.append(f"Limited {g_name}")
+
+        if adv_df is not None and not adv_df.empty:
+            adv_p = adv_df[adv_df["batter_id"] == player_id]
+            if not adv_p.empty:
+                ar = adv_p.iloc[0]
+                pop = adv_df[adv_df["pa"] >= 50]
+                if pd.notna(ar.get("whiff_rate")) and len(pop) >= 20:
+                    whiff_pct = percentile_rank(pop["whiff_rate"], ar["whiff_rate"], False)
+                    if whiff_pct <= 25:
+                        weaknesses.append("Swing-and-miss is a concern -- whiff rate is high")
+
+    else:
+        if arsenal_df is not None and not arsenal_df.empty:
+            pa = arsenal_df[arsenal_df["pitcher_id"] == player_id]
+            pa = pa[pa["pitches"] >= 50] if not pa.empty else pa
+            if not pa.empty:
+                # Pitches that get hit hard
+                for _, row in pa.sort_values("xwoba_against", ascending=False).head(2).iterrows():
+                    if pd.notna(row.get("xwoba_against")) and row["xwoba_against"] >= 0.370:
+                        pt_name = PITCH_DISPLAY.get(row["pitch_type"], row["pitch_type"])
+                        weaknesses.append(f"{pt_name} gets hit hard -- hitters do damage against it")
+
+                # Low-whiff pitches that get heavy usage (hittable)
+                hittable = pa[(pa["usage_pct"] >= 0.15) & (pa["whiff_rate"] < 0.18)]
+                for _, row in hittable.head(1).iterrows():
+                    pt_name = PITCH_DISPLAY.get(row["pitch_type"], row["pitch_type"])
+                    weaknesses.append(
+                        f"{pt_name} doesn't miss bats -- hitters put it in play consistently"
+                    )
+
+        if grade_row is not None:
+            for g_col, g_name in PITCHER_GRADE_SKILLS:
+                g_val = grade_row.get(g_col)
+                if pd.notna(g_val) and g_val <= 45:
+                    weaknesses.append(f"{g_name.capitalize()} can be inconsistent")
+
+        if adv_df is not None and not adv_df.empty:
+            adv_p = adv_df[adv_df["pitcher_id"] == player_id]
+            if not adv_p.empty:
+                ar = adv_p.iloc[0]
+                pop = adv_df[adv_df["batters_faced"] >= 50]
+                if pd.notna(ar.get("hard_hit_pct_against")) and len(pop) >= 20:
+                    hh_pct = percentile_rank(pop["hard_hit_pct_against"], ar["hard_hit_pct_against"], False)
+                    if hh_pct <= 25:
+                        weaknesses.append("Gives up hard contact at an above-average rate")
+
+    card["weaknesses"] = weaknesses[:5]
+
+    # Cross-reference: if a specific pitch type appears in both strengths and
+    # weaknesses, keep the weakness (more actionable for casual fans)
+    if card["strengths"] and card["weaknesses"]:
+        if is_hitter:
+            _weak_families = set()
+            for w in card["weaknesses"]:
+                wl = w.lower()
+                for fam in ("fastball", "breaking ball", "offspeed"):
+                    if fam in wl:
+                        _weak_families.add(fam)
+            if _weak_families:
+                card["strengths"] = [
+                    s for s in card["strengths"]
+                    if not any(fam in s.lower() for fam in _weak_families)
+                ]
+        else:
+            # For pitchers: remove strength bullets for pitches that also show
+            # as weaknesses (e.g., 4-Seam has high whiff but also gets hit hard)
+            _weak_pitches = set()
+            for w in card["weaknesses"]:
+                for pt_name in PITCH_DISPLAY.values():
+                    if pt_name in w:
+                        _weak_pitches.add(pt_name)
+            if _weak_pitches:
+                card["strengths"] = [
+                    s for s in card["strengths"]
+                    if not any(pt in s for pt in _weak_pitches)
+                ]
+
+    # ── OUTLOOK ──────────────────────────────────────────────────────
+    outlook: list[str] = []
+
+    # EOS pace from counting sim
+    if counting_row is not None:
+        pace_parts = []
+        if is_hitter:
+            for label, prefix in [("HR", "total_hr"), ("R", "total_r"), ("RBI", "total_rbi")]:
+                mean_col = f"{prefix}_mean"
+                if mean_col in counting_row.index and pd.notna(counting_row.get(mean_col)):
+                    pace_parts.append(f"{int(round(counting_row[mean_col]))} {label}")
+        else:
+            for label, prefix in [("K", "total_k"), ("IP", "projected_ip")]:
+                mean_col = f"{prefix}_mean"
+                if mean_col in counting_row.index and pd.notna(counting_row.get(mean_col)):
+                    pace_parts.append(f"{int(round(counting_row[mean_col]))} {label}")
+        if pace_parts:
+            outlook.append(f"Projected for {', '.join(pace_parts)} by season end.")
+
+    # Bayesian rate direction
+    for label, key, higher_better, _desc in stat_configs:
+        obs_col = f"observed_{key}"
+        proj_col = f"projected_{key}"
+        if obs_col not in player_row.index or pd.isna(player_row.get(obs_col)):
+            continue
+        observed = player_row[obs_col]
+        projected = player_row[proj_col]
+        delta_pp = (projected - observed) * 100
+
+        ci_lo = player_row.get(f"projected_{key}_2_5", projected)
+        ci_hi = player_row.get(f"projected_{key}_97_5", projected)
+        ci_width = (ci_hi - ci_lo) * 100
+
+        if ci_width < 6:
+            conf = "Model confidence is high."
+        elif ci_width < 12:
+            conf = "Moderate confidence in this projection."
+        else:
+            conf = "Wide range of outcomes possible."
+
+        obs_s = fmt_stat(observed, key)
+        proj_s = fmt_stat(projected, key)
+
+        if abs(delta_pp) < 0.5:
+            outlook.append(f"{label} projected to hold steady at {proj_s}. {conf}")
+        elif abs(delta_pp) > 3:
+            direction = "up" if delta_pp > 0 else "down"
+            outlook.append(f"{label} moving {direction} from {obs_s} to {proj_s}. {conf}")
+        else:
+            direction = "ticking up" if delta_pp > 0 else "trending down slightly"
+            outlook.append(f"{label} {direction} from {obs_s} to {proj_s}. {conf}")
+
+    card["outlook"] = outlook
+
+    # ── DEVELOPMENT ──────────────────────────────────────────────────
+    if breakout_df is not None and not breakout_df.empty:
+        bo = breakout_df[breakout_df["batter_id"] == player_id] if is_hitter else pd.DataFrame()
+        if not bo.empty:
+            bo_row = bo.iloc[0]
+            if pd.notna(bo_row.get("breakout_tier")) and bo_row["breakout_tier"]:
+                narrative = bo_row.get("breakout_narrative", "")
+                if narrative:
+                    card["development"] = str(narrative)
+
+    return card
+
+
+def render_scouting_card(card: dict) -> None:
+    """Render the scouting card as styled HTML in Streamlit."""
+    parts: list[str] = []
+
+    # One-liner
+    if card.get("one_liner"):
+        parts.append(
+            f'<div style="font-size:1rem; font-weight:600; color:{CREAM}; '
+            f'margin-bottom:12px; line-height:1.4;">{card["one_liner"]}</div>'
+        )
+
+    # Strengths / Weaknesses side by side
+    has_strengths = bool(card.get("strengths"))
+    has_weaknesses = bool(card.get("weaknesses"))
+
+    if has_strengths or has_weaknesses:
+        cols_html = '<div style="display:flex; gap:24px; margin-bottom:12px;">'
+
+        if has_strengths:
+            s_bullets = "".join(
+                f'<li style="margin-bottom:4px; color:{CREAM};">{b}</li>'
+                for b in card["strengths"]
+            )
+            cols_html += (
+                f'<div style="flex:1;">'
+                f'<div style="color:{SAGE}; font-weight:600; font-size:0.7rem; '
+                f'letter-spacing:1px; margin-bottom:4px;">STRENGTHS</div>'
+                f'<ul style="margin:0; padding-left:1.2rem; font-size:0.85rem;">{s_bullets}</ul>'
+                f'</div>'
+            )
+
+        if has_weaknesses:
+            w_bullets = "".join(
+                f'<li style="margin-bottom:4px; color:{CREAM};">{b}</li>'
+                for b in card["weaknesses"]
+            )
+            cols_html += (
+                f'<div style="flex:1;">'
+                f'<div style="color:{EMBER}; font-weight:600; font-size:0.7rem; '
+                f'letter-spacing:1px; margin-bottom:4px;">WEAKNESSES</div>'
+                f'<ul style="margin:0; padding-left:1.2rem; font-size:0.85rem;">{w_bullets}</ul>'
+                f'</div>'
+            )
+
+        cols_html += '</div>'
+        parts.append(cols_html)
+
+    # Outlook
+    if card.get("outlook"):
+        o_text = " ".join(card["outlook"])
+        parts.append(
+            f'<div style="margin-bottom:8px;">'
+            f'<div style="color:{GOLD}; font-weight:600; font-size:0.7rem; '
+            f'letter-spacing:1px; margin-bottom:4px;">SEASON OUTLOOK</div>'
+            f'<div style="font-size:0.85rem; color:{CREAM}; line-height:1.5;">{o_text}</div>'
+            f'</div>'
+        )
+
+    # Development watch
+    if card.get("development"):
+        parts.append(
+            f'<div>'
+            f'<div style="color:{GOLD}; font-weight:600; font-size:0.7rem; '
+            f'letter-spacing:1px; margin-bottom:4px;">DEVELOPMENT WATCH</div>'
+            f'<div style="font-size:0.85rem; color:{CREAM}; line-height:1.5; '
+            f'font-style:italic;">{card["development"]}</div>'
+            f'</div>'
+        )
+
+    if parts:
+        st.markdown(
+            f'<div style="margin:0.5rem 0 1rem; padding:12px 16px; '
+            f'border-left:3px solid {GOLD}; background:rgba(200,169,110,0.04);">'
+            f'<div style="color:{GOLD}; font-weight:600; font-size:0.75rem; '
+            f'letter-spacing:1px; margin-bottom:8px;">SCOUTING REPORT</div>'
+            + "".join(parts)
+            + '</div>',
+            unsafe_allow_html=True,
+        )
 
 
 def render_scouting_html(report) -> None:

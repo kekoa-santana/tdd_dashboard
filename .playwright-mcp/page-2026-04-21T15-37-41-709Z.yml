@@ -1,0 +1,328 @@
+- generic [active]:
+  - generic [ref=e6]:
+    - navigation "Main navigation" [ref=e8]:
+      - link "The Data Diamond The Data Diamond" [ref=e9] [cursor=pointer]:
+        - /url: "?page=home"
+        - img "The Data Diamond" [ref=e10]
+        - generic [ref=e11]: The Data Diamond
+      - generic [ref=e12]:
+        - button "Games ▾" [ref=e14] [cursor=pointer]
+        - button "Players ▾" [ref=e16] [cursor=pointer]
+        - button "Teams ▾" [ref=e18] [cursor=pointer]
+        - button "Tools ▾" [ref=e20] [cursor=pointer]
+        - button "About ▾" [ref=e22] [cursor=pointer]
+      - generic [ref=e24]:
+        - link "𝕏" [ref=e25] [cursor=pointer]:
+          - /url: https://x.com/TheDataDiamond
+        - link "⌘" [ref=e26] [cursor=pointer]:
+          - /url: https://instagram.com/TheDataDiamond
+    - radiogroup "button group" [ref=e29]:
+      - 'button "A: Home Mirror" [ref=e661] [cursor=pointer]':
+        - paragraph [ref=e665]: "A: Home Mirror"
+      - 'button "B: Hybrid" [ref=e666] [cursor=pointer]':
+        - paragraph [ref=e670]: "B: Hybrid"
+      - 'button "C: Command Center" [ref=e671] [cursor=pointer]':
+        - paragraph [ref=e675]: "C: Command Center"
+    - generic [ref=e48]:
+      - generic [ref=e49]:
+        - generic [ref=e50]: Tue, Apr 21 (Today)
+        - combobox "Selected Tue, Apr 21 (Today). Game Date" [ref=e52]
+      - img "open" [ref=e54]
+    - generic [ref=e60]:
+      - generic [ref=e61]: Tue Apr 21· 2026
+      - generic [ref=e62]:
+        - generic [ref=e63]:
+          - generic [ref=e64]: "15"
+          - generic [ref=e65]: Games
+        - generic [ref=e66]:
+          - generic [ref=e67]: "351"
+          - generic [ref=e68]: Hitters
+    - group [ref=e678]:
+      - generic "keyboard_arrow_right 6:10 PM ET | HOU @ CLE | Ryan Weiss vs Parker Messick | 27 hitters" [ref=e679] [cursor=pointer]:
+        - generic [ref=e680]:
+          - generic [ref=e682]: keyboard_arrow_right
+          - paragraph [ref=e685]: 6:10 PM ET | HOU @ CLE | Ryan Weiss vs Parker Messick | 27 hitters
+    - group [ref=e687]:
+      - generic "keyboard_arrow_right 6:40 PM ET | CIN @ TB | Chase Burns vs Steven Matz | 24 hitters" [ref=e688] [cursor=pointer]:
+        - generic [ref=e689]:
+          - generic [ref=e691]: keyboard_arrow_right
+          - paragraph [ref=e694]: 6:40 PM ET | CIN @ TB | Chase Burns vs Steven Matz | 24 hitters
+    - group [ref=e697]:
+      - generic "keyboard_arrow_right 6:40 PM ET | STL @ MIA | Dustin May vs Chris Paddack | 26 hitters" [ref=e698] [cursor=pointer]:
+        - generic [ref=e699]:
+          - generic [ref=e701]: keyboard_arrow_right
+          - paragraph [ref=e704]: 6:40 PM ET | STL @ MIA | Dustin May vs Chris Paddack | 26 hitters
+    - group [ref=e706]:
+      - generic "keyboard_arrow_right 6:40 PM ET | MIL @ DET | Kyle Harrison vs Keider Montero | 26 hitters" [ref=e707] [cursor=pointer]:
+        - generic [ref=e708]:
+          - generic [ref=e710]: keyboard_arrow_right
+          - paragraph [ref=e713]: 6:40 PM ET | MIL @ DET | Kyle Harrison vs Keider Montero | 26 hitters
+    - group [ref=e716]:
+      - generic "keyboard_arrow_right 6:45 PM ET | ATL @ WSH | Reynaldo López vs Foster Griffin | 26 hitters" [ref=e717] [cursor=pointer]:
+        - generic [ref=e718]:
+          - generic [ref=e720]: keyboard_arrow_right
+          - paragraph [ref=e723]: 6:45 PM ET | ATL @ WSH | Reynaldo López vs Foster Griffin | 26 hitters
+    - generic [ref=e183]:
+      - generic [ref=e188] [cursor=pointer]:
+        - checkbox "Matchups & Projections"
+        - paragraph [ref=e194]: Matchups & Projections
+      - generic [ref=e200]:
+        - paragraph:
+          - link "Full Analysis →" [ref=e201] [cursor=pointer]:
+            - /url: "?page=game_analysis&game_pk=823880"
+    - generic [ref=e206]:
+      - generic [ref=e207]: 2026-04-21 · 6:40 PM ET
+      - generic [ref=e208]:
+        - img [ref=e209]
+        - generic [ref=e210]: MIL
+        - generic [ref=e211]: 12-9
+        - generic [ref=e212]: "@"
+        - generic [ref=e213]: DET
+        - generic [ref=e214]: 12-11
+        - img [ref=e215]
+      - generic [ref=e216]:
+        - generic [ref=e217]: Kyle Harrison · Fastball DominantE[K] 4.7 · IP 4.2
+        - generic [ref=e218]: Keider Montero · Ground-Ball ArtistE[K] 3.7 · IP 4.2
+    - generic [ref=e220]:
+      - generic [ref=e225] [cursor=pointer]:
+        - checkbox "Matchups & Projections"
+        - paragraph [ref=e231]: Matchups & Projections
+      - generic [ref=e237]:
+        - paragraph:
+          - link "Full Analysis →" [ref=e238] [cursor=pointer]:
+            - /url: "?page=game_analysis&game_pk=824290"
+    - generic [ref=e243]:
+      - generic [ref=e244]: 2026-04-21 · 6:45 PM ET
+      - generic [ref=e245]:
+        - img [ref=e246]
+        - generic [ref=e247]: ATL
+        - generic [ref=e248]: 16-7
+        - generic [ref=e249]: "@"
+        - generic [ref=e250]: WSH
+        - generic [ref=e251]: 10-13
+        - img [ref=e252]
+      - generic [ref=e253]:
+        - generic [ref=e254]: Reynaldo LópezE[K] 5.1 · IP 5.1
+        - generic [ref=e255]: Foster GriffinE[K] 4.6 · IP 5.0
+    - generic [ref=e257]:
+      - generic [ref=e262] [cursor=pointer]:
+        - checkbox "Matchups & Projections"
+        - paragraph [ref=e268]: Matchups & Projections
+      - generic [ref=e274]:
+        - paragraph:
+          - link "Full Analysis →" [ref=e275] [cursor=pointer]:
+            - /url: "?page=game_analysis&game_pk=822747"
+    - generic [ref=e280]:
+      - generic [ref=e281]: 2026-04-21 · 6:45 PM ET
+      - generic [ref=e282]:
+        - img [ref=e283]
+        - generic [ref=e284]: NYY
+        - generic [ref=e285]: 13-9
+        - generic [ref=e286]: "@"
+        - generic [ref=e287]: BOS
+        - generic [ref=e288]: 9-13
+        - img [ref=e289]
+      - generic [ref=e290]:
+        - generic [ref=e291]: Luis Gil · Ground-Ball ArtistE[K] 4.4 · IP 4.2
+        - generic [ref=e292]: Connelly EarlyE[K] 5.8 · IP 5.0
+    - generic [ref=e294]:
+      - generic [ref=e299] [cursor=pointer]:
+        - checkbox "Matchups & Projections"
+        - paragraph [ref=e305]: Matchups & Projections
+      - generic [ref=e311]:
+        - paragraph:
+          - link "Full Analysis →" [ref=e312] [cursor=pointer]:
+            - /url: "?page=game_analysis&game_pk=824773"
+    - generic [ref=e317]:
+      - generic [ref=e318]: 2026-04-21 · 7:10 PM ET
+      - generic [ref=e319]:
+        - img [ref=e320]
+        - generic [ref=e321]: MIN
+        - generic [ref=e322]: 11-11
+        - generic [ref=e323]: "@"
+        - generic [ref=e324]: NYM
+        - generic [ref=e325]: 7-15
+        - img [ref=e326]
+      - generic [ref=e327]:
+        - generic [ref=e328]: Simeon Woods Richardson · Breaking-Ball HeavyE[K] 3.7 · IP 4.2
+        - generic [ref=e329]: Nolan McLean · Breaking-Ball HeavyE[K] 6.2 · IP 5.1
+    - generic [ref=e331]:
+      - generic [ref=e336] [cursor=pointer]:
+        - checkbox "Matchups & Projections"
+        - paragraph [ref=e342]: Matchups & Projections
+      - generic [ref=e348]:
+        - paragraph:
+          - link "Full Analysis →" [ref=e349] [cursor=pointer]:
+            - /url: "?page=game_analysis&game_pk=823640"
+    - generic [ref=e354]:
+      - generic [ref=e355]: 2026-04-21 · 7:40 PM ET
+      - generic [ref=e356]:
+        - img [ref=e357]
+        - generic [ref=e358]: BAL
+        - generic [ref=e359]: 11-12
+        - generic [ref=e360]: "@"
+        - generic [ref=e361]: KC
+        - generic [ref=e362]: 7-16
+        - img [ref=e363]
+      - generic [ref=e364]:
+        - generic [ref=e365]: Shane Baz · Breaking-Ball HeavyE[K] 4.3 · IP 5.1
+        - generic [ref=e366]: Kris Bubic · Power ArmE[K] 7.3 · IP 5.2
+    - generic [ref=e368]:
+      - generic [ref=e373] [cursor=pointer]:
+        - checkbox "Matchups & Projections"
+        - paragraph [ref=e379]: Matchups & Projections
+      - generic [ref=e385]:
+        - paragraph:
+          - link "Full Analysis →" [ref=e386] [cursor=pointer]:
+            - /url: "?page=game_analysis&game_pk=824127"
+    - generic [ref=e391]:
+      - generic [ref=e392]: 2026-04-21 · 7:40 PM ET
+      - generic [ref=e393]:
+        - img [ref=e394]
+        - generic [ref=e395]: PHI
+        - generic [ref=e396]: 8-14
+        - generic [ref=e397]: "@"
+        - generic [ref=e398]: CHC
+        - generic [ref=e399]: 13-9
+        - img [ref=e400]
+      - generic [ref=e401]:
+        - generic [ref=e402]: Jesús Luzardo · Balanced MixE[K] 5.8 · IP 5.1
+        - generic [ref=e403]: Shota Imanaga · Command SpecialistE[K] 6.5 · IP 5.1
+    - generic [ref=e405]:
+      - generic [ref=e410] [cursor=pointer]:
+        - checkbox "Matchups & Projections"
+        - paragraph [ref=e416]: Matchups & Projections
+      - generic [ref=e422]:
+        - paragraph:
+          - link "Full Analysis →" [ref=e423] [cursor=pointer]:
+            - /url: "?page=game_analysis&game_pk=824690"
+    - generic [ref=e428]:
+      - generic [ref=e429]: 2026-04-21 · 8:05 PM ET
+      - generic [ref=e430]:
+        - img [ref=e431]
+        - generic [ref=e432]: PIT
+        - generic [ref=e433]: 13-9
+        - generic [ref=e434]: "@"
+        - generic [ref=e435]: TEX
+        - generic [ref=e436]: 11-11
+        - img [ref=e437]
+      - generic [ref=e438]:
+        - generic [ref=e439]: Carmen Mlodzinski · Ground-Ball ArtistK% 22.1%
+        - generic [ref=e440]: TBD
+    - generic [ref=e442]:
+      - generic [ref=e447] [cursor=pointer]:
+        - checkbox "Matchups & Projections"
+        - paragraph [ref=e453]: Matchups & Projections
+      - generic [ref=e459]:
+        - paragraph:
+          - link "Full Analysis →" [ref=e460] [cursor=pointer]:
+            - /url: "?page=game_analysis&game_pk=822914"
+    - generic [ref=e465]:
+      - generic [ref=e466]: 2026-04-21 · 8:40 PM ET
+      - generic [ref=e467]:
+        - img [ref=e468]
+        - generic [ref=e469]: SD
+        - generic [ref=e470]: 15-7
+        - generic [ref=e471]: "@"
+        - generic [ref=e472]: COL
+        - generic [ref=e473]: 9-14
+        - img [ref=e474]
+      - generic [ref=e475]:
+        - generic [ref=e476]: Randy Vásquez · Ground-Ball ArtistE[K] 4.7 · IP 5.0
+        - generic [ref=e477]: TBD
+    - generic [ref=e479]:
+      - generic [ref=e484] [cursor=pointer]:
+        - checkbox "Matchups & Projections"
+        - paragraph [ref=e490]: Matchups & Projections
+      - generic [ref=e496]:
+        - paragraph:
+          - link "Full Analysis →" [ref=e497] [cursor=pointer]:
+            - /url: "?page=game_analysis&game_pk=824369"
+    - generic [ref=e502]:
+      - generic [ref=e503]: 2026-04-21 · 9:38 PM ET
+      - generic [ref=e504]:
+        - img [ref=e505]
+        - generic [ref=e506]: TOR
+        - generic [ref=e507]: 9-13
+        - generic [ref=e508]: "@"
+        - generic [ref=e509]: LAA
+        - generic [ref=e510]: 11-13
+        - img [ref=e511]
+      - generic [ref=e512]:
+        - generic [ref=e513]: Patrick Corbin · Ground-Ball ArtistE[K] 5.5 · IP 5.0
+        - generic [ref=e514]: Jack Kochanowicz · Ground-Ball ArtistE[K] 2.9 · IP 4.2
+    - generic [ref=e516]:
+      - generic [ref=e521] [cursor=pointer]:
+        - checkbox "Matchups & Projections"
+        - paragraph [ref=e527]: Matchups & Projections
+      - generic [ref=e533]:
+        - paragraph:
+          - link "Full Analysis →" [ref=e534] [cursor=pointer]:
+            - /url: "?page=game_analysis&game_pk=824045"
+    - generic [ref=e539]:
+      - generic [ref=e540]: 2026-04-21 · 9:40 PM ET
+      - generic [ref=e541]:
+        - img [ref=e542]
+        - generic [ref=e543]: ATH
+        - generic [ref=e544]: 12-11
+        - generic [ref=e545]: "@"
+        - generic [ref=e546]: SEA
+        - generic [ref=e547]: 10-14
+        - img [ref=e548]
+      - generic [ref=e549]:
+        - generic [ref=e550]: Jacob Lopez · Breaking-Ball HeavyE[K] 5.0 · IP 4.1
+        - generic [ref=e551]: Luis Castillo · Fastball DominantE[K] 4.7 · IP 5.1
+    - generic [ref=e553]:
+      - generic [ref=e558] [cursor=pointer]:
+        - checkbox "Matchups & Projections"
+        - paragraph [ref=e564]: Matchups & Projections
+      - generic [ref=e570]:
+        - paragraph:
+          - link "Full Analysis →" [ref=e571] [cursor=pointer]:
+            - /url: "?page=game_analysis&game_pk=823148"
+    - generic [ref=e576]:
+      - generic [ref=e577]: 2026-04-21 · 9:40 PM ET
+      - generic [ref=e578]:
+        - img [ref=e579]
+        - generic [ref=e580]: CWS
+        - generic [ref=e581]: 8-14
+        - generic [ref=e582]: "@"
+        - generic [ref=e583]: AZ
+        - generic [ref=e584]: 13-9
+        - img [ref=e585]
+      - generic [ref=e586]:
+        - generic [ref=e587]: Sean Burke · Breaking-Ball HeavyE[K] 4.2 · IP 4.2
+        - generic [ref=e588]: Merrill Kelly · Command SpecialistE[K] 4.8 · IP 5.1
+    - generic [ref=e590]:
+      - generic [ref=e595] [cursor=pointer]:
+        - checkbox "Matchups & Projections"
+        - paragraph [ref=e601]: Matchups & Projections
+      - generic [ref=e607]:
+        - paragraph:
+          - link "Full Analysis →" [ref=e608] [cursor=pointer]:
+            - /url: "?page=game_analysis&game_pk=825099"
+    - generic [ref=e613]:
+      - generic [ref=e614]: 2026-04-21 · 9:45 PM ET
+      - generic [ref=e615]:
+        - img [ref=e616]
+        - generic [ref=e617]: LAD
+        - generic [ref=e618]: 16-6
+        - generic [ref=e619]: "@"
+        - generic [ref=e620]: SF
+        - generic [ref=e621]: 9-13
+        - img [ref=e622]
+      - generic [ref=e623]:
+        - generic [ref=e624]: Yoshinobu Yamamoto · Power ArmE[K] 5.4 · IP 5.1
+        - generic [ref=e625]: Landen Roupp · Ground-Ball ArtistE[K] 4.4 · IP 4.2
+    - generic [ref=e627]:
+      - generic [ref=e632] [cursor=pointer]:
+        - checkbox "Matchups & Projections"
+        - paragraph [ref=e638]: Matchups & Projections
+      - generic [ref=e644]:
+        - paragraph:
+          - link "Full Analysis →" [ref=e645] [cursor=pointer]:
+            - /url: "?page=game_analysis&game_pk=823236"
+    - separator [ref=e650]
+    - generic [ref=e655]: 675 pitchers simulated | 10,000 Monte Carlo draws per pitcher
+    - generic [ref=e660]: For entertainment and research purposes. Not financial advice.
+  - img [ref=e724]

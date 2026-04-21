@@ -472,6 +472,14 @@ def load_full_stats(player_type: str) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_DATA_TTL)
+def load_advanced_stats(player_type: str) -> pd.DataFrame:
+    path = DASHBOARD_DIR / f"{player_type}_advanced.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
 def load_pitcher_location_grid_all() -> pd.DataFrame:
     path = DASHBOARD_DIR / "pitcher_location_grid_all.parquet"
     if not path.exists():
