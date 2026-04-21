@@ -1,9 +1,8 @@
 {
-  "last_updated": "2026-04-20T07:26:26.246538",
+  "last_updated": "2026-04-21T06:26:16.974517",
   "game_date": "2026-04-21",
   "season": 2026,
-  "hitters_updated": 497,
-  "pitchers_updated": 603,
-  "k_samples_count": 713,
-  "last_schedule_refresh": "2026-04-21T01:00:09.281224"
+  "hitters_updated": 577,
+  "pitchers_updated": 723,
+  "k_samples_count": 889
 }
