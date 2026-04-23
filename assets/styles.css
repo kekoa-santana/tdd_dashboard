@@ -124,6 +124,14 @@ h1, h2, h3 {
 header[data-testid="stHeader"] { display: none; }
 [data-testid="stFooter"] { display: none; }
 footer { display: none; }
+.viewerBadge_container__r5tak { display: none !important; }
+.viewerBadge_link__qRIco { display: none !important; }
+[data-testid="manage-app-button"] { display: none !important; }
+._profileContainer_gzau3_53 { display: none !important; }
+div[class*="viewerBadge"] { display: none !important; }
+div[class*="profileContainer"] { display: none !important; }
+._bottom_gzau3_39 { display: none !important; }
+div[class*="_bottom"] { display: none !important; }
 
 /* Disable drag-to-zoom and pinch-to-zoom on all Plotly charts.
    The .nsewdrag overlay handles drag interactions; disabling pointer
