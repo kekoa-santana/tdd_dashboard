@@ -507,6 +507,46 @@ def _prop_card_html(row: pd.Series) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Scouting Report section
+# ---------------------------------------------------------------------------
+
+def _render_scouting_section(sides: list[dict], gpk: int) -> None:
+    """Side-by-side pitcher scouting reports for a game."""
+    scouting_data = _get_scouting_report_data()
+
+    col_away, col_home = st.columns(2)
+    for side_info, col in zip(sides, [col_away, col_home]):
+        pid = side_info["pitcher_id"]
+        pitcher_name = side_info["pitcher_name"]
+        side_abbr = side_info["abbr"]
+        opp_abbr = side_info["opp_abbr"]
+
+        with col:
+            st.markdown(
+                f'<div class="tdd-section-hdr">'
+                f'<span class="tdd-team-abbr" data-team="{side_abbr}">'
+                f'{side_abbr}</span>'
+                f' <span style="color:var(--tdd-slate); font-size:0.8rem;">'
+                f'{pitcher_name}</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+            if not pid:
+                st.markdown(
+                    '<div class="tdd-meta">Starter TBD</div>',
+                    unsafe_allow_html=True,
+                )
+                continue
+
+            report = get_pitcher_scouting(
+                pid, pitcher_name, side_abbr, opp_abbr,
+                scouting_data,
+            )
+            _render_scouting_html(report)
+
+
+# ---------------------------------------------------------------------------
 # Game Drill-Down (Phase 2: Game Center)
 # ---------------------------------------------------------------------------
 
@@ -565,7 +605,7 @@ def _render_game_drilldown(
         })
 
     # --- Inline toolbar: Section ---
-    _SECTIONS = ["Lineups", "Props Lab"]
+    _SECTIONS = ["Lineups", "Scouting Report", "Props Lab"]
 
     section = st.selectbox(
         "Section", _SECTIONS,
@@ -598,6 +638,9 @@ def _render_game_drilldown(
             pitcher_sim_samples=pitcher_sim_samples,
             batter_sim_samples=batter_sim_samples,
         )
+
+    elif section == "Scouting Report":
+        _render_scouting_section(sides, gpk)
 
     elif section == "Props Lab":
         _render_props_section(
