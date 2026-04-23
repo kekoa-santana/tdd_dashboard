@@ -2,6 +2,7 @@
 logs/
 
 docs/fantasy_team.md
+output.md
 
 # Python
 __pycache__/

@@ -949,42 +949,82 @@ def run_schedule_refresh(game_date: str) -> bool:
                      n_api, n_dc, n_none)
 
         # --- Game-level predictions (moneyline / spread / over-under) ---
-        _build_game_predictions(sim_df, sim_sample_arrays)
+        _build_game_predictions(game_date)
     else:
         logger.warning("No pitchers could be simulated (missing K samples?)")
 
     return True
 
 
-def _build_game_predictions(
-    sim_df: "pd.DataFrame", sample_arrays: dict[str, "np.ndarray"],
-) -> None:
-    """Compute game-level predictions from pitcher sim runs and save.
+def _build_game_predictions(game_date: str) -> None:
+    """Copy game-level predictions from confident_picks output.
+
+    Reads game_predictions.parquet (produced by the confident_picks
+    precompute in player_profiles), filters to today's games, remaps
+    columns to the dashboard schema, and saves as
+    todays_game_predictions.parquet.
 
     Also appends to the running archive parquet so we accumulate a
     sim-vs-market history over the season for calibration and bias
     learning (see ``run_market_comparison.py``).
     """
     import pandas as pd
-    from datetime import date as _date
-    from lib.game_predictions import build_game_predictions_from_sims
 
-    game_preds = build_game_predictions_from_sims(sim_df, sample_arrays)
-    if game_preds.empty:
-        logger.warning("No game-level predictions produced")
+    src_path = DASHBOARD_DIR / "game_predictions.parquet"
+    if not src_path.exists():
+        logger.warning("game_predictions.parquet not found; skipping game preds")
         return
+
+    full_df = pd.read_parquet(src_path)
+    if full_df.empty:
+        logger.warning("game_predictions.parquet is empty")
+        return
+
+    # Filter to today's games
+    game_preds = full_df[full_df["game_date"].astype(str).str[:10] == game_date].copy()
+    if game_preds.empty:
+        logger.warning("No game predictions for %s in game_predictions.parquet", game_date)
+        return
+
+    # Remap columns: confident_picks uses home-centric naming,
+    # dashboard archive/evaluation expects away-centric naming.
+    game_preds["p_away_win"] = game_preds["away_win_prob"]
+    game_preds["p_home_win"] = game_preds["home_win_prob"]
+    game_preds["total_mean"] = game_preds["total_runs_mean"]
+    game_preds["total_std"] = game_preds["total_runs_std"]
+    game_preds["margin_mean"] = game_preds["home_margin_mean"]
+
+    # Remap spread: home_cover -> away_cover (flip perspective)
+    spread_map = {
+        "p_home_cover_-2.5": "p_away_cover_p2_5",
+        "p_home_cover_-1.5": "p_away_cover_p1_5",
+        "p_home_cover_-0.5": "p_away_cover_p0_5",
+        "p_home_cover_+0.5": "p_away_cover_m0_5",
+        "p_home_cover_+1.5": "p_away_cover_m1_5",
+        "p_home_cover_+2.5": "p_away_cover_m2_5",
+    }
+    for src_col, dst_col in spread_map.items():
+        if src_col in game_preds.columns:
+            game_preds[dst_col] = 1.0 - game_preds[src_col]
+
+    # Remap O/U: "p_over_7.5" -> "p_over_7_5" + "p_under_7_5"
+    for col in list(game_preds.columns):
+        if col.startswith("p_over_") and "." in col:
+            line_str = col.replace("p_over_", "")
+            safe = line_str.replace(".", "_")
+            game_preds[f"p_over_{safe}"] = game_preds[col]
+            game_preds[f"p_under_{safe}"] = 1.0 - game_preds[col]
 
     game_preds.to_parquet(
         DASHBOARD_DIR / "todays_game_predictions.parquet", index=False,
     )
-    logger.info("Saved game predictions for %d games", len(game_preds))
+    logger.info("Saved game predictions for %d games (from confident_picks)", len(game_preds))
 
-    # Archive append — one row per (game_date, game_pk), re-running the
+    # Archive append -- one row per (game_date, game_pk), re-running the
     # pipeline for the same date overwrites existing rows.
     try:
         archive_path = DASHBOARD_DIR / "sim_predictions_archive.parquet"
         tagged = game_preds.copy()
-        tagged["game_date"] = str(_date.today())
         tagged["updated_at"] = pd.Timestamp.now("UTC").isoformat()
 
         if archive_path.exists():

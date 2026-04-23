@@ -325,9 +325,15 @@ def load_report_data(dashboard_dir: Path) -> ReportData:
         for pt, v in LEAGUE_AVG_BY_PITCH_TYPE.items()
     }
 
-    # Build sims from game_props (single source of truth)
+    # Build sims from game_props (single source of truth).
+    # Use the date from todays_games so sims align with batter_sims/lineups
+    # (game_props may contain future dates that don't match).
     game_props = _load("game_props.parquet")
-    sims = _build_sims_from_game_props(game_props)
+    games = _load("todays_games.parquet")
+    _today_date: str | None = None
+    if not games.empty and "game_date" in games.columns:
+        _today_date = str(games["game_date"].iloc[0])
+    sims = _build_sims_from_game_props(game_props, game_date=_today_date)
 
     return ReportData(
         games=_load("todays_games.parquet"),
