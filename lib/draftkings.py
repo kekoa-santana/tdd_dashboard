@@ -1,10 +1,14 @@
-"""DraftKings MLB odds scraper.
+"""DraftKings MLB odds & DFS scraper.
 
 Fetches MLB player props (K, H, HR, TB, BB, R) and game-level odds
 (moneyline, run line, total) from DraftKings' sportscontent API.
 
-Requires ``curl_cffi`` for TLS fingerprinting (regular urllib/requests
-gets 403 from Cloudflare).
+Also fetches DFS classic salaries and tier contest assignments from
+DraftKings' public draftgroups API (no auth required).
+
+Requires ``curl_cffi`` for TLS fingerprinting on the sportsbook API
+(regular urllib/requests gets 403 from Cloudflare).  The DFS API
+uses standard ``requests``.
 """
 from __future__ import annotations
 
@@ -256,3 +260,212 @@ def fetch_dk_game_odds() -> pd.DataFrame:
     else:
         logger.warning("No DraftKings game odds found")
     return df
+
+
+# -----------------------------------------------------------------------
+# DFS: Classic salaries & Tier assignments
+# -----------------------------------------------------------------------
+_LOBBY_URL = "https://www.draftkings.com/lobby/getcontests?sport=MLB"
+_DRAFTABLES_URL = (
+    "https://api.draftkings.com/draftgroups/v1/draftgroups/{dg}/draftables"
+)
+
+# DK GameTypeId → label
+_GAME_TYPE_CLASSIC = 2
+_GAME_TYPE_TIERS = 45
+
+# Tier rosterSlotIds are sequential starting at 278 → Tier 1.
+_TIER_SLOT_BASE = 278
+
+
+def _get_draftgroups() -> list[dict[str, Any]]:
+    """Fetch today's MLB draft groups from the DK lobby."""
+    import requests as std_requests
+
+    resp = std_requests.get(_LOBBY_URL, timeout=30)
+    resp.raise_for_status()
+    return resp.json().get("DraftGroups", [])
+
+
+def _fetch_draftables(draftgroup_id: int) -> list[dict[str, Any]]:
+    """Fetch the player pool for a draft group."""
+    import requests as std_requests
+
+    url = _DRAFTABLES_URL.format(dg=draftgroup_id)
+    resp = std_requests.get(url, timeout=30)
+    resp.raise_for_status()
+    return resp.json().get("draftables", [])
+
+
+def _find_main_slate_dg(
+    draftgroups: list[dict[str, Any]],
+    game_type_id: int,
+) -> int | None:
+    """Find the main-slate draft group for a given game type.
+
+    The main slate is the one with the most games and earliest start
+    (lowest SortOrder).
+    """
+    candidates = [
+        dg for dg in draftgroups if dg.get("GameTypeId") == game_type_id
+    ]
+    if not candidates:
+        return None
+    # Primary sort: most games; secondary: lowest SortOrder (featured)
+    candidates.sort(
+        key=lambda d: (-d.get("GameCount", 0), d.get("SortOrder", 999))
+    )
+    return candidates[0]["DraftGroupId"]
+
+
+def fetch_dk_salaries(
+    draftgroup_id: int | None = None,
+) -> pd.DataFrame:
+    """Fetch DraftKings classic DFS salaries for today's MLB slate.
+
+    Parameters
+    ----------
+    draftgroup_id : int, optional
+        Specific draft group to fetch.  If *None*, auto-detects the
+        main Classic slate (most games).
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: player_name, player_dk_id, position, team, opponent,
+        salary, fppg, game, game_time, status, handedness.
+    """
+    if draftgroup_id is None:
+        dgs = _get_draftgroups()
+        draftgroup_id = _find_main_slate_dg(dgs, _GAME_TYPE_CLASSIC)
+        if draftgroup_id is None:
+            logger.warning("No DK Classic MLB slate found")
+            return pd.DataFrame()
+        logger.info("Auto-detected Classic main slate: dg=%d", draftgroup_id)
+
+    draftables = _fetch_draftables(draftgroup_id)
+    rows: list[dict[str, Any]] = []
+    for d in draftables:
+        # FPPG is stat attribute id=408
+        fppg = None
+        for attr in d.get("draftStatAttributes", []):
+            if attr.get("id") == 408:
+                try:
+                    fppg = float(attr["value"])
+                except (ValueError, TypeError):
+                    pass
+
+        hand = None
+        for attr in d.get("playerAttributes", []):
+            if attr.get("name") == "Bat-Handedness":
+                hand = attr.get("value")
+
+        comp = d.get("competition", {})
+        rows.append({
+            "player_name": d.get("displayName", ""),
+            "player_dk_id": d.get("playerDkId"),
+            "position": d.get("position", ""),
+            "team": d.get("teamAbbreviation", ""),
+            "opponent": _parse_opponent(
+                comp.get("name", ""), d.get("teamAbbreviation", "")
+            ),
+            "salary": d.get("salary"),
+            "fppg": fppg,
+            "game": comp.get("name", ""),
+            "game_time": comp.get("startTime", ""),
+            "status": d.get("status", ""),
+            "handedness": hand,
+        })
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        logger.info(
+            "Fetched %d DK salaries (dg=%d), salary range $%s–$%s",
+            len(df), draftgroup_id,
+            f"{df['salary'].min():,}", f"{df['salary'].max():,}",
+        )
+    else:
+        logger.warning("No DK draftables found for dg=%d", draftgroup_id)
+    return df
+
+
+def fetch_dk_tiers(
+    draftgroup_id: int | None = None,
+) -> pd.DataFrame:
+    """Fetch DraftKings Tiers contest player pool for today's MLB slate.
+
+    Parameters
+    ----------
+    draftgroup_id : int, optional
+        Specific tiers draft group.  If *None*, auto-detects.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: player_name, player_dk_id, position, team, opponent,
+        tier, fppg, game, game_time, status, handedness.
+    """
+    if draftgroup_id is None:
+        dgs = _get_draftgroups()
+        draftgroup_id = _find_main_slate_dg(dgs, _GAME_TYPE_TIERS)
+        if draftgroup_id is None:
+            logger.warning("No DK Tiers MLB slate found")
+            return pd.DataFrame()
+        logger.info("Auto-detected Tiers slate: dg=%d", draftgroup_id)
+
+    draftables = _fetch_draftables(draftgroup_id)
+    rows: list[dict[str, Any]] = []
+    for d in draftables:
+        tier = d.get("rosterSlotId", 0) - _TIER_SLOT_BASE + 1
+        if tier < 1:
+            tier = None
+
+        fppg = None
+        for attr in d.get("draftStatAttributes", []):
+            if attr.get("id") == 408:
+                try:
+                    fppg = float(attr["value"])
+                except (ValueError, TypeError):
+                    pass
+
+        hand = None
+        for attr in d.get("playerAttributes", []):
+            if attr.get("name") == "Bat-Handedness":
+                hand = attr.get("value")
+
+        comp = d.get("competition", {})
+        rows.append({
+            "player_name": d.get("displayName", ""),
+            "player_dk_id": d.get("playerDkId"),
+            "position": d.get("position", ""),
+            "team": d.get("teamAbbreviation", ""),
+            "opponent": _parse_opponent(
+                comp.get("name", ""), d.get("teamAbbreviation", "")
+            ),
+            "tier": tier,
+            "fppg": fppg,
+            "game": comp.get("name", ""),
+            "game_time": comp.get("startTime", ""),
+            "status": d.get("status", ""),
+            "handedness": hand,
+        })
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        logger.info(
+            "Fetched %d DK tier players (dg=%d) across %d tiers",
+            len(df), draftgroup_id, df["tier"].nunique(),
+        )
+    else:
+        logger.warning("No DK tier draftables found for dg=%d", draftgroup_id)
+    return df
+
+
+def _parse_opponent(game_name: str, team: str) -> str:
+    """Extract opponent abbreviation from a game name like 'NYY @ HOU'."""
+    parts = game_name.replace(" @ ", "/").replace(" vs ", "/").split("/")
+    parts = [p.strip() for p in parts]
+    for p in parts:
+        if p != team:
+            return p
+    return ""

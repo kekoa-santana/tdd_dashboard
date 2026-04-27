@@ -1059,6 +1059,23 @@ def _schedule_masthead_html(selected_date, n_games: int, n_hitters: int) -> str:
     )
 
 
+def _pitcher_proj_line_html(
+    gpk: int,
+    pid: int | None,
+    lookup: dict[tuple[int, int], str],
+) -> str:
+    """Return HTML snippet for a pitcher's projected stat line."""
+    if pid is None:
+        return ""
+    line = lookup.get((gpk, pid))
+    if not line:
+        return ""
+    return (
+        f'<div style="color:var(--tdd-slate); font-size:0.65rem; '
+        f'margin-top:0.1rem;">{esc(line)}</div>'
+    )
+
+
 def _render_layout_a(
     schedule: pd.DataFrame,
     sims: pd.DataFrame,
@@ -1089,6 +1106,30 @@ def _render_layout_a(
 
     # Lookups + drilldown data (lazy, shared across all games)
     _lookups = _build_schedule_lookups()
+
+    # Build pitcher projected line lookup from game_props: (game_pk, pitcher_id) -> line str
+    _pitcher_line_lookup: dict[tuple[int, int], str] = {}
+    if not sims.empty and "player_type" in sims.columns:
+        _p_props = sims[sims["player_type"] == "pitcher"]
+        for (gpk_key, pid_key), grp in _p_props.groupby(["game_pk", "player_id"]):
+            parts = {}
+            ip_val = None
+            for _, pr in grp.iterrows():
+                stat = pr["stat"]
+                exp = pr["expected"]
+                if pd.notna(exp):
+                    parts[stat] = exp
+                if ip_val is None and pd.notna(pr.get("expected_ip")):
+                    ip_val = pr["expected_ip"]
+            line_parts = []
+            if ip_val is not None:
+                line_parts.append(f"{ip_val:.1f} IP")
+            for s in ["K", "BB", "H", "HR"]:
+                if s in parts:
+                    line_parts.append(f"{parts[s]:.1f} {s}")
+            if line_parts:
+                _pitcher_line_lookup[(int(gpk_key), int(pid_key))] = ", ".join(line_parts)
+
     _drilldown_data: dict | None = None
 
     def _get_dd() -> dict:
@@ -1159,6 +1200,10 @@ def _render_layout_a(
         status = game.get("status", "")
         away_sp = game.get("away_pitcher_name", "") or "TBD"
         home_sp = game.get("home_pitcher_name", "") or "TBD"
+        away_pid_raw = game.get("away_pitcher_id")
+        home_pid_raw = game.get("home_pitcher_id")
+        away_pid = int(away_pid_raw) if pd.notna(away_pid_raw) else None
+        home_pid = int(home_pid_raw) if pd.notna(home_pid_raw) else None
         nh = hitters_per_game.get(gpk, 0)
         is_open = gpk in st.session_state["sched_a_open"]
 
@@ -1193,9 +1238,18 @@ def _render_layout_a(
             f'{nh_html}'
             f'</div>'
             f'</div>'
-            # Row 2: pitchers
-            f'<div style="color:var(--tdd-slate); font-size:0.72rem; margin-top:0.2rem;">'
-            f'{esc(away_sp)} vs {esc(home_sp)}'
+            # Row 2: pitchers with projected lines
+            f'<div style="display:flex; justify-content:space-between; margin-top:0.3rem; gap:1rem;">'
+            # Away pitcher
+            f'<div style="flex:1; min-width:0;">'
+            f'<div style="color:var(--tdd-cream); font-size:0.75rem; font-weight:600;">{esc(away_sp)}</div>'
+            f'{_pitcher_proj_line_html(gpk, away_pid, _pitcher_line_lookup)}'
+            f'</div>'
+            # Home pitcher
+            f'<div style="flex:1; min-width:0; text-align:right;">'
+            f'<div style="color:var(--tdd-cream); font-size:0.75rem; font-weight:600;">{esc(home_sp)}</div>'
+            f'{_pitcher_proj_line_html(gpk, home_pid, _pitcher_line_lookup)}'
+            f'</div>'
             f'</div>'
             f'</div>'
         )
