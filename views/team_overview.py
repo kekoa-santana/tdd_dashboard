@@ -1,13 +1,14 @@
-"""Team Overview page — team intelligence, roster, depth chart, trade sim."""
+"""Team Overview page -- Press Box data wall."""
 
 from __future__ import annotations
+
+import math
 
 import pandas as pd
 import streamlit as st
 
 from config import (
     GOLD, EMBER, SAGE, SLATE, CREAM,
-    POSITIVE, NEGATIVE,
     CURRENT_SEASON, PRIOR_SEASON,
 )
 from utils.alerts import tdd_info, tdd_warn
@@ -16,1194 +17,1038 @@ from services.data_loader import (
     load_preseason_injuries,
     load_hitter_archetypes, load_pitcher_archetypes,
     load_rankings, load_team_elo, load_team_profiles, load_team_rankings,
-    load_team_elo_history,
     load_standings,
 )
 from utils.html import esc, esc_attr
+from utils.team_names import team_full, abbr_from_full
+from components.team_logo import team_logo_html
+
 
 # ── Constants ─────────────────────────────────────────────────────────
 _HITTER_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"]
-_PITCHER_POSITIONS = {"SP", "RP", "P"}
-_MLB_ROSTER_STATUSES = {"active", "il_7", "il_10", "il_15", "il_60"}
-
-_PILL_COLORS = {
-    # Pitcher archetypes
-    "Command Specialist": SAGE, "Breaking-Ball Heavy": EMBER,
-    "Balanced Mix": SLATE, "Power Arm": GOLD,
-    "Fastball Dominant": POSITIVE, "Ground-Ball Artist": NEGATIVE,
-    # Hitter archetypes
-    "Patient Power": GOLD, "Contact-Over-Power": SAGE,
-    "Speed Threat": POSITIVE, "Power Slugger": EMBER,
-    "Balanced All-Around": SLATE, "Free Swinger": NEGATIVE,
-}
-
-_HEALTH_COLORS = {
-    "Iron Man": GOLD, "Durable": SAGE,
-    "Average": SLATE, "Unknown": SLATE,
-    "Questionable": EMBER, "Injury Prone": NEGATIVE,
-}
 
 _TIER_COLORS = {
     "Elite": GOLD, "Contender": SAGE,
     "Competitive": SLATE, "Rebuilding": EMBER,
 }
 
+# Position coords as % within the depth-chart diamond (facing up)
+_FIELD_POS = {
+    "C":  (50, 84),
+    "1B": (80, 58),
+    "2B": (68, 40),
+    "SS": (32, 40),
+    "3B": (20, 58),
+    "LF": (12, 20),
+    "CF": (50, 8),
+    "RF": (88, 20),
+}
 
-# ═══════════════════════════════════════════════════════════════════════
-# TEAM PROFILE TAB — new team intelligence from ELO + profiles
-# ═══════════════════════════════════════════════════════════════════════
+# Score labels for radar / diamond scores
+_SCORE_KEYS = [
+    ("lineup_diamond",   "Lineup"),
+    ("rotation_diamond", "Rotation"),
+    ("bullpen_diamond",  "Bullpen"),
+]
 
-def _pill(label: str, color: str) -> str:
-    """Render a colored pill/tag."""
+
+# ── Helpers ───────────────────────────────────────────────────────────
+
+def _safe(val, default=None):
+    """Return val if not NaN/None, else default."""
+    if val is None:
+        return default
+    if isinstance(val, float) and (pd.isna(val) or math.isnan(val)):
+        return default
+    return val
+
+
+def _section(num: str, title: str, sub: str = "") -> str:
+    sub_html = f'<span class="sub">{esc(sub)}</span>' if sub else ""
     return (
-        f'<span class="tdd-badge" style="background:{color}22; color:{color}; '
-        f'border:1px solid {color}44; margin-right:5px;">{label}</span>'
-    )
-
-
-def _stat_row(label: str, value: str, color: str = CREAM) -> str:
-    """Key-value stat row."""
-    return (
-        f'<div style="display:flex; justify-content:space-between; padding:3px 0;">'
-        f'<span class="tdd-stat-label">{label}</span>'
-        f'<span class="tdd-stat-value" style="color:{color};">{value}</span>'
+        f'<div class="to-sec">'
+        f'<span class="num">{esc(num)}</span>'
+        f'<h2>{esc(title)}</h2>{sub_html}'
         f'</div>'
     )
 
 
-def _render_team_profile_tab(
-    selected_team: str,
-    teams_df: pd.DataFrame,
-) -> None:
-    """Render the Team Profile tab — ELO, sub-scores, team identity."""
-    rankings = load_team_rankings()
-    profiles = load_team_profiles()
-    elo_df = load_team_elo(preseason=True)
-    elo_history = load_team_elo_history()
+def _blk_head(title: str, meta: str = "") -> str:
+    meta_html = f'<span class="meta">{esc(meta)}</span>' if meta else ""
+    return f'<div class="blk-head"><span>{esc(title)}</span>{meta_html}</div>'
 
-    if rankings.empty and profiles.empty and elo_df.empty:
-        tdd_info("No team intelligence data available. Run precompute first.")
-        return
 
-    # Find this team's data
-    team_rank = rankings[rankings["abbreviation"] == selected_team] if not rankings.empty else pd.DataFrame()
-    team_prof = profiles[profiles["abbreviation"] == selected_team] if not profiles.empty else pd.DataFrame()
-    team_elo = elo_df[elo_df["abbreviation"] == selected_team] if not elo_df.empty else pd.DataFrame()
+# ── Rendering functions ──────────────────────────────────────────────
 
-    if team_rank.empty and team_elo.empty:
-        tdd_info(f"No profile data for {selected_team}.")
-        return
-
-    tr = team_rank.iloc[0] if not team_rank.empty else pd.Series(dtype=float)
-    tp = team_prof.iloc[0] if not team_prof.empty else pd.Series(dtype=float)
-    te = team_elo.iloc[0] if not team_elo.empty else pd.Series(dtype=float)
-
-    # ── Tier + headline metrics ──────────────────────────────────────
-    tier = tr.get("tier", "Competitive") if not tr.empty else "Competitive"
-    tier_color = _TIER_COLORS.get(tier, SLATE)
-    rank = int(tr["rank"]) if not tr.empty and pd.notna(tr.get("rank")) else None
-    from services.data_loader import load_standings
-    _standings = load_standings()
-    _rec = _standings.get(selected_team)
-    record_html = (
-        f'<span class="tdd-context" style="color:var(--tdd-cream);">'
-        f'<span style="color:var(--tdd-gold); font-weight:700;">{_rec[0]}-{_rec[1]}</span></span>'
-        if _rec else ""
+def _render_eyebrow(division: str, team_name: str) -> str:
+    return (
+        f'<div class="to-eyebrow">'
+        f'<span>The Data Diamond</span>'
+        f'<span class="sep">/</span>'
+        f'<span>Teams</span>'
+        f'<span class="sep">/</span>'
+        f'<span>{esc(division)}</span>'
+        f'<span class="sep">/</span>'
+        f'<span class="gold">{esc(team_name)}</span>'
+        f'</div>'
     )
 
-    rank_html = f'<span style="color:var(--tdd-gold); font-size:2rem; font-weight:800;">#{rank}</span>' if rank else ""
-    tier_html = _pill(tier, tier_color)
 
-    st.markdown(
-        f'<div style="display:flex; align-items:center; gap:16px; margin-bottom:16px; flex-wrap:wrap;">'
-        f'{rank_html} {tier_html} {record_html}'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    # ── Profile scores (diamond scale, from team_profiles) ──────────
-    if not tp.empty:
-        # Compute league ranks from team_profiles
-        all_tp = load_team_profiles()
-        _rank_cols = {
-            "lineup_diamond": "Offense",
-            "rotation_diamond": "Rotation",
-            "bullpen_diamond": "Bullpen",
-        }
-        _ranks: dict[str, int] = {}
-        for col in _rank_cols:
-            if col in all_tp.columns:
-                ranked = all_tp[col].rank(ascending=False, method="min")
-                idx = all_tp.index[all_tp["abbreviation"] == selected_team]
-                val = ranked.loc[idx].iloc[0] if len(idx) > 0 else 0
-                _ranks[col] = int(val) if pd.notna(val) else 0
-
-        # Defense/depth ranks from team_rankings
-        all_tr = load_team_rankings()
-        for col, label in [("defense_score", "Fielding"), ("health_depth_score", "Depth")]:
-            if col in all_tr.columns:
-                ranked = all_tr[col].rank(ascending=False, method="min")
-                idx = all_tr.index[all_tr["abbreviation"] == selected_team]
-                val = ranked.loc[idx].iloc[0] if len(idx) > 0 else 0
-                _ranks[col] = int(val) if pd.notna(val) else 0
-
-        # ── Top 10 players with league-wide positional rank ──────────
-        st.markdown(
-            '<div class="tdd-section-hdr" style="margin-top:16px; margin-bottom:8px;">'
-            'Top Players</div>',
-            unsafe_allow_html=True,
-        )
-
-        # Load rankings for this team — use roster as authoritative team source
-        from lib.diamond_rating import score_to_diamonds as _s2d
-        _hr = load_rankings("hitters")
-        _pr = load_rankings("pitchers")
-        _roster = load_roster()
-        _team_pids = set()
-        if not _roster.empty:
-            _team_pids = set(_roster[_roster["team_abbr"] == selected_team]["player_id"])
-
-        def _player_rank_row(name: str, pos: str, league_rank: int, score: float) -> str:
-            color = GOLD if league_rank <= 5 else SAGE if league_rank <= 15 else SLATE
-            diamonds = _s2d(score)
-            return (
-                f'<div style="display:flex; align-items:center; gap:8px; '
-                f'padding:4px 12px; border-left:3px solid {color}; margin-bottom:2px;">'
-                f'<span class="tdd-stat-value" style="color:{color}; min-width:2.5rem; '
-                f'font-weight:700;">#{league_rank}</span>'
-                f'<span class="tdd-meta" style="min-width:2rem; color:{SLATE};">{pos}</span>'
-                f'<span style="color:var(--tdd-cream); flex:1;">{esc(name)}</span>'
-                f'<span class="tdd-stat-value" style="color:var(--tdd-gold);">{diamonds:.1f}</span>'
-                f'</div>'
-            )
-
-        top_rows = ""
-        top_players = []
-
-        if not _hr.empty and _team_pids:
-            _h_pid = "batter_id" if "batter_id" in _hr.columns else "player_id"
-            _h_score = next((c for c in ("current_value_score", "tdd_value_score") if c in _hr.columns), None)
-            if _h_score:
-                team_hitters = _hr[_hr[_h_pid].isin(_team_pids)].copy()
-                for _, row in team_hitters.iterrows():
-                    top_players.append({
-                        "name": row["batter_name"],
-                        "pos": row.get("position", ""),
-                        "rank": int(row.get("pos_rank", 0)),
-                        "score": float(row[_h_score]),
-                    })
-
-        if not _pr.empty and _team_pids:
-            _p_pid = "pitcher_id" if "pitcher_id" in _pr.columns else "player_id"
-            _p_score = next((c for c in ("current_value_score", "tdd_value_score") if c in _pr.columns), None)
-            if _p_score:
-                team_pitchers = _pr[_pr[_p_pid].isin(_team_pids)].copy()
-                for _, row in team_pitchers.iterrows():
-                    top_players.append({
-                        "name": row["pitcher_name"],
-                        "pos": row.get("role", "P"),
-                        "rank": int(row.get("role_rank", 0)),
-                        "score": float(row[_p_score]),
-                    })
-
-        top_players.sort(key=lambda x: x["score"], reverse=True)
-        for p in top_players[:10]:
-            top_rows += _player_rank_row(p["name"], p["pos"], p["rank"], p["score"])
-
-        if top_rows:
-            st.markdown(
-                f'<div class="insight-card">{top_rows}</div>',
-                unsafe_allow_html=True,
-            )
-
-        # Style pills
-        styles = []
-        off_style = tr.get("offense_style")
-        if pd.notna(off_style):
-            s_color = GOLD if off_style == "Power" else SAGE if off_style == "Contact" else POSITIVE if off_style == "Smallball" else SLATE
-            styles.append(_pill(f"\u26be {off_style}", s_color))
-        pit_style = tr.get("pitching_style")
-        if pd.notna(pit_style):
-            p_color = GOLD if pit_style == "Strikeout" else SAGE if pit_style == "Contact-mgmt" else SLATE
-            styles.append(_pill(f"\u26be {pit_style}", p_color))
-        age_traj = tr.get("age_trajectory")
-        if pd.notna(age_traj):
-            a_color = SAGE if age_traj == "Ascending" else EMBER if age_traj == "Declining" else SLATE
-            styles.append(_pill(age_traj, a_color))
-        if styles:
-            st.markdown(
-                f'<div style="margin-top:8px;">{"".join(styles)}</div>',
-                unsafe_allow_html=True,
-            )
-
-    # ── Offense snapshot ─────────────────────────────────────────────
-    st.markdown(
-        '<div class="tdd-section-hdr" style="margin-top:16px; margin-bottom:8px;">Offense</div>',
-        unsafe_allow_html=True,
-    )
-
-    off_cols = st.columns(3)
-    with off_cols[0]:
-        rpg = tr.get("rpg") if not tr.empty else None
-        hr_pg = tr.get("hr_per_game") if not tr.empty else None
-        html = ""
-        if rpg and pd.notna(rpg):
-            html += _stat_row("R/G", f"{rpg:.2f}")
-        if hr_pg and pd.notna(hr_pg):
-            html += _stat_row("HR/G", f"{hr_pg:.2f}")
-        depth = tp.get("lineup_depth") if not tp.empty else None
-        if depth and pd.notna(depth):
-            html += _stat_row("Lineup Depth", f"{depth:.0%}")
-        if html:
-            st.markdown(f'<div class="insight-card">{html}</div>', unsafe_allow_html=True)
-
-    with off_cols[1]:
-        html = ""
-        avg_h = tp.get("avg_hitter_score") if not tp.empty else None
-        if avg_h and pd.notna(avg_h):
-            html += _stat_row("Avg Hitter Score", f"{avg_h:.2f}")
-        sb_pg = tr.get("sb_per_game") if not tr.empty else None
-        if sb_pg and pd.notna(sb_pg):
-            html += _stat_row("SB/G", f"{sb_pg:.2f}")
-        if html:
-            st.markdown(f'<div class="insight-card">{html}</div>', unsafe_allow_html=True)
-
-    with off_cols[2]:
-        html = ""
-        lu_d = tp.get("lineup_diamond") if not tp.empty else None
-        if lu_d is not None and pd.notna(lu_d):
-            lu_color = GOLD if float(lu_d) >= 6.5 else SAGE if float(lu_d) >= 5.0 else SLATE
-            html += _stat_row("Lineup", f"{float(lu_d):.1f}", lu_color)
-        if html:
-            st.markdown(f'<div class="insight-card">{html}</div>', unsafe_allow_html=True)
-
-    # ── Pitching snapshot ────────────────────────────────────────────
-    st.markdown(
-        '<div class="tdd-section-hdr" style="margin-top:16px; margin-bottom:8px;">Pitching</div>',
-        unsafe_allow_html=True,
-    )
-
-    pit_cols = st.columns(3)
-    with pit_cols[0]:
-        html = ""
-        ra_pg = tr.get("ra_per_game") if not tr.empty else None
-        if ra_pg and pd.notna(ra_pg):
-            html += _stat_row("RA/G", f"{ra_pg:.2f}")
-        k_pg = tr.get("k_per_game") if not tr.empty else None
-        if k_pg and pd.notna(k_pg):
-            html += _stat_row("K/G", f"{k_pg:.1f}")
-        if html:
-            st.markdown(f'<div class="insight-card">{html}</div>', unsafe_allow_html=True)
-
-    with pit_cols[1]:
-        html = ""
-        rot = tp.get("rotation_strength") if not tp.empty else None
-        if rot and pd.notna(rot):
-            html += _stat_row("Rotation Strength", f"{rot:.2f}")
-        bp = tp.get("bullpen_depth") if not tp.empty else None
-        if bp and pd.notna(bp):
-            html += _stat_row("Bullpen Depth", f"{bp:.2f}")
-        if html:
-            st.markdown(f'<div class="insight-card">{html}</div>', unsafe_allow_html=True)
-
-    with pit_cols[2]:
-        html = ""
-        rot_d = tp.get("rotation_diamond") if not tp.empty else None
-        if rot_d is not None and pd.notna(rot_d):
-            rot_color = GOLD if float(rot_d) >= 6.5 else SAGE if float(rot_d) >= 5.0 else SLATE
-            html += _stat_row("Rotation", f"{float(rot_d):.1f}", rot_color)
-        bp_d = tp.get("bullpen_diamond") if not tp.empty else None
-        if bp_d is not None and pd.notna(bp_d):
-            bp_color = GOLD if float(bp_d) >= 6.5 else SAGE if float(bp_d) >= 5.0 else SLATE
-            html += _stat_row("Bullpen", f"{float(bp_d):.1f}", bp_color)
-        if html:
-            st.markdown(f'<div class="insight-card">{html}</div>', unsafe_allow_html=True)
-
-    # ── Defense & Organization row ───────────────────────────────────
-    def_org_cols = st.columns(2)
-    with def_org_cols[0]:
-        st.markdown(
-            '<div class="tdd-section-hdr" style="margin-top:12px; margin-bottom:8px;">Defense</div>',
-            unsafe_allow_html=True,
-        )
-        html = ""
-        oaa = tr.get("team_oaa") if not tr.empty else None
-        if oaa is not None and pd.notna(oaa):
-            oaa_color = POSITIVE if float(oaa) > 0 else NEGATIVE if float(oaa) < 0 else SLATE
-            html += _stat_row("Team OAA", f"{oaa:+.0f}", oaa_color)
-        framing = tr.get("catcher_framing_runs") if not tr.empty else None
-        if framing is not None and pd.notna(framing):
-            fr_color = POSITIVE if float(framing) > 0 else NEGATIVE if float(framing) < 0 else SLATE
-            html += _stat_row("Catcher Framing", f"{framing:+.1f} runs", fr_color)
-        if html:
-            st.markdown(f'<div class="insight-card">{html}</div>', unsafe_allow_html=True)
-
-    with def_org_cols[1]:
-        st.markdown(
-            '<div class="tdd-section-hdr" style="margin-top:12px; margin-bottom:8px;">Organization</div>',
-            unsafe_allow_html=True,
-        )
-        html = ""
-        hg = tr.get("pct_homegrown") if not tr.empty else None
-        if hg and pd.notna(hg):
-            html += _stat_row("Homegrown %", f"{hg:.0%}")
-        farm = tr.get("farm_avg_score") if not tr.empty else None
-        if farm and pd.notna(farm):
-            html += _stat_row("Farm Avg Score", f"{farm:.2f}")
-        n_prosp = tr.get("n_ranked_prospects") if not tr.empty else None
-        if n_prosp and pd.notna(n_prosp):
-            html += _stat_row("Ranked Prospects", f"{int(n_prosp)}")
-        top100 = tr.get("top_100_count") if not tr.empty else None
-        if top100 and pd.notna(top100) and int(top100) > 0:
-            html += _stat_row("Top-100 Prospects", f"{int(top100)}")
-        if html:
-            st.markdown(f'<div class="insight-card">{html}</div>', unsafe_allow_html=True)
-
-    # ── Health & Age ─────────────────────────────────────────────────
-    health_cols = st.columns(2)
-    with health_cols[0]:
-        il_days = tr.get("total_il_days") if not tr.empty else None
-        avg_age = tr.get("avg_age") if not tr.empty else None
-        if (il_days and pd.notna(il_days)) or (avg_age and pd.notna(avg_age)):
-            st.markdown(
-                '<div class="tdd-section-hdr" style="margin-top:12px; margin-bottom:8px;">Health & Age</div>',
-                unsafe_allow_html=True,
-            )
-            html = ""
-            if il_days and pd.notna(il_days):
-                il_color = NEGATIVE if int(il_days) > 1000 else SLATE
-                html += _stat_row(f"IL Days ({PRIOR_SEASON})", f"{int(il_days)}", il_color)
-            if avg_age and pd.notna(avg_age):
-                html += _stat_row("Avg Roster Age", f"{avg_age:.1f}")
-            st.markdown(f'<div class="insight-card">{html}</div>', unsafe_allow_html=True)
-
-    with health_cols[1]:
-        opp_elo = tr.get("avg_opp_elo") if not tr.empty else None
-        big_gm = tr.get("big_game_pct") if not tr.empty else None
-        div_elo = tr.get("div_avg_elo") if not tr.empty else None
-        if (opp_elo and pd.notna(opp_elo)) or (big_gm and pd.notna(big_gm)):
-            st.markdown(
-                '<div class="tdd-section-hdr" style="margin-top:12px; margin-bottom:8px;">Schedule Context</div>',
-                unsafe_allow_html=True,
-            )
-            html = ""
-            if opp_elo and pd.notna(opp_elo):
-                html += _stat_row("Avg Opp ELO", f"{opp_elo:.0f}")
-            if big_gm and pd.notna(big_gm):
-                html += _stat_row("Big Game W%", f"{big_gm:.0%}")
-            if div_elo and pd.notna(div_elo):
-                html += _stat_row("Division Avg ELO", f"{div_elo:.0f}")
-            st.markdown(f'<div class="insight-card">{html}</div>', unsafe_allow_html=True)
-
-    # ── ELO trend sparkline (last 3 seasons) ─────────────────────────
-    if not elo_history.empty:
-        team_hist = elo_history[elo_history["abbreviation"] == selected_team] if "abbreviation" in elo_history.columns else pd.DataFrame()
-        if team_hist.empty and not te.empty:
-            team_id = te.get("team_id")
-            if pd.notna(team_id):
-                team_hist = elo_history[elo_history["team_id"] == int(team_id)]
-
-        if not team_hist.empty and len(team_hist) > 20:
-            st.markdown(
-                '<div class="tdd-section-hdr" style="margin-top:16px; margin-bottom:8px;">ELO Trend</div>',
-                unsafe_allow_html=True,
-            )
-            import plotly.graph_objects as go
-            chart_data = team_hist[["game_date", "composite_elo"]].copy()
-            chart_data["game_date"] = pd.to_datetime(chart_data["game_date"])
-            chart_data = chart_data.set_index("game_date").resample("W").last().dropna()
-
-            elo_fig = go.Figure()
-            elo_fig.add_trace(go.Scatter(
-                x=chart_data.index, y=chart_data["composite_elo"],
-                mode="lines", line=dict(color=GOLD, width=2),
-                hovertemplate="ELO: %{y:.0f}<extra></extra>",
-            ))
-            elo_fig.add_hline(y=1500, line_dash="dot", line_color=SLATE, line_width=1)
-            elo_fig.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                margin=dict(l=10, r=10, t=10, b=10),
-                height=200, showlegend=False, dragmode=False,
-                xaxis=dict(showgrid=False, fixedrange=True,
-                           tickfont=dict(color=SLATE, size=9)),
-                yaxis=dict(showgrid=True, gridcolor="rgba(123,143,166,0.12)",
-                           fixedrange=True, tickfont=dict(color=SLATE, size=9)),
-                font=dict(color=CREAM),
-            )
-            st.plotly_chart(
-                elo_fig, use_container_width=True,
-                config={"displayModeBar": False, "scrollZoom": False},
-            )
-
-    # ── League-wide rankings table ───────────────────────────────────
-    if not rankings.empty:
-        with st.expander("League-Wide Power Rankings"):
-            display_cols = ["rank", "abbreviation", "tier", "composite_score",
-                            "offense_score", "pitching_score", "defense_score"]
-            avail = [c for c in display_cols if c in rankings.columns]
-            display = rankings[avail].copy()
-            rename_map = {
-                "rank": "Rank", "abbreviation": "Team", "tier": "Tier",
-                "composite_score": "Score",
-                "offense_score": "Off", "pitching_score": "Pit",
-                "defense_score": "Field",
-            }
-            display = display.rename(columns={k: v for k, v in rename_map.items() if k in display.columns})
-
-            # Highlight selected team
-            def _highlight_team(row: pd.Series) -> list[str]:
-                if row.get("Team") == selected_team:
-                    return [f"background-color: {GOLD}22; font-weight: bold"] * len(row)
-                return [""] * len(row)
-
-            styled = display.style.apply(_highlight_team, axis=1).format(
-                {c: "{:.2f}" for c in ["Score", "Off", "Pit", "Def"] if c in display.columns}
-            )
-            st.dataframe(styled, use_container_width=True, hide_index=True, height=500)
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# DEPTH CHART TAB (unchanged from original)
-# ═══════════════════════════════════════════════════════════════════════
-
-def _player_row_html(
-    name: str, rank: int, score: float, arch: str, health: str,
-    is_first: bool, *, hand: str = "", secondary: bool = False,
+def _render_team_header(
+    abbr: str,
+    team_name: str,
+    division: str,
+    record: tuple[int, int] | None,
+    tr: pd.Series,
+    te: pd.Series,
+    team_id: int | None = None,
 ) -> str:
-    """Render a single player row for depth chart."""
-    if secondary:
-        border_color = f"{SLATE}22"
-    elif is_first:
-        border_color = GOLD
-    else:
-        border_color = f"{SLATE}44"
-    opacity = "0.6" if secondary else "1"
+    # Record line
+    w, l = record if record else (0, 0)
+    pct = w / (w + l) if (w + l) > 0 else 0
+    pct_str = f"{pct:.3f}".lstrip("0")
 
-    arch_html = ""
-    if pd.notna(arch) and arch:
-        color = _PILL_COLORS.get(arch, SLATE)
-        arch_html = (
-            f'<span class="tdd-badge" style="background:{color}22; color:{color}; '
-            f'border:1px solid {color}44; margin-left:8px;">{arch}</span>'
+    run_diff = _safe(tr.get("run_diff"), "")
+    if isinstance(run_diff, (int, float)):
+        run_diff = f"{run_diff:+.0f}" if run_diff != 0 else "0"
+    streak = _safe(tr.get("streak"), "")
+    last10 = _safe(tr.get("last_10"), "")
+
+    sub_parts = [f'<span class="rec">{w}-{l}</span>', f'<span>{pct_str} W%</span>']
+    if run_diff:
+        sub_parts.append(f'<span class="gold">RD {run_diff}</span>')
+    if last10:
+        sub_parts.append(f'<span>L10 {last10}</span>')
+    if streak:
+        sub_parts.append(f'<span class="gold">{streak}</span>')
+
+    sub_html = '<span class="dot">&middot;</span>'.join(sub_parts)
+
+    # Stat boxes
+    elo = _safe(tr.get("elo"), _safe(te.get("composite_elo")))
+    elo_delta = _safe(tr.get("elo_delta"), "")
+    rank = _safe(tr.get("rank"))
+    proj_wins = _safe(tr.get("proj_wins"))
+
+    stats_html = ""
+    if elo:
+        delta_cls = ' class="delta up"' if str(elo_delta).startswith("+") else ' class="delta"'
+        stats_html += (
+            f'<div class="stat">'
+            f'<div class="v">{int(elo)}</div>'
+            f'<div class="l">ELO</div>'
+            f'<div{delta_cls}>{elo_delta}</div>'
+            f'</div>'
         )
-
-    h_color = _HEALTH_COLORS.get(health, SLATE)
-    dot = (
-        "\u25cf" if health in ("Iron Man", "Durable")
-        else "\u25d0" if health in ("Average", "Unknown")
-        else "\u25cb"
-    )
-    health_html = (
-        f'<span class="tdd-meta" style="color:{h_color}; margin-left:8px;">'
-        f'{dot} {health}</span>'
-    )
-
-    hand_html = ""
-    if hand:
-        hand_html = (
-            f'<span class="tdd-meta" style="min-width:30px;">'
-            f'{hand}HP</span>'
+    if rank:
+        stats_html += (
+            f'<div class="stat">'
+            f'<div class="v neutral">#{int(rank)}</div>'
+            f'<div class="l">Lg Rank</div>'
+            f'<div class="delta">&middot;</div>'
+            f'</div>'
         )
-
-    rank_html = (
-        f'<span class="tdd-context" style="min-width:60px;">'
-        f'#{rank}</span>'
-        if rank > 0 else ""
-    )
+    if proj_wins:
+        stats_html += (
+            f'<div class="stat">'
+            f'<div class="v">{float(proj_wins):.1f}</div>'
+            f'<div class="l">Proj Wins</div>'
+            f'<div class="delta">&middot;</div>'
+            f'</div>'
+        )
 
     return (
-        f'<div style="padding:6px 12px; border-left:3px solid {border_color}; '
-        f'margin-bottom:2px; display:flex; align-items:center; gap:8px; '
-        f'flex-wrap:wrap; opacity:{opacity};">'
-        f'<span class="tdd-player-name" style="font-weight:{"700" if is_first else "400"}; '
-        f'min-width:6rem; flex-shrink:1;">{esc(name)}</span>'
-        f'{hand_html}'
-        f'{rank_html}'
-        f'<span class="tdd-stat-value" style="color:var(--tdd-gold); min-width:2.5rem;">{score * 10:.1f}</span>'
-        f'{arch_html}{health_html}'
+        f'<header class="to-header">'
+        f'<div class="crest" data-team="{esc_attr(abbr)}">'
+        f'{team_logo_html(team_id, size=72) if team_id else esc(abbr)}'
+        f'</div>'
+        f'<div>'
+        f'<div class="name">{esc(division)} &middot; {CURRENT_SEASON} Season</div>'
+        f'<h1>{esc(team_name)}</h1>'
+        f'<div class="sub">{sub_html}</div>'
+        f'</div>'
+        f'<div class="stats">{stats_html}</div>'
+        f'</header>'
+    )
+
+
+def _render_tier_row(tier: str, div_rank: int | None) -> str:
+    tier_cls = "gold" if tier == "Elite" else "sage" if tier == "Contender" else ""
+    pills = [f'<span class="pill {tier_cls}">{tier} Tier</span>']
+    if div_rank:
+        pills.append(f'<span class="pill">Div #{div_rank}</span>')
+    return f'<div class="to-tier-row">{"".join(pills)}</div>'
+
+
+def _render_identity_card(
+    tier: str, rank: int | None, division: str, div_rank: int | None,
+    off_style: str, pit_style: str, age_traj: str,
+) -> str:
+    rows = [
+        ("Tier", tier, "gold" if tier == "Elite" else ""),
+        ("League #", f"{rank} of 30" if rank else "--", "gold" if rank and rank <= 5 else ""),
+        ("Division", f"{division} &middot; #{div_rank}" if div_rank else division, ""),
+        ("Style", " &middot; ".join(filter(None, [off_style, pit_style])) or "--", ""),
+        ("Tempo", age_traj or "--", "slate"),
+    ]
+    rows_html = ""
+    for k, v, cls in rows:
+        v_cls = f' class="v {cls}"' if cls else ' class="v"'
+        rows_html += (
+            f'<div class="to-identity-row">'
+            f'<span class="k">{esc(k)}</span>'
+            f'<span{v_cls}>{v}</span>'
+            f'</div>'
+        )
+    return (
+        f'<div class="to-card-block">'
+        f'{_blk_head("Team Identity", "profile")}'
+        f'<div class="to-identity-list">{rows_html}</div>'
         f'</div>'
     )
 
 
-def _render_depth_chart_tab(
-    selected_team: str,
-    teams_df: pd.DataFrame,
-    *,
-    team_pitchers: pd.DataFrame | None = None,
-    p_proj: pd.DataFrame | None = None,
-) -> None:
-    """Render depth chart from roster.parquet lineup positions."""
-    if team_pitchers is None:
-        team_pitchers = pd.DataFrame()
-    if p_proj is None:
-        p_proj = pd.DataFrame()
+def _render_scores_card(scores: list[dict]) -> str:
+    rows_html = ""
+    for s in scores:
+        v = s["v"]
+        pct = (v / 10) * 100
+        lg_pct = (s["lg_avg"] / 10) * 100
+        blurb = s.get("blurb", "")
+        rows_html += (
+            f'<div class="to-score-row">'
+            f'<span class="lab">{esc(s["label"])}</span>'
+            f'<div class="bar">'
+            f'<div class="fill" style="width:{pct:.0f}%"></div>'
+            f'<div class="lg-tick" style="left:{lg_pct:.0f}%"></div>'
+            f'</div>'
+            f'<div class="right">'
+            f'<span class="v">{v:.1f}</span>'
+            f'<span class="rk">#{s["rank"]}</span>'
+            f'</div>'
+            f'</div>'
+        )
+        if blurb:
+            rows_html += f'<div class="to-score-blurb">{esc(blurb)}</div>'
+    return (
+        f'<div class="to-card-block">'
+        f'{_blk_head("Diamond Scores", "0-10 vs lg avg")}'
+        f'<div class="to-scores">{rows_html}</div>'
+        f'</div>'
+    )
 
-    # Load roster — contains lineup_position + is_depth_starter from
-    # actual current-season lineups (set by precompute run_roster).
-    roster = load_roster()
-    if roster.empty:
-        tdd_info("No roster data available.")
-        return
+
+def _render_radar_card(scores: list[dict]) -> str:
+    """5-axis radar SVG."""
+    labels = [s["label"] for s in scores]
+    values = [s["v"] / 10 for s in scores]
+    lg_vals = [s["lg_avg"] / 10 for s in scores]
+    cx, cy, R = 140, 130, 92
+    n = len(labels)
+
+    def angle(i: int) -> float:
+        return (-math.pi / 2) + (i * 2 * math.pi / n)
+
+    def pt(i: int, r: float) -> tuple[float, float]:
+        return cx + math.cos(angle(i)) * R * r, cy + math.sin(angle(i)) * R * r
+
+    def poly_pts(vs: list[float]) -> str:
+        return " ".join(f"{pt(i, v)[0]:.1f},{pt(i, v)[1]:.1f}" for i, v in enumerate(vs))
+
+    # Grid rings
+    rings = ""
+    for r in (0.25, 0.5, 0.75, 1.0):
+        rings += f'<polygon points="{poly_pts([r]*n)}" fill="none" stroke="#2A2E3A" stroke-width="1"/>'
+
+    # Spokes
+    spokes = ""
+    for i in range(n):
+        x, y = pt(i, 1)
+        spokes += f'<line x1="{cx}" y1="{cy}" x2="{x:.1f}" y2="{y:.1f}" stroke="#2A2E3A" stroke-width="1"/>'
+
+    # League avg polygon
+    lg_poly = f'<polygon points="{poly_pts(lg_vals)}" fill="rgba(123,143,166,0.15)" stroke="#7B8FA6" stroke-width="1" stroke-dasharray="3 3"/>'
+
+    # Team polygon
+    team_poly = f'<polygon points="{poly_pts(values)}" fill="var(--tdd-gold)" fill-opacity="0.18" stroke="var(--tdd-gold)" stroke-width="1.5"/>'
+
+    # Dots
+    dots = ""
+    for i, v in enumerate(values):
+        x, y = pt(i, v)
+        dots += f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="var(--tdd-gold)"/>'
+
+    # Labels
+    label_els = ""
+    for i, lab in enumerate(labels):
+        x, y = pt(i, 1.18)
+        label_els += (
+            f'<text x="{x:.1f}" y="{y:.1f}" text-anchor="middle" dominant-baseline="middle" '
+            f'fill="#7B8FA6" font-size="9.5" font-family="Inter" font-weight="700" '
+            f'letter-spacing="1">{lab.upper()}</text>'
+        )
+
+    svg = (
+        f'<svg viewBox="0 0 280 260">'
+        f'{rings}{spokes}{lg_poly}{team_poly}{dots}{label_els}'
+        f'</svg>'
+    )
+
+    return (
+        f'<div class="to-card-block">'
+        f'{_blk_head("Composite Profile", "team vs lg avg")}'
+        f'<div class="to-radar-wrap">{svg}</div>'
+        f'</div>'
+    )
+
+
+def _render_sw_list(items: list[dict], kind: str) -> str:
+    title = "Strengths" if kind == "up" else "Weaknesses"
+    rows_html = ""
+    for it in items:
+        rows_html += (
+            f'<div class="to-sw-row {kind}">'
+            f'<div class="lab">{esc(it["label"])}'
+            f'<span class="lg">{esc(it["metric"])} &middot; {esc(it["lg"])}</span>'
+            f'</div>'
+            f'<div class="delta">{esc(it["delta"])}</div>'
+            f'<div class="rk">#{it["rank"]}</div>'
+            f'</div>'
+        )
+    return (
+        f'<div class="to-card-block">'
+        f'{_blk_head(title, "vs league avg")}'
+        f'<div class="to-sw-list">{rows_html}</div>'
+        f'</div>'
+    )
+
+
+def _render_top_players(players: list[dict]) -> str:
+    rows_html = ""
+    for i, p in enumerate(players, 1):
+        rk_cls = "rk gold" if p["rank"] <= 5 else "rk sage" if p["rank"] <= 15 else "rk"
+        note_html = f'<span class="il">&middot; {esc(p.get("note", ""))}</span>' if p.get("note") else ""
+        arch_html = f'<span class="arch">{esc(p.get("arch", ""))}</span>' if p.get("arch") else ""
+        rows_html += (
+            f'<div class="to-top-row">'
+            f'<span class="{rk_cls}">{str(i).zfill(2)}</span>'
+            f'<span class="pos">{esc(p["pos"])}</span>'
+            f'<span class="nm">{esc(p["name"])}{arch_html}{note_html}</span>'
+            f'<span class="diamond"><span class="glyph">&#9670;</span>{p["score"]:.1f}</span>'
+            f'<span class="rk">#{p["rank"]}</span>'
+            f'</div>'
+        )
+    return (
+        f'<div class="to-card-block">'
+        f'{_blk_head("Top Players", "league rank")}'
+        f'<div class="to-top-list">{rows_html}</div>'
+        f'</div>'
+    )
+
+
+def _render_depth_field(depth: dict[str, list[dict]]) -> str:
+    """Baseball diamond SVG with positioned player labels."""
+    # SVG background
+    svg = (
+        '<svg viewBox="0 0 540 514" preserveAspectRatio="xMidYMid meet">'
+        '<defs>'
+        '<pattern id="grass" x="0" y="0" width="14" height="14" patternUnits="userSpaceOnUse">'
+        '<rect width="14" height="14" fill="#161922"/>'
+        '<circle cx="2" cy="2" r="0.6" fill="#1f2330"/>'
+        '</pattern>'
+        '</defs>'
+        '<path d="M 30 280 A 240 240 0 0 1 510 280 L 270 514 Z" '
+        'fill="url(#grass)" stroke="#2A2E3A" stroke-width="1"/>'
+        '<polygon points="270,160 400,290 270,420 140,290" '
+        'fill="#1c2030" stroke="#3a3f4f" stroke-width="1"/>'
+        '<circle cx="270" cy="290" r="60" fill="none" stroke="#3a3f4f" '
+        'stroke-width="1" stroke-dasharray="2 4"/>'
+    )
+    # Bases
+    for bx, by in [(270, 160), (400, 290), (270, 420), (140, 290)]:
+        svg += (
+            f'<rect x="{bx-5}" y="{by-5}" width="10" height="10" '
+            f'fill="#C8A96E" transform="rotate(45 {bx} {by})"/>'
+        )
+    # Pitcher mound
+    svg += '<circle cx="270" cy="290" r="9" fill="#2A2E3A" stroke="#3a3f4f"/>'
+    svg += '</svg>'
+
+    # Position labels
+    pos_els = ""
+    for pos, (x, y) in _FIELD_POS.items():
+        players = depth.get(pos, [])
+        if not players:
+            continue
+        starter = players[0]
+        backup = players[1] if len(players) > 1 else None
+        bench_html = ""
+        if backup:
+            last_name = backup["name"].split()[-1]
+            bench_html = f'<span class="bench">-> {esc(last_name)}</span>'
+        pos_els += (
+            f'<div class="to-field-pos" style="left:{x}%;top:{y}%">'
+            f'<div class="pin">{pos}</div>'
+            f'<div class="nm" title="{esc_attr(starter["name"])}">'
+            f'{esc(starter["name"])}'
+            f'<span class="sc">{starter["score"]:.1f}</span>'
+            f'</div>'
+            f'{bench_html}'
+            f'</div>'
+        )
+
+    # DH row below the diamond
+    dh_players = depth.get("DH", [])
+    dh_html = ""
+    if dh_players:
+        dh = dh_players[0]
+        dh_html = (
+            f'<div style="margin-top:0.7rem; display:flex; align-items:center; '
+            f'justify-content:center; gap:0.55rem; '
+            f'font-family:var(--tdd-font-heading); font-size:0.7rem; '
+            f'color:var(--tdd-slate); letter-spacing:1px; '
+            f'border-top:1px solid var(--tdd-dark-border-faint); padding-top:0.55rem;">'
+            f'<span style="background:rgba(123,143,166,0.1); padding:2px 6px; '
+            f'border-radius:2px; font-size:0.58rem; letter-spacing:1.2px; font-weight:700;">DH</span>'
+            f'<span style="color:var(--tdd-cream);">{esc(dh["name"])}</span>'
+            f'<span style="color:var(--tdd-gold); font-weight:800; '
+            f'font-variant-numeric:tabular-nums;">&#9670; {dh["score"]:.1f}</span>'
+            f'</div>'
+        )
+
+    return (
+        f'<div class="to-card-block to-field-card">'
+        f'{_blk_head("Depth Chart", "starter / next-up")}'
+        f'<div class="to-field-wrap">{svg}{pos_els}</div>'
+        f'{dh_html}'
+        f'</div>'
+    )
+
+
+def _render_pitching_staff(rotation: list[dict], bullpen: list[dict]) -> str:
+    def _row(slot: str, p: dict) -> str:
+        hand = p.get("hand", "")
+        hand_html = f'<span class="h">{hand}HP</span>' if hand else ""
+        era = p.get("era")
+        era_str = f"{era:.2f}" if era is not None else "--"
+        arch = p.get("arch", "")
+        return (
+            f'<div class="to-staff-row">'
+            f'<span class="slot">{esc(slot)}</span>'
+            f'<span class="nm">{esc(p["name"])} {hand_html}</span>'
+            f'<span class="era">{era_str}</span>'
+            f'<span class="sc">{p["score"]:.1f}</span>'
+            f'<span class="arch">{esc(arch)}</span>'
+            f'</div>'
+        )
+
+    rot_html = ""
+    for i, p in enumerate(rotation):
+        rot_html += _row(f"SP{i+1}", p)
+
+    bp_html = ""
+    for i, p in enumerate(bullpen[:4]):
+        slot = "CL" if i == 0 else "SU" if i == 1 else "RP"
+        bp_html += _row(slot, p)
+
+    return (
+        f'<div class="to-card-block">'
+        f'{_blk_head("Pitching Staff", "rotation & bullpen")}'
+        f'<div class="to-staff-divider">Rotation</div>'
+        f'<div class="to-staff">{rot_html}</div>'
+        f'<div class="to-staff-divider">Bullpen &middot; High Leverage</div>'
+        f'<div class="to-staff">{bp_html}</div>'
+        f'</div>'
+    )
+
+
+def _render_health_card(il_list: list[dict], il_days: int | None, avg_age: float | None) -> str:
+    org_cells = ""
+    if il_days is not None:
+        org_cells += (
+            f'<div class="to-org-cell">'
+            f'<span class="v">{il_days:,}</span>'
+            f'<span class="l">IL Days \'{PRIOR_SEASON % 100}</span>'
+            f'</div>'
+        )
+    if avg_age is not None:
+        org_cells += (
+            f'<div class="to-org-cell">'
+            f'<span class="v">{avg_age:.1f}</span>'
+            f'<span class="l">Avg Age</span>'
+            f'</div>'
+        )
+
+    il_rows = ""
+    for p in il_list:
+        il_rows += (
+            f'<div class="to-il-row">'
+            f'<span class="nm">{esc(p["name"])}<span class="pos">{esc(p.get("pos", ""))}</span></span>'
+            f'<span class="status">{esc(p.get("status", "IL"))}</span>'
+            f'<span class="note">{esc(p.get("note", ""))}</span>'
+            f'</div>'
+        )
+
+    return (
+        f'<div class="to-card-block">'
+        f'{_blk_head("Health / Injury List")}'
+        f'<div class="to-org-grid">{org_cells}</div>'
+        f'<div class="to-il-list">{il_rows}</div>'
+        f'</div>'
+    )
+
+
+def _render_org_card(
+    pct_hg: float | None, farm_avg: float | None,
+    n_ranked: int | None, top100: int | None,
+) -> str:
+    cells = ""
+    if pct_hg is not None:
+        cells += f'<div class="to-org-cell"><span class="v">{pct_hg:.0%}</span><span class="l">Homegrown</span></div>'
+    if farm_avg is not None:
+        cells += f'<div class="to-org-cell"><span class="v">{farm_avg:.1f}</span><span class="l">Farm Score</span></div>'
+    if n_ranked is not None:
+        cells += f'<div class="to-org-cell"><span class="v">{int(n_ranked)}</span><span class="l">Ranked</span></div>'
+    if top100 is not None and int(top100) > 0:
+        cells += f'<div class="to-org-cell"><span class="v">{int(top100)}</span><span class="l">Top 100</span></div>'
+
+    return (
+        f'<div class="to-card-block">'
+        f'{_blk_head("Organization / Farm")}'
+        f'<div class="to-org-grid">{cells}</div>'
+        f'</div>'
+    )
+
+
+def _render_league_ranks(
+    rankings: pd.DataFrame, selected_team: str,
+) -> str:
+    if rankings.empty:
+        return ""
+
+    header = (
+        '<div class="to-league-row head">'
+        '<span class="rk">RK</span>'
+        '<span class="ab">TEAM</span>'
+        '<span class="nm">Tier</span>'
+        '<span class="v">Score</span>'
+        '<span class="v">Off</span>'
+        '<span class="v">Pit</span>'
+        '<span class="v">Def</span>'
+        '</div>'
+    )
+
+    rows_html = ""
+    display = rankings.head(8)
+    for _, r in display.iterrows():
+        abbr = r.get("abbreviation", "")
+        rank = _safe(r.get("rank"), 0)
+        tier = _safe(r.get("tier"), "")
+        comp = _safe(r.get("composite_score"), 0)
+        off = _safe(r.get("offense_score"), 0)
+        pit = _safe(r.get("pitching_score"), 0)
+        defense = _safe(r.get("defense_score"), 0)
+        is_this = abbr == selected_team
+        row_cls = "to-league-row this" if is_this else "to-league-row"
+        rk_cls = "rk top" if rank <= 4 else "rk"
+        v_cls = "v gold" if is_this else "v"
+        rows_html += (
+            f'<div class="{row_cls}">'
+            f'<span class="{rk_cls}">{int(rank)}</span>'
+            f'<span class="ab">{esc(abbr)}</span>'
+            f'<span class="nm">{esc(tier)}</span>'
+            f'<span class="{v_cls}">{float(comp):.1f}</span>'
+            f'<span class="v">{float(off):.1f}</span>'
+            f'<span class="v">{float(pit):.1f}</span>'
+            f'<span class="v">{float(defense):.1f}</span>'
+            f'</div>'
+        )
+
+    return f'<div class="to-league-strip">{header}{rows_html}</div>'
+
+
+# ── Data assembly helpers ─────────────────────────────────────────────
+
+def _build_scores(
+    tp: pd.Series, all_tp: pd.DataFrame, all_tr: pd.DataFrame,
+    selected_team: str,
+) -> list[dict]:
+    """Build diamond sub-scores list from team profiles + rankings."""
+    scores = []
+
+    for col, label in _SCORE_KEYS:
+        v = _safe(tp.get(col) if not tp.empty else None, 5.0)
+        # Compute league rank
+        rank = 15
+        if col in all_tp.columns:
+            ranked = all_tp[col].rank(ascending=False, method="min")
+            idx = all_tp.index[all_tp["abbreviation"] == selected_team]
+            if len(idx) > 0:
+                rank = int(ranked.loc[idx].iloc[0])
+        scores.append({
+            "key": col, "label": label,
+            "v": float(v), "rank": rank, "lg_avg": 5.0,
+        })
+
+    # Defense from team_rankings
+    for col, label in [("defense_score", "Fielding"), ("health_depth_score", "Depth")]:
+        v = 5.0
+        rank = 15
+        if col in all_tr.columns:
+            tr_row = all_tr[all_tr["abbreviation"] == selected_team]
+            if not tr_row.empty:
+                v = _safe(tr_row.iloc[0].get(col), 5.0)
+            ranked = all_tr[col].rank(ascending=False, method="min")
+            idx = all_tr.index[all_tr["abbreviation"] == selected_team]
+            if len(idx) > 0:
+                rank = int(ranked.loc[idx].iloc[0])
+        scores.append({
+            "key": col, "label": label,
+            "v": float(v), "rank": rank, "lg_avg": 5.0,
+        })
+
+    return scores
+
+
+def _build_strengths_weaknesses(tr: pd.Series) -> tuple[list[dict], list[dict]]:
+    """Build strengths and weaknesses lists from team_rankings data."""
+    strengths = []
+    weaknesses = []
+
+    # Define metrics: (field, label, format, lg_avg, higher_is_better)
+    metrics = [
+        ("rpg", "Run scoring", "{:.2f} R/G", 4.5, True),
+        ("hr_per_game", "Power", "{:.2f} HR/G", 1.12, True),
+        ("k_per_game", "Strikeout stuff", "{:.1f} K/G", 8.7, True),
+        ("ra_per_game", "Run prevention", "{:.2f} RA/G", 4.5, False),
+        ("team_oaa", "Defense (OAA)", "{:+.0f} OAA", 0, True),
+        ("avg_age", "Roster age", "{:.1f} yrs", 28.4, False),
+    ]
+
+    for field, label, fmt, lg_avg, higher_better in metrics:
+        val = _safe(tr.get(field))
+        if val is None:
+            continue
+        val = float(val)
+        diff = val - lg_avg
+        if not higher_better:
+            diff = -diff
+
+        # Compute display delta
+        raw_diff = val - lg_avg
+        if isinstance(raw_diff, float):
+            delta_str = f"{raw_diff:+.2f}" if abs(raw_diff) < 10 else f"{raw_diff:+.0f}"
+        else:
+            delta_str = f"{raw_diff:+.0f}"
+
+        entry = {
+            "label": label,
+            "metric": fmt.format(val),
+            "lg": f"{lg_avg} lg",
+            "delta": delta_str,
+            "rank": 15,  # placeholder
+        }
+
+        if diff > 0:
+            strengths.append(entry)
+        else:
+            weaknesses.append(entry)
+
+    return strengths[:4], weaknesses[:4]
+
+
+def _build_top_players(
+    selected_team: str, team_pids: set[int],
+) -> list[dict]:
+    """Build top 10 roster players sorted by score."""
+    from lib.diamond_rating import score_to_diamonds
+
+    hr = load_rankings("hitters")
+    pr = load_rankings("pitchers")
+    h_arch = load_hitter_archetypes()
+    p_arch = load_pitcher_archetypes()
+
+    h_arch_map = {}
+    if not h_arch.empty and "batter_id" in h_arch.columns:
+        h_arch_map = dict(zip(h_arch["batter_id"].astype(int), h_arch["archetype_name"]))
+    p_arch_map = {}
+    if not p_arch.empty and "pitcher_id" in p_arch.columns:
+        p_arch_map = dict(zip(p_arch["pitcher_id"].astype(int), p_arch["archetype_name"]))
+
+    players: list[dict] = []
+
+    if not hr.empty:
+        pid_col = "batter_id" if "batter_id" in hr.columns else "player_id"
+        score_col = next((c for c in ("current_value_score", "tdd_value_score") if c in hr.columns), None)
+        if score_col:
+            team_h = hr[hr[pid_col].isin(team_pids)]
+            for _, row in team_h.iterrows():
+                pid = int(row[pid_col])
+                players.append({
+                    "name": row.get("batter_name", ""),
+                    "pos": row.get("position", ""),
+                    "rank": int(row.get("pos_rank", 0) or 0),
+                    "score": score_to_diamonds(float(row[score_col])),
+                    "arch": h_arch_map.get(pid, ""),
+                })
+
+    if not pr.empty:
+        pid_col = "pitcher_id" if "pitcher_id" in pr.columns else "player_id"
+        score_col = next((c for c in ("current_value_score", "tdd_value_score") if c in pr.columns), None)
+        if score_col:
+            team_p = pr[pr[pid_col].isin(team_pids)]
+            for _, row in team_p.iterrows():
+                pid = int(row[pid_col])
+                players.append({
+                    "name": row.get("pitcher_name", ""),
+                    "pos": row.get("role", "P"),
+                    "rank": int(row.get("role_rank", 0) or 0),
+                    "score": score_to_diamonds(float(row[score_col])),
+                    "arch": p_arch_map.get(pid, ""),
+                })
+
+    players.sort(key=lambda x: x["score"], reverse=True)
+    return players[:10]
+
+
+def _build_depth_chart(
+    roster: pd.DataFrame, selected_team: str,
+) -> dict[str, list[dict]]:
+    """Build depth chart from roster data."""
+    from lib.diamond_rating import score_to_diamonds
 
     team_roster = roster[roster["team_abbr"] == selected_team].copy()
     if team_roster.empty:
-        tdd_info("No roster data for this team.")
-        return
+        return {}
 
-    team_pids = set(team_roster["player_id"].astype(int))
+    hr = load_rankings("hitters")
+    pr = load_rankings("pitchers")
 
-    # Pitcher rankings for rotation/bullpen
-    p_rank = load_rankings("pitchers")
-    team_p = p_rank[p_rank["pitcher_id"].isin(team_pids)].copy() if not p_rank.empty else pd.DataFrame()
-    p_arch = load_pitcher_archetypes()
-    if not p_arch.empty and not team_p.empty:
-        team_p = team_p.merge(
-            p_arch[["pitcher_id", "archetype_name"]].drop_duplicates("pitcher_id"),
-            on="pitcher_id", how="left",
-        )
+    # Build score lookup
+    score_map: dict[int, float] = {}
+    if not hr.empty:
+        pid_col = "batter_id" if "batter_id" in hr.columns else "player_id"
+        score_col = next((c for c in ("current_value_score", "tdd_value_score") if c in hr.columns), None)
+        if score_col:
+            for _, r in hr.iterrows():
+                score_map[int(r[pid_col])] = score_to_diamonds(float(r[score_col]))
 
-    # --- Position Depth Chart ---
-    st.markdown("### Position Players")
+    if not pr.empty:
+        pid_col = "pitcher_id" if "pitcher_id" in pr.columns else "player_id"
+        score_col = next((c for c in ("current_value_score", "tdd_value_score") if c in pr.columns), None)
+        if score_col:
+            for _, r in pr.iterrows():
+                score_map[int(r[pid_col])] = score_to_diamonds(float(r[score_col]))
 
     has_lineup = "lineup_position" in team_roster.columns
     has_starter = "is_depth_starter" in team_roster.columns
 
+    depth: dict[str, list[dict]] = {}
     for pos in _HITTER_POSITIONS:
-        # Starter: player flagged is_depth_starter at this lineup_position
-        starter_row = None
-        bench_at_pos: list[pd.Series] = []
-
+        entries: list[dict] = []
         if has_lineup and has_starter:
-            starters_here = team_roster[
+            starters = team_roster[
                 (team_roster["lineup_position"] == pos)
                 & (team_roster["is_depth_starter"] == True)  # noqa: E712
             ]
-            if not starters_here.empty:
-                starter_row = starters_here.iloc[0]
-
-            # Bench players who have also started at this position
-            bench_here = team_roster[
+            for _, row in starters.iterrows():
+                pid = int(row["player_id"])
+                entries.append({
+                    "name": row["player_name"],
+                    "score": score_map.get(pid, 5.0),
+                })
+            bench = team_roster[
                 (team_roster["lineup_position"] == pos)
                 & (team_roster["is_depth_starter"] == False)  # noqa: E712
             ]
-            bench_at_pos = [row for _, row in bench_here.iterrows()]
-
-        if starter_row is None and not bench_at_pos:
-            st.markdown(
-                f'<div style="display:flex; align-items:center; gap:0.5rem; '
-                f'padding:0.4rem 0; border-bottom:1px solid var(--tdd-dark-border-faint);">'
-                f'<span style="color:var(--tdd-gold); font-weight:700; '
-                f'min-width:2.2rem; font-size:0.9rem;">{pos}</span>'
-                f'<span class="tdd-context">No data</span>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-            continue
-
-        player_parts: list[str] = []
-        if starter_row is not None:
-            name = starter_row["player_name"]
-            player_parts.append(
-                f'<span style="color:var(--tdd-cream); font-weight:600; '
-                f'font-size:0.88rem;">{esc(name)}</span>'
-            )
-        for brow in bench_at_pos[:3]:
-            player_parts.append(
-                f'<span class="tdd-context">{esc(brow["player_name"])}</span>'
-            )
-
-        st.markdown(
-            f'<div style="display:flex; align-items:center; gap:0.5rem; '
-            f'padding:0.4rem 0; border-bottom:1px solid var(--tdd-dark-border-faint); '
-            f'flex-wrap:wrap;">'
-            f'<span style="color:var(--tdd-gold); font-weight:700; '
-            f'min-width:2.2rem; font-size:0.9rem;">{pos}</span>'
-            + " <span style='color:var(--tdd-slate); margin:0 0.2rem;'>\u2192</span> ".join(player_parts)
-            + '</div>',
-            unsafe_allow_html=True,
-        )
-
-    # --- Pitching Depth ---
-    _render_pitching_depth(team_p)
-
-    # --- Rotation / Bullpen Profiles ---
-    if not team_pitchers.empty and not p_proj.empty:
-        team_sp = team_pitchers[team_pitchers["is_starter"] == True]  # noqa: E712
-        team_rp = team_pitchers[team_pitchers["is_starter"] == False]  # noqa: E712
-        lg_sp = p_proj[p_proj["is_starter"] == True]  # noqa: E712
-        lg_rp = p_proj[p_proj["is_starter"] == False]  # noqa: E712
-
-        _k_col = "projected_k_rate"
-        _bb_col = "projected_bb_rate"
-
-        if not team_sp.empty:
-            st.markdown(f"### Rotation Profile")
-            _render_staff_metrics(team_sp, lg_sp, _k_col, _bb_col)
-        if not team_rp.empty:
-            st.markdown(f"### Bullpen Profile")
-            _render_staff_metrics(team_rp, lg_rp, _k_col, _bb_col)
-
-
-def _render_pitching_depth(team_p: pd.DataFrame) -> None:
-    """Render pitching depth — rotation + bullpen."""
-    if team_p.empty:
-        tdd_info("No ranked pitchers found for this team.")
-        return
-    st.markdown("### Pitching Depth")
-
-    for label, subset in [
-        ("Starting Rotation",
-         team_p[team_p["role"] == "SP"].sort_values("role_rank").head(5)),
-        ("Bullpen",
-         team_p[team_p["role"] == "RP"].sort_values("tdd_value_score", ascending=False)),
-    ]:
-        if subset.empty:
-            continue
-        st.markdown(
-            f'<div class="tdd-section-hdr" style="margin-bottom:4px; padding-left:15px;">{label}</div>',
-            unsafe_allow_html=True,
-        )
-        rows_html = ""
-        for i, (_, row) in enumerate(subset.iterrows()):
-            rows_html += _player_row_html(
-                name=row["pitcher_name"], rank=int(row["role_rank"]),
-                score=row["tdd_value_score"],
-                arch=row.get("archetype_name", ""),
-                health=row.get("health_label", "Unknown"),
-                is_first=i == 0, hand=row.get("pitch_hand", ""),
-            )
-        st.markdown(
-            f'<div style="margin-bottom:14px;">{rows_html}</div>',
-            unsafe_allow_html=True,
-        )
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# TRADE SIMULATOR TAB (unchanged from original)
-# ═══════════════════════════════════════════════════════════════════════
-
-def _identify_weaknesses(
-    selected_team: str, teams_df: pd.DataFrame,
-) -> list[dict]:
-    """Identify positional weaknesses — best player pos_rank > 15."""
-    h_rank = load_rankings("hitters")
-    if h_rank.empty:
-        return []
-    team_pids = set(
-        teams_df[teams_df["team_abbr"] == selected_team]["player_id"].astype(int)
-    )
-    team_h = h_rank[h_rank["batter_id"].isin(team_pids)]
-
-    weaknesses: list[dict] = []
-    for pos in _HITTER_POSITIONS:
-        if pos == "DH":
-            continue
-        pos_players = team_h[team_h["position"] == pos]
-        if pos_players.empty:
-            weaknesses.append({"position": pos, "best_rank": None, "player": None})
-        else:
-            best = pos_players.loc[pos_players["pos_rank"].idxmin()]
-            if best["pos_rank"] > 15:
-                weaknesses.append({
-                    "position": pos,
-                    "best_rank": int(best["pos_rank"]),
-                    "player": best["batter_name"],
+            for _, row in bench.iterrows():
+                pid = int(row["player_id"])
+                entries.append({
+                    "name": row["player_name"],
+                    "score": score_map.get(pid, 4.0),
                 })
-    return weaknesses
+        if entries:
+            depth[pos] = entries
+
+    return depth
 
 
-def _find_trade_targets(
-    selected_team: str, teams_df: pd.DataFrame,
-    target_position: str, trade_capital: float,
-    offered_positions: list[str] | None = None,
-    tolerance: float = 0.15,
-) -> pd.DataFrame:
-    """Find league-wide trade targets at a position within value tolerance."""
-    h_rank = load_rankings("hitters")
-    if h_rank.empty:
-        return pd.DataFrame()
+def _build_pitching_staff(
+    team_pids: set[int],
+) -> tuple[list[dict], list[dict]]:
+    """Build rotation and bullpen lists."""
+    from lib.diamond_rating import score_to_diamonds
 
-    other_pids = set(
-        teams_df[teams_df["team_abbr"] != selected_team]["player_id"].astype(int)
-    )
-    candidates = h_rank[
-        (h_rank["batter_id"].isin(other_pids))
-        & (h_rank["position"] == target_position)
-    ].copy()
+    pr = load_rankings("pitchers")
+    p_arch = load_pitcher_archetypes()
+    p_proj = load_projections("pitcher")
 
-    if candidates.empty or trade_capital <= 0:
-        return pd.DataFrame()
+    p_arch_map = {}
+    if not p_arch.empty and "pitcher_id" in p_arch.columns:
+        p_arch_map = dict(zip(p_arch["pitcher_id"].astype(int), p_arch["archetype_name"]))
 
-    low = trade_capital * (1 - tolerance)
-    high = trade_capital * (1 + tolerance)
-    matches = candidates[
-        (candidates["tdd_value_score"] >= low) & (candidates["tdd_value_score"] <= high)
-    ].copy()
+    if pr.empty:
+        return [], []
 
-    if matches.empty:
-        candidates["_diff"] = (candidates["tdd_value_score"] - trade_capital).abs()
-        matches = candidates.nsmallest(10, "_diff").drop(columns="_diff")
+    pid_col = "pitcher_id" if "pitcher_id" in pr.columns else "player_id"
+    score_col = next((c for c in ("current_value_score", "tdd_value_score") if c in pr.columns), None)
+    if not score_col:
+        return [], []
 
-    pid_to_team = dict(zip(
-        teams_df["player_id"].astype(int), teams_df["team_abbr"],
-    ))
-    matches["team"] = matches["batter_id"].map(pid_to_team)
-    matches["value_match_pct"] = (
-        1 - (matches["tdd_value_score"] - trade_capital).abs()
-        / max(trade_capital, 0.01)
-    ) * 100
+    team_p = pr[pr[pid_col].isin(team_pids)].copy()
+    if team_p.empty:
+        return [], []
 
-    h_arch = load_hitter_archetypes()
-    if not h_arch.empty:
-        arch_cols = h_arch[["batter_id", "archetype_name"]].drop_duplicates("batter_id")
-        if "archetype_name" in matches.columns:
-            matches = matches.drop(columns="archetype_name")
-        matches = matches.merge(arch_cols, on="batter_id", how="left")
+    # Determine starter status
+    is_starter_col = "is_starter" if "is_starter" in team_p.columns else None
+    role_col = "role" if "role" in team_p.columns else None
 
-    if offered_positions:
-        hitter_pos = [p for p in offered_positions if p in _HITTER_POSITIONS]
-        fit_tiers: list[str] = []
-        for _, row in matches.iterrows():
-            partner_team = row.get("team", "")
-            if not partner_team or not hitter_pos:
-                fit_tiers.append("Low")
-                continue
-            partner_pids = set(
-                teams_df[teams_df["team_abbr"] == partner_team]["player_id"].astype(int)
-            )
-            partner_h = h_rank[h_rank["batter_id"].isin(partner_pids)]
-            tier = "Low"
-            for pos in hitter_pos:
-                pos_players = partner_h[partner_h["position"] == pos]
-                if pos_players.empty:
-                    tier = "High"
-                    break
-                best_rank = int(pos_players["pos_rank"].min())
-                if best_rank > 15:
-                    tier = "High"
-                    break
-                elif best_rank > 10 and tier != "High":
-                    tier = "Medium"
-            fit_tiers.append(tier)
-        matches["trade_fit"] = fit_tiers
-    else:
-        matches["trade_fit"] = "Low"
+    # Get ERA from projections
+    era_map: dict[int, float] = {}
+    hand_map: dict[int, str] = {}
+    if not p_proj.empty:
+        for _, r in p_proj.iterrows():
+            pid = int(r.get("pitcher_id", 0))
+            # Try projected ERA or actual ERA
+            era = _safe(r.get("projected_era"), _safe(r.get("era")))
+            if era is not None:
+                era_map[pid] = float(era)
+            throws = _safe(r.get("throws"))
+            if throws:
+                hand_map[pid] = str(throws)[0]
 
-    fit_order = {"High": 0, "Medium": 1, "Low": 2}
-    matches["_fit_order"] = matches["trade_fit"].map(fit_order)
-    return matches.sort_values(["_fit_order", "pos_rank"]).drop(columns="_fit_order").head(10)
+    rotation: list[dict] = []
+    bullpen: list[dict] = []
+
+    for _, row in team_p.iterrows():
+        pid = int(row[pid_col])
+        entry = {
+            "name": row.get("pitcher_name", ""),
+            "score": score_to_diamonds(float(row[score_col])),
+            "era": era_map.get(pid),
+            "hand": hand_map.get(pid, ""),
+            "arch": p_arch_map.get(pid, ""),
+        }
+
+        is_sp = False
+        if is_starter_col and pd.notna(row.get(is_starter_col)):
+            is_sp = bool(row[is_starter_col])
+        elif role_col and pd.notna(row.get(role_col)):
+            is_sp = str(row[role_col]).upper() in ("SP", "STARTER")
+
+        if is_sp:
+            rotation.append(entry)
+        else:
+            bullpen.append(entry)
+
+    rotation.sort(key=lambda x: x["score"], reverse=True)
+    bullpen.sort(key=lambda x: x["score"], reverse=True)
+
+    return rotation[:5], bullpen[:6]
 
 
-def _render_trade_simulator_tab(
-    selected_team: str, teams_df: pd.DataFrame,
-) -> None:
-    """Render the Trade Simulator tab."""
-    st.markdown(
-        f'<div style="background:{EMBER}22; border:1px solid {EMBER}44; '
-        f'border-radius:6px; padding:0.6rem 1rem; margin-bottom:1rem; '
-        f'font-size:0.85rem; color:{EMBER}; font-weight:600;">'
-        f'WORK IN PROGRESS — This feature is still being refined.</div>',
-        unsafe_allow_html=True,
-    )
-    weaknesses = _identify_weaknesses(selected_team, teams_df)
+def _build_il_list(selected_team: str) -> list[dict]:
+    """Build injury list from preseason injuries data."""
+    inj = load_preseason_injuries()
+    if inj.empty:
+        return []
 
-    st.markdown("#### Positional Needs")
-    if weaknesses:
-        pills_html = ""
-        for w in weaknesses:
-            suffix = f' (#{w["best_rank"]})' if w["best_rank"] else " (empty)"
-            pills_html += (
-                f'<span class="tdd-badge" style="background:{EMBER}22; color:{EMBER}; '
-                f'border:1px solid {EMBER}44; margin-right:6px;">'
-                f'{w["position"]}{suffix}</span> '
-            )
-        st.markdown(
-            f'<div style="margin-bottom:16px;">{pills_html}</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            f'<span style="color:var(--tdd-sage);">'
-            f'No significant positional weaknesses detected.</span>',
-            unsafe_allow_html=True,
-        )
-
-    st.markdown("---")
-
-    st.markdown("#### Select Trade Assets")
-    h_rank = load_rankings("hitters")
-    p_rank = load_rankings("pitchers")
-    team_pids = set(
-        teams_df[teams_df["team_abbr"] == selected_team]["player_id"].astype(int)
-    )
-
-    assets: list[dict] = []
-    if not h_rank.empty:
-        team_h = h_rank[h_rank["batter_id"].isin(team_pids)].sort_values(
-            "tdd_value_score", ascending=False,
-        )
-        for _, row in team_h.iterrows():
-            assets.append({
-                "label": (
-                    f'{row["batter_name"]} ({row["position"]}, '
-                    f'#{int(row["pos_rank"])}) '
-                    f'\u2014 {row["tdd_value_score"]:.2f}'
-                ),
-                "value": row["tdd_value_score"],
-                "position": row["position"],
-            })
-    if not p_rank.empty:
-        team_p = p_rank[p_rank["pitcher_id"].isin(team_pids)].sort_values(
-            "tdd_value_score", ascending=False,
-        )
-        for _, row in team_p.iterrows():
-            assets.append({
-                "label": (
-                    f'{row["pitcher_name"]} ({row["role"]}, '
-                    f'#{int(row["role_rank"])}) '
-                    f'\u2014 {row["tdd_value_score"]:.2f}'
-                ),
-                "value": row["tdd_value_score"],
-                "position": row["role"],
-            })
-
-    if not assets:
-        tdd_info("No ranked players available for trade selection.")
-        return
-
-    selected_assets = st.multiselect(
-        "Players to offer", options=[a["label"] for a in assets], key="trade_assets",
-    )
-    trade_capital = sum(a["value"] for a in assets if a["label"] in selected_assets)
-    st.markdown(
-        f'<div style="padding:8px 16px; background:{GOLD}15; '
-        f'border:1px solid {GOLD}44; border-radius:8px; margin:8px 0 16px;">'
-        f'<span class="tdd-stat-value">Trade Capital:</span> '
-        f'<span style="color:var(--tdd-gold); font-weight:700; font-size:1.1rem;">'
-        f'{trade_capital:.2f}</span></div>',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("#### Target Need")
-    weakness_positions = [w["position"] for w in weaknesses]
-    all_positions = weakness_positions + [
-        p for p in _HITTER_POSITIONS if p not in weakness_positions
+    team_inj = inj[
+        (inj["team_abbr"] == selected_team)
+        & (inj["est_missed_games"] > 0)
     ]
-    target_pos = st.selectbox("Position to upgrade", all_positions, key="trade_target_pos")
-
-    if st.button("Find Trade Matches", type="primary", disabled=trade_capital <= 0):
-        offered_positions = [
-            a["position"] for a in assets
-            if a["label"] in selected_assets and "position" in a
-        ]
-        matches = _find_trade_targets(
-            selected_team, teams_df, target_pos, trade_capital,
-            offered_positions=offered_positions,
-        )
-        if matches.empty:
-            tdd_info(f"No trade candidates found at {target_pos}.")
-        else:
-            _render_trade_results(matches, trade_capital, target_pos, selected_team, teams_df)
-
-
-def _render_trade_results(
-    matches: pd.DataFrame, trade_capital: float,
-    target_pos: str, selected_team: str, teams_df: pd.DataFrame,
-) -> None:
-    """Display trade match results table."""
-    st.markdown(f"#### Trade Candidates \u2014 {target_pos}")
-
-    h_rank = load_rankings("hitters")
-    team_pids = set(
-        teams_df[teams_df["team_abbr"] == selected_team]["player_id"].astype(int)
-    )
-    team_at_pos = h_rank[
-        (h_rank["batter_id"].isin(team_pids)) & (h_rank["position"] == target_pos)
-    ]
-    current_best_rank = int(team_at_pos["pos_rank"].min()) if not team_at_pos.empty else None
-
-    rows_html = ""
-    for _, row in matches.iterrows():
-        name = row["batter_name"]
-        team = row.get("team", "?")
-        rank = int(row["pos_rank"])
-        score = row["tdd_value_score"]
-        match_pct = row.get("value_match_pct", 0)
-        arch = row.get("archetype_name", "")
-        trade_fit = row.get("trade_fit", "Low")
-        fit_color = GOLD if trade_fit == "High" else SAGE if trade_fit == "Medium" else SLATE
-        fit_label = "Likely" if trade_fit == "High" else "Possible" if trade_fit == "Medium" else "Unlikely"
-
-        if current_best_rank and rank < current_best_rank:
-            upgrade = f'<span style="color:{POSITIVE}; font-weight:600;">\u2191 +{current_best_rank - rank}</span>'
-        elif current_best_rank:
-            upgrade = f'<span style="color:var(--tdd-slate);">\u2014</span>'
-        else:
-            upgrade = f'<span style="color:{POSITIVE}; font-weight:600;">\u2191 New</span>'
-
-        arch_html = ""
-        if pd.notna(arch) and arch:
-            color = _PILL_COLORS.get(arch, SLATE)
-            arch_html = (
-                f'<span class="tdd-badge" style="background:{color}22; color:{color}; '
-                f'border:1px solid {color}44;">{arch}</span>'
-            )
-
-        m_color = GOLD if match_pct >= 85 else SAGE if match_pct >= 70 else EMBER
-
-        rows_html += (
-            f'<tr>'
-            f'<td class="tdd-player-name" style="padding:6px 10px;">{esc(name)}</td>'
-            f'<td class="tdd-stat-label" style="padding:6px 10px;" data-team="{esc_attr(team)}">{esc(team)}</td>'
-            f'<td style="padding:6px 10px;">{arch_html}</td>'
-            f'<td class="tdd-stat-value" style="padding:6px 10px;color:var(--tdd-gold);">{score:.2f}</td>'
-            f'<td style="padding:6px 10px;">#{rank}</td>'
-            f'<td style="padding:6px 10px;color:{m_color};">{match_pct:.0f}%</td>'
-            f'<td style="padding:6px 10px;">{upgrade}</td>'
-            f'<td style="padding:6px 10px;">'
-            f'<span class="tdd-badge" style="background:{fit_color}22; color:{fit_color}; '
-            f'border:1px solid {fit_color}44;">'
-            f'{fit_label}</span></td>'
-            f'</tr>'
-        )
-
-    table_html = (
-        f'<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">'
-        f'<thead><tr style="border-bottom:1px solid {SLATE}44;">'
-        f'<th class="tdd-section-hdr" style="text-align:left;padding:6px 10px;">Player</th>'
-        f'<th class="tdd-stat-label" style="padding:6px 10px;">Team</th>'
-        f'<th class="tdd-stat-label" style="padding:6px 10px;">Archetype</th>'
-        f'<th class="tdd-stat-label" style="padding:6px 10px;">TDD Score</th>'
-        f'<th class="tdd-stat-label" style="padding:6px 10px;">Pos Rank</th>'
-        f'<th class="tdd-stat-label" style="padding:6px 10px;">Match %</th>'
-        f'<th class="tdd-stat-label" style="padding:6px 10px;">Upgrade</th>'
-        f'<th class="tdd-stat-label" style="padding:6px 10px;">Trade Fit</th>'
-        f'</tr></thead><tbody>{rows_html}</tbody></table>'
-    )
-    st.markdown(f'<div class="insight-card">{table_html}</div>', unsafe_allow_html=True)
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# ROSTER TAB — original overview content (identity, profiles, tables)
-# ═══════════════════════════════════════════════════════════════════════
-
-def _render_staff_metrics(
-    team_subset: pd.DataFrame, lg_subset: pd.DataFrame,
-    k_col: str, bb_col: str,
-) -> None:
-    """Render strengths/weaknesses for a pitcher subset."""
-    pitch_metrics: list[dict] = []
-    for label, key, higher_better in [
-        ("K%", k_col, True), ("BB%", bb_col, False),
-        ("Whiff%", "whiff_rate", True), ("Avg Velo", "avg_velo", True),
-        ("Zone%", "zone_pct", True), ("GB%", "gb_pct", True),
-    ]:
-        if key not in team_subset.columns or key not in lg_subset.columns:
-            continue
-        team_avg = team_subset[key].dropna().mean()
-        league_avg = lg_subset[key].dropna().mean()
-        if pd.isna(team_avg) or pd.isna(league_avg) or league_avg == 0:
-            continue
-        diff = team_avg - league_avg
-        if key in (k_col, bb_col, "whiff_rate", "zone_pct", "gb_pct"):
-            diff_str = f"{diff * 100:+.1f}pp"
-            team_str = f"{team_avg * 100:.1f}%"
-            lg_str = f"{league_avg * 100:.1f}%"
-        else:
-            diff_str = f"{diff:+.1f}"
-            team_str = f"{team_avg:.1f}"
-            lg_str = f"{league_avg:.1f}"
-        is_good = (diff > 0 and higher_better) or (diff < 0 and not higher_better)
-        color = POSITIVE if is_good else NEGATIVE
-        pitch_metrics.append({
-            "Metric": label, "Team": team_str, "League Avg": lg_str,
-            "Diff": diff_str, "_color": color, "_is_good": is_good,
+    result = []
+    for _, row in team_inj.iterrows():
+        pos = _safe(row.get("position"), "")
+        result.append({
+            "name": row.get("player_name", ""),
+            "pos": pos,
+            "status": f"IL-{int(row.get('il_type', 15))}" if _safe(row.get("il_type")) else "IL",
+            "note": _safe(row.get("injury_description"), ""),
         })
+    return result[:5]
 
-    if not pitch_metrics:
-        return
 
-    strengths = [m for m in pitch_metrics if m["_is_good"]]
-    weaknesses_p = [m for m in pitch_metrics if not m["_is_good"]]
-    col_s, col_w = st.columns(2)
-    with col_s:
-        st.markdown(
-            f'<div style="color:{POSITIVE}; font-weight:600; margin-bottom:8px;">Strengths</div>',
-            unsafe_allow_html=True,
-        )
-        if strengths:
-            for m in strengths:
-                st.markdown(
-                    f'<div style="padding:4px 0;">'
-                    f'<span class="tdd-player-name" style="font-weight:400;">{m["Metric"]}</span>: '
-                    f'<span class="tdd-stat-value" style="color:{POSITIVE};">{m["Team"]}</span> '
-                    f'<span class="tdd-context">(lg: {m["League Avg"]}, {m["Diff"]})</span></div>',
-                    unsafe_allow_html=True,
-                )
-        else:
-            st.markdown('<span class="tdd-context">None vs league average</span>', unsafe_allow_html=True)
-    with col_w:
-        st.markdown(
-            f'<div style="color:{NEGATIVE}; font-weight:600; margin-bottom:8px;">Weaknesses</div>',
-            unsafe_allow_html=True,
-        )
-        if weaknesses_p:
-            for m in weaknesses_p:
-                st.markdown(
-                    f'<div style="padding:4px 0;">'
-                    f'<span class="tdd-player-name" style="font-weight:400;">{m["Metric"]}</span>: '
-                    f'<span class="tdd-stat-value" style="color:{NEGATIVE};">{m["Team"]}</span> '
-                    f'<span class="tdd-context">(lg: {m["League Avg"]}, {m["Diff"]})</span></div>',
-                    unsafe_allow_html=True,
-                )
-        else:
-            st.markdown('<span class="tdd-context">None vs league average</span>', unsafe_allow_html=True)
+# ── Team name lookup ──────────────────────────────────────────────────
+
+_TEAM_NAMES: dict[str, tuple[str, str]] = {
+    "ARI": ("Arizona Diamondbacks", "NL West"),
+    "ATL": ("Atlanta Braves", "NL East"),
+    "BAL": ("Baltimore Orioles", "AL East"),
+    "BOS": ("Boston Red Sox", "AL East"),
+    "CHC": ("Chicago Cubs", "NL Central"),
+    "CWS": ("Chicago White Sox", "AL Central"),
+    "CIN": ("Cincinnati Reds", "NL Central"),
+    "CLE": ("Cleveland Guardians", "AL Central"),
+    "COL": ("Colorado Rockies", "NL West"),
+    "DET": ("Detroit Tigers", "AL Central"),
+    "HOU": ("Houston Astros", "AL West"),
+    "KC":  ("Kansas City Royals", "AL Central"),
+    "LAA": ("Los Angeles Angels", "AL West"),
+    "LAD": ("Los Angeles Dodgers", "NL West"),
+    "MIA": ("Miami Marlins", "NL East"),
+    "MIL": ("Milwaukee Brewers", "NL Central"),
+    "MIN": ("Minnesota Twins", "AL Central"),
+    "NYM": ("New York Mets", "NL East"),
+    "NYY": ("New York Yankees", "AL East"),
+    "OAK": ("Oakland Athletics", "AL West"),
+    "PHI": ("Philadelphia Phillies", "NL East"),
+    "PIT": ("Pittsburgh Pirates", "NL Central"),
+    "SD":  ("San Diego Padres", "NL West"),
+    "SF":  ("San Francisco Giants", "NL West"),
+    "SEA": ("Seattle Mariners", "AL West"),
+    "STL": ("St. Louis Cardinals", "NL Central"),
+    "TB":  ("Tampa Bay Rays", "AL East"),
+    "TEX": ("Texas Rangers", "AL West"),
+    "TOR": ("Toronto Blue Jays", "AL East"),
+    "WSH": ("Washington Nationals", "NL East"),
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Main page
+# ═══════════════════════════════════════════════════════════════════════
 
 def page_team_overview() -> None:
-    """Team-level view with team intelligence, roster, depth chart, and trade sim."""
-    st.markdown(
-        '<div class="section-header">Team Overview</div>',
-        unsafe_allow_html=True,
-    )
+    """Team Overview -- Press Box data wall."""
 
+    # ── Team selector ──────────────────────────────────────────────
     teams_df = load_roster()
     if teams_df.empty:
         tdd_warn("No team data found. Run precompute first.")
         return
 
-    all_teams = sorted(
+    all_abbrs = sorted(
         teams_df["team_abbr"].replace("", pd.NA).dropna().unique().tolist()
     )
+    display_names = [team_full(a) for a in all_abbrs]
     qp_team = st.query_params.get("team", "")
-    default_team_idx = 0
-    if qp_team in all_teams:
-        default_team_idx = all_teams.index(qp_team)
-    selected_team = st.selectbox(
-        "Select team", all_teams, index=default_team_idx, key="team_select",
+    default_idx = 0
+    if qp_team in all_abbrs:
+        default_idx = all_abbrs.index(qp_team)
+    selected_name = st.selectbox(
+        "Select team", display_names, index=default_idx, key="team_select",
+        label_visibility="collapsed",
     )
+    selected_team = abbr_from_full(selected_name)
     st.query_params["team"] = selected_team
 
-    # Get all player IDs for this team
-    team_pids = set(
-        teams_df[teams_df["team_abbr"] == selected_team]["player_id"].astype(int)
-    )
-
-    # Load projections
-    h_proj = load_projections("hitter")
-    p_proj = load_projections("pitcher")
-    h_count = load_counting("hitter")
-    p_count = load_counting("pitcher")
-
-    # Filter to team
-    team_hitters = h_proj[h_proj["batter_id"].isin(team_pids)].copy()
-    team_pitchers = p_proj[p_proj["pitcher_id"].isin(team_pids)].copy()
-
-    # Merge counting stats
-    if not h_count.empty:
-        h_merge_cols = ["batter_id"] + [
-            c for c in h_count.columns if c.endswith("_mean") or c.startswith("actual_")
-        ]
-        available = [c for c in h_merge_cols if c in h_count.columns]
-        team_hitters = team_hitters.merge(h_count[available], on="batter_id", how="left")
-
-    if not p_count.empty:
-        p_merge_cols = ["pitcher_id"] + [
-            c for c in p_count.columns if c.endswith("_mean") or c.startswith("actual_")
-        ]
-        available = [c for c in p_merge_cols if c in p_count.columns]
-        team_pitchers = team_pitchers.merge(p_count[available], on="pitcher_id", how="left")
-
-    # ── Identify rostered players without projections ────────────
-    # Only works when roster.parquet is available (has roster_status, primary_position).
-    # Falls back gracefully when using player_teams.parquet (no extra columns).
-    projected_pids = set(team_hitters["batter_id"]) | set(team_pitchers["pitcher_id"])
-    team_roster = teams_df[teams_df["team_abbr"] == selected_team].copy()
-    has_roster_detail = (
-        "roster_status" in team_roster.columns
-        and "primary_position" in team_roster.columns
-    )
-    if has_roster_detail:
-        missing_roster = team_roster[
-            (~team_roster["player_id"].isin(projected_pids))
-            & (team_roster["roster_status"].isin(_MLB_ROSTER_STATUSES))
-        ].copy()
-        missing_pitchers = missing_roster[
-            missing_roster["primary_position"].isin(_PITCHER_POSITIONS)
-        ]
-        missing_hitters = missing_roster[
-            ~missing_roster["primary_position"].isin(_PITCHER_POSITIONS)
-        ]
-    else:
-        missing_pitchers = pd.DataFrame()
-        missing_hitters = pd.DataFrame()
-
-    # ── Header ──────────────────────────────────────────────────────
-    # Enrich header with ELO + tier
+    # ── Load data ──────────────────────────────────────────────────
     rankings = load_team_rankings()
-    team_rank_row = rankings[rankings["abbreviation"] == selected_team] if not rankings.empty else pd.DataFrame()
+    profiles = load_team_profiles()
+    elo_df = load_team_elo(preseason=True)
+    standings = load_standings()
 
-    tier_html = ""
-    elo_html = ""
-    proj_w_html = ""
-    if not team_rank_row.empty:
-        tr = team_rank_row.iloc[0]
-        tier = tr.get("tier", "")
-        tier_color = _TIER_COLORS.get(tier, SLATE)
-        if tier:
-            tier_html = (
-                f'<span class="tdd-badge" style="background:{tier_color}22; color:{tier_color}; '
-                f'border:1px solid {tier_color}44; margin-left:10px;">{tier}</span>'
-            )
-        rank_val = tr.get("rank")
-        if pd.notna(rank_val):
-            elo_html = (
-                f'<span style="color:var(--tdd-gold); font-weight:700; '
-                f'margin-left:8px;">#{int(rank_val)}</span>'
-            )
-    _standings = load_standings()
-    _rec = _standings.get(selected_team)
-    if _rec:
-        proj_w_html = (
-            f'<span class="tdd-context" style="margin-left:10px;">'
-            f'<span style="color:var(--tdd-gold); font-weight:700;">{_rec[0]}-{_rec[1]}</span></span>'
-        )
+    tr_row = rankings[rankings["abbreviation"] == selected_team] if not rankings.empty else pd.DataFrame()
+    tp_row = profiles[profiles["abbreviation"] == selected_team] if not profiles.empty else pd.DataFrame()
+    te_row = elo_df[elo_df["abbreviation"] == selected_team] if not elo_df.empty else pd.DataFrame()
 
-    _inj_full = load_preseason_injuries()
-    n_injured = len(_inj_full[
-        (_inj_full["team_abbr"] == selected_team) & (_inj_full["est_missed_games"] > 0)
-    ]) if not _inj_full.empty else 0
+    tr = tr_row.iloc[0] if not tr_row.empty else pd.Series(dtype=float)
+    tp = tp_row.iloc[0] if not tp_row.empty else pd.Series(dtype=float)
+    te = te_row.iloc[0] if not te_row.empty else pd.Series(dtype=float)
 
-    total_pitchers = len(team_pitchers) + len(missing_pitchers)
-    total_hitters = len(team_hitters) + len(missing_hitters)
-    team_header_html = (
-        f'<div class="brand-header">'
-        f'<div>'
-        f'<div class="brand-title"><span class="tdd-team-abbr" data-team="{selected_team}">{selected_team}</span>{elo_html}{tier_html}</div>'
-        f'<div class="brand-subtitle">'
-        f'{total_pitchers} pitchers | {total_hitters} hitters | '
-        f'{n_injured} injured{proj_w_html}</div>'
-        f'</div>'
-        f'<div class="tdd-context">'
-        f'{CURRENT_SEASON} Season</div>'
+    team_pids = set(teams_df[teams_df["team_abbr"] == selected_team]["player_id"].astype(int))
+    record = standings.get(selected_team)
+
+    team_info = _TEAM_NAMES.get(selected_team, (selected_team, ""))
+    team_name, division = team_info
+
+    tier = _safe(tr.get("tier"), "Competitive") if not tr.empty else "Competitive"
+    rank = int(_safe(tr.get("rank"), 0)) if not tr.empty else 0
+    div_rank = int(_safe(tr.get("div_rank"), 0)) if not tr.empty else 0
+
+    # ── Assemble page HTML ─────────────────────────────────────────
+    html_parts: list[str] = ['<div class="to-page">']
+
+    # Eyebrow
+    html_parts.append(_render_eyebrow(division, team_name))
+
+    # Team header masthead
+    team_id = int(tr.get("team_id", 0)) if not tr.empty and "team_id" in tr.index else None
+    html_parts.append(_render_team_header(
+        selected_team, team_name, division, record, tr, te,
+        team_id=team_id,
+    ))
+
+    # Tier row
+    html_parts.append(_render_tier_row(tier, div_rank if div_rank else None))
+
+    # ── Section 01: Profile ────────────────────────────────────────
+    html_parts.append(_section("01", "Profile", "identity / scores / composite"))
+
+    scores = _build_scores(tp, profiles, rankings, selected_team)
+
+    # Get style info
+    off_style = _safe(tr.get("offense_style"), "") if not tr.empty else ""
+    pit_style = _safe(tr.get("pitching_style"), "") if not tr.empty else ""
+    age_traj = _safe(tr.get("age_trajectory"), "") if not tr.empty else ""
+
+    identity_html = _render_identity_card(
+        tier, rank if rank else None, division, div_rank if div_rank else None,
+        off_style, pit_style, age_traj,
+    )
+    scores_html = _render_scores_card(scores)
+    radar_html = _render_radar_card(scores)
+
+    html_parts.append(
+        f'<div class="to-row-identity">'
+        f'{identity_html}{scores_html}{radar_html}'
         f'</div>'
     )
-    st.markdown(team_header_html, unsafe_allow_html=True)
 
-    # ── Tabs ────────────────────────────────────────────────────────
-    tab_profile, tab_depth, tab_trade = st.tabs(
-        ["Team Profile", "Depth Chart", "Trade Simulator"],
+    # ── Section 02: Strengths & Weaknesses ─────────────────────────
+    html_parts.append(_section("02", "Strengths & Weaknesses", "vs MLB average"))
+
+    strengths, weaknesses = _build_strengths_weaknesses(tr)
+    html_parts.append(
+        f'<div class="to-row-sw">'
+        f'{_render_sw_list(strengths, "up")}'
+        f'{_render_sw_list(weaknesses, "down")}'
+        f'</div>'
     )
 
-    with tab_profile:
-        _render_team_profile_tab(selected_team, teams_df)
+    # ── Section 03: Roster ─────────────────────────────────────────
+    html_parts.append(_section("03", "Roster", "position players / pitching"))
 
-    with tab_depth:
-        _render_depth_chart_tab(
-            selected_team, teams_df,
-            team_pitchers=team_pitchers,
-            p_proj=p_proj,
-        )
+    depth = _build_depth_chart(teams_df, selected_team)
+    rotation, bullpen = _build_pitching_staff(team_pids)
+    top_players = _build_top_players(selected_team, team_pids)
 
-    with tab_trade:
-        _render_trade_simulator_tab(selected_team, teams_df)
+    html_parts.append(
+        f'<div class="to-row-identity" style="grid-template-columns:1.2fr 1fr 1fr">'
+        f'{_render_depth_field(depth)}'
+        f'{_render_pitching_staff(rotation, bullpen)}'
+        f'{_render_top_players(top_players)}'
+        f'</div>'
+    )
+
+    # ── Section 04: Schedule & Context ─────────────────────────────
+    html_parts.append(_section("04", "Context", "health / organization"))
+
+    il_list = _build_il_list(selected_team)
+    il_days = int(_safe(tr.get("total_il_days"))) if _safe(tr.get("total_il_days")) is not None else None
+    avg_age = float(_safe(tr.get("avg_age"))) if _safe(tr.get("avg_age")) is not None else None
+    pct_hg = float(_safe(tr.get("pct_homegrown"))) if _safe(tr.get("pct_homegrown")) is not None else None
+    farm_avg = float(_safe(tr.get("farm_avg_score"))) if _safe(tr.get("farm_avg_score")) is not None else None
+    n_ranked = int(_safe(tr.get("n_ranked_prospects"))) if _safe(tr.get("n_ranked_prospects")) is not None else None
+    top100 = int(_safe(tr.get("top_100_count"))) if _safe(tr.get("top_100_count")) is not None else None
+
+    html_parts.append(
+        f'<div class="to-row-sw" style="margin-top:0.6rem">'
+        f'{_render_health_card(il_list, il_days, avg_age)}'
+        f'{_render_org_card(pct_hg, farm_avg, n_ranked, top100)}'
+        f'</div>'
+    )
+
+    # ── Section 05: League Standing ────────────────────────────────
+    html_parts.append(_section("05", "League Standing", "top 8 by composite"))
+
+    if not rankings.empty:
+        sort_col = "rank" if "rank" in rankings.columns else "composite_score"
+        asc = True if sort_col == "rank" else False
+        sorted_ranks = rankings.sort_values(sort_col, ascending=asc)
+        html_parts.append(_render_league_ranks(sorted_ranks, selected_team))
+
+    html_parts.append('</div>')  # close .to-page
+
+    st.markdown("\n".join(html_parts), unsafe_allow_html=True)

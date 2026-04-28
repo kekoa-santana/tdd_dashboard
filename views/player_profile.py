@@ -37,6 +37,8 @@ from services.data_loader import (
     season_selector,
 )
 from utils.helpers import get_team_lookup, get_injury_lookup
+from utils.html import esc
+from utils.team_names import team_full
 from utils.formatters import fmt_stat, fmt_trad
 from components.metric_cards import (
     metric_card, percentile_rank, hybrid_percentile_rank,
@@ -848,12 +850,102 @@ def render_arsenal_evolution(
 
 
 # ---------------------------------------------------------------------------
-# Page: Player Profile
+# Page: Player Profile (Editorial Layout)
 # ---------------------------------------------------------------------------
+
+
+def _editorial_hero_html(
+    name: str,
+    team: str,
+    header_parts: list[str],
+    diamond_html: str,
+    tools_html: str,
+    injury_html: str,
+    vitals: list[tuple[str, str, str]],
+    scouting_text: str,
+    player_id: int | None = None,
+) -> str:
+    """Build the editorial hero: headshot portrait + identity + vitals + scouting callout."""
+    from components.headshot import _headshot_url
+
+    # Vitals grid
+    vitals_cells = ""
+    for v, l, d in vitals:
+        d_cls = "pos" if d.startswith("+") else "neg" if d.startswith("-") else ""
+        d_html = f'<div class="d {d_cls}">{esc(d)}</div>' if d else ""
+        vitals_cells += (
+            '<div class="vstat">'
+            f'<div class="v">{esc(v)}</div>'
+            f'<div class="l">{esc(l)}</div>'
+            f'{d_html}'
+            '</div>'
+        )
+
+    # Scouting callout
+    scout_html = ""
+    if scouting_text:
+        scout_html = (
+            '<div class="scouting">'
+            '<span class="eyebrow">Model Read</span>'
+            f'<p>{esc(scouting_text)}</p>'
+            '</div>'
+        )
+
+    team_attr = f' data-team="{esc(team)}"' if team else ""
+    sub_line = " | ".join(header_parts) if header_parts else ""
+
+    # Portrait: real MLB headshot
+    if player_id:
+        hs_url = _headshot_url(player_id, 400)
+        portrait_content = (
+            f'<img src="{hs_url}" alt="{esc(name)}" '
+            f'style="width:100%;height:100%;object-fit:cover;object-position:top center;" '
+            f'onerror="this.style.display=\'none\'" />'
+        )
+    else:
+        initials = "".join(w[0] for w in name.split()[:2]) if name else ""
+        portrait_content = f'<span class="initials">{esc(initials)}</span>'
+
+    return (
+        '<div class="tdd-hero-player editorial">'
+        # Portrait column
+        f'<div class="portrait" style="background-color:var(--tdd-dark-card)">'
+        f'{portrait_content}'
+        f'<div class="team-strip"{team_attr}>{esc(team)}</div>'
+        '</div>'
+        # Body column
+        '<div class="body">'
+        '<div class="top">'
+        '<div class="idblock">'
+        '<div class="eyebrow">Player Profile</div>'
+        f'<h1>{esc(name)}</h1>'
+        f'<div class="sub">{esc(sub_line)}</div>'
+        f'{injury_html}'
+        '</div>'
+        f'<div class="rating">{diamond_html}{tools_html}</div>'
+        '</div>'
+        # Vitals grid
+        f'<div class="vitals">{vitals_cells}</div>'
+        # Scouting callout
+        f'{scout_html}'
+        '</div>'
+        '</div>'
+    )
+
+
+def _section_head(title: str, sub: str = "") -> str:
+    """Return a .p-section header."""
+    sub_html = f'<span class="p-shead-sub">{esc(sub)}</span>' if sub else ""
+    return (
+        '<div class="p-shead">'
+        f'<h2>{esc(title)}</h2>'
+        f'{sub_html}'
+        '</div>'
+    )
+
+
 def page_player_profile() -> None:
-    """Deep dive into a single player's projections."""
-    st.markdown('<div class="tdd-section-hdr">Player Profile</div>',
-                unsafe_allow_html=True)
+    """Deep dive into a single player's projections -- editorial layout."""
 
     qp_player_id = st.query_params.get("player_id", "")
 
@@ -901,16 +993,20 @@ def page_player_profile() -> None:
     # Inline toolbar: Team | Player | Season
     sel_cols = st.columns([1, 3, 1])
     with sel_cols[0]:
-        team_opts = ["All Teams"] + all_teams
+        team_display = ["All Teams"] + [team_full(a) for a in all_teams]
         default_team_idx = 0
         if deep_link_player_id is not None:
             linked_team = team_lookup.get(deep_link_player_id, "")
-            if linked_team in team_opts:
-                default_team_idx = team_opts.index(linked_team)
-        profile_team_filter = st.selectbox(
-            "Team", team_opts, index=default_team_idx, key="profile_team",
+            linked_display = team_full(linked_team) if linked_team else ""
+            if linked_display in team_display:
+                default_team_idx = team_display.index(linked_display)
+        profile_team_display = st.selectbox(
+            "Team", team_display, index=default_team_idx, key="profile_team",
             label_visibility="collapsed",
         )
+        # Map display name back to abbreviation for filtering
+        _abbr_map = {team_full(a): a for a in all_teams}
+        profile_team_filter = _abbr_map.get(profile_team_display, profile_team_display)
 
     # Filter players by team
     if profile_team_filter != "All Teams":
@@ -971,8 +1067,11 @@ def page_player_profile() -> None:
     is_career = season_choice == "Career"
     selected_season = None if is_projection or is_career else int(season_choice)
 
+    # === EDITORIAL LAYOUT ==========================================
+    # Wrap entire page in .tdd-profile container
+    st.markdown('<div class="tdd-profile">', unsafe_allow_html=True)
+
     # --- Header card ---
-    # Team abbreviation
     teams_df = load_player_teams()
     player_team = ""
     if not teams_df.empty:
@@ -994,7 +1093,7 @@ def page_player_profile() -> None:
     header_parts = []
     if player_team:
         header_parts.append(
-            f'<span class="tdd-team-abbr" data-team="{player_team}">{player_team}</span>'
+            f'<span class="tdd-team-abbr" data-team="{player_team}">{team_full(player_team)}</span>'
         )
     header_parts.append(f"Age {age}")
     if hand:
@@ -1122,27 +1221,56 @@ def page_player_profile() -> None:
             f'</div>'
         )
 
-    header_html = (
-        f'<div class="brand-header">'
-        f'<div>'
-        f'<div class="brand-title">{selected_name}</div>'
-        f'<div class="brand-subtitle">{" | ".join(header_parts)} | '
-        f'{PROJECTION_LABEL if is_projection else "Career" if is_career else f"{selected_season} Season"}</div>'
-        f'{injury_html}'
-        f'</div>'
-        f'<div style="text-align:right;">'
-        f'{diamond_html}'
-        f'{_tools_html}'
-        f'</div>'
-        f'</div>'
-    )
-    hdr_left, hdr_right = st.columns([1, 11])
-    with hdr_left:
-        render_headshot(player_id, size=80)
-    with hdr_right:
-        st.markdown(header_html, unsafe_allow_html=True)
+    # Build vitals from Bayesian projections (available before trad_all_df loads)
+    vitals: list[tuple[str, str, str]] = []
+    if player_type in ("Hitter", "Two-Way"):
+        for col, label in [("projected_k_rate", "K%"), ("projected_bb_rate", "BB%")]:
+            v = player_row.get(col)
+            if pd.notna(v):
+                vitals.append((f"{float(v)*100:.1f}%", f"Proj {label}", ""))
+    else:
+        for col, label in [("projected_k_rate", "K%"), ("projected_bb_rate", "BB%"), ("projected_hr_per_bf", "HR/BF")]:
+            v = player_row.get(col)
+            if pd.notna(v):
+                if col == "projected_hr_per_bf":
+                    vitals.append((f"{float(v)*100:.1f}%", f"Proj {label}", ""))
+                else:
+                    vitals.append((f"{float(v)*100:.1f}%", f"Proj {label}", ""))
 
-    # --- Scouting grades for regular (non-two-way) players ---
+    # Get scouting summary for callout
+    scouting_text = ""
+    try:
+        _is_h = player_type in ("Hitter", "Two-Way")
+        _sc_arch_df = load_hitter_archetypes() if _is_h else load_pitcher_archetypes()
+        _arch_id_col = "batter_id" if _is_h else "pitcher_id"
+        if not _sc_arch_df.empty:
+            _ar = _sc_arch_df[_sc_arch_df[_arch_id_col] == player_id]
+            if not _ar.empty:
+                arch_name = _ar.iloc[0].get("archetype_name", "")
+                if arch_name:
+                    scouting_text = f"{arch_name} profile."
+    except Exception:
+        pass
+
+    # Render editorial hero
+    st.markdown(
+        _editorial_hero_html(
+            name=selected_name,
+            team=player_team,
+            header_parts=header_parts,
+            diamond_html=diamond_html,
+            tools_html=_tools_html,
+            injury_html=injury_html,
+            vitals=vitals,
+            scouting_text=scouting_text,
+            player_id=player_id,
+        ),
+        unsafe_allow_html=True,
+    )
+
+    # === SECTIONS (editorial single-column flow) ===================
+
+    # --- Scouting grades ---
     if not is_two_way_player and not _rank_row.empty:
         _rr_grades = _rank_row.iloc[0]
         _ci_data = _grade_ci_row.iloc[0] if not _grade_ci_row.empty else None
@@ -1324,7 +1452,8 @@ def page_player_profile() -> None:
                 unsafe_allow_html=True,
             )
 
-    # ── 2. SEASON (full width, with dropdown) ──────────────────────────
+    # ── SEASON STATS ────────────────────────────────────────────────
+    st.markdown('<div class="p-section">' + _section_head("Season Stats", "Observed rates and counting stats"), unsafe_allow_html=True)
     _player_seasons: list[int] = []
     if not trad_all_df.empty:
         _ps = trad_all_df[trad_all_df[id_col] == player_id]["season"].dropna().unique()
@@ -1535,8 +1664,10 @@ def page_player_profile() -> None:
         else:
             st.caption(f"No stats found for {_pick_season}.")
 
-    # ── 3. SCOUTING CARD ────────────────────────────────────────────
-    st.markdown("<div style='margin-top: 1.5rem;'></div>", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)  # close season stats p-section
+
+    # ── SCOUTING REPORT ──────────────────────────────────────────
+    st.markdown('<div class="p-section">' + _section_head("Scouting Report", "Model-generated analysis"), unsafe_allow_html=True)
 
     # Gather data for scouting card
     _is_hitter = player_type in ("Hitter", "Two-Way")
@@ -1578,19 +1709,19 @@ def page_player_profile() -> None:
     )
     render_scouting_card(_sc_card)
 
-    # Approach & efficiency
+    st.markdown('</div>', unsafe_allow_html=True)  # close scouting p-section
+
+    # ── APPROACH & EFFICIENCY ────────────────────────────────────
+    st.markdown('<div class="p-section">' + _section_head("Approach & Efficiency", "Plate discipline and efficiency metrics"), unsafe_allow_html=True)
     render_approach_efficiency(
         player_type, player_id, id_col,
         selected_season=_recent_season, is_career=False,
     )
 
-    # (Observed + projected percentile bars are now inline in the columns above)
+    st.markdown('</div>', unsafe_allow_html=True)  # close approach p-section
 
-    # ── 4. DEEP DIVE (season selector controls this) ─────────────────
-    st.markdown(
-        f'<div class="tdd-section-hdr" style="margin-top:1.5rem;">Deep Dive</div>',
-        unsafe_allow_html=True,
-    )
+    # ── DEEP DIVE ────────────────────────────────────────────────
+    st.markdown('<div class="p-section">' + _section_head("Deep Dive", "Season trends, pitch profiles, and arsenal"), unsafe_allow_html=True)
     deep_season = st.selectbox(
         "Season", [str(s) for s in AVAILABLE_SEASONS] + ["Career"],
         index=len(AVAILABLE_SEASONS) - 1,  # default to most recent
@@ -1613,7 +1744,9 @@ def page_player_profile() -> None:
     if player_type == "Pitcher" and _deep_season and not _deep_is_career:
         render_arsenal_evolution(player_id, selected_name, _deep_season)
 
-    # K% posterior distribution (pitcher only)
+    st.markdown('</div>', unsafe_allow_html=True)  # close deep dive p-section
+
+    # ── K% POSTERIOR (pitcher only) ──────────────────────────────
     k_samples = load_k_samples()
     sample_key = str(player_id)
     if player_type == "Pitcher" and sample_key in k_samples:
@@ -1632,11 +1765,8 @@ def page_player_profile() -> None:
         with chart_col:
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False})
 
-    # Stat breakdown table
-    st.markdown(
-        '<div class="tdd-section-hdr">Stat Breakdown</div>',
-        unsafe_allow_html=True,
-    )
+    # ── STAT BREAKDOWN ──────────────────────────────────────────────
+    st.markdown('<div class="p-section">' + _section_head("Stat Breakdown", "Observed vs projected with credible intervals"), unsafe_allow_html=True)
     detail_rows = []
     for label, key, higher_better, desc in stat_configs:
         obs_col = f"observed_{key}"
@@ -1661,4 +1791,6 @@ def page_player_profile() -> None:
     if detail_rows:
         st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
 
+    st.markdown('</div>', unsafe_allow_html=True)  # close stat breakdown p-section
+    st.markdown('</div>', unsafe_allow_html=True)  # close .tdd-profile wrapper
     return  # End of profile page

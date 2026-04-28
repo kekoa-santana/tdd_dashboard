@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from utils.alerts import tdd_info, tdd_warn
+from utils.team_names import team_short
 from config import GOLD, SAGE, SLATE, DARK_BORDER, DASHBOARD_DIR
 from components.team_logo import team_logo_html
 from services.data_loader import load_team_rankings
@@ -64,7 +65,7 @@ def _division_card(teams: pd.DataFrame, short_name: str,
             f'<span class="{rank_cls}">{i}.</span>'
             f'{logo}'
             f'<span class="lb-name tdd-team-abbr" data-team="{abbr}" '
-            f'style="flex:1;">{abbr}</span>'
+            f'style="flex:1;">{team_short(abbr)}</span>'
             # Tier pill
             f'<span style="font-size:0.65rem; color:{tier_color}; '
             f'margin-right:0.6rem;">{tier}</span>'

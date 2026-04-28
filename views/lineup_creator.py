@@ -14,6 +14,7 @@ from services.data_loader import (
 from components.diamond_rating import diamond_rating_html
 from lib.diamond_rating import score_to_diamonds
 from utils.alerts import tdd_warn
+from utils.team_names import team_full
 
 _POSITIONS = ["C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH"]
 
@@ -196,9 +197,12 @@ def page_lineup_creator() -> None:
     pos_medians = _position_median_ratings(pool)
 
     # --- Team selector ---
-    selected_team = st.selectbox(
-        "Team", teams, key="lc_team", label_visibility="collapsed",
+    team_display = [team_full(a) for a in teams]
+    selected_display = st.selectbox(
+        "Team", team_display, key="lc_team", label_visibility="collapsed",
     )
+    _abbr_map = {team_full(a): a for a in teams}
+    selected_team = _abbr_map.get(selected_display, selected_display)
 
     # --- Initialize lineup in session state ---
     state_key = f"lc_lineup_{selected_team}"
@@ -215,7 +219,7 @@ def page_lineup_creator() -> None:
         st.markdown(
             f'<div class="tdd-section-hdr">'
             f'<span class="tdd-team-abbr" data-team="{selected_team}">'
-            f'{selected_team}</span> Starting Lineup</div>',
+            f'{team_full(selected_team)}</span> Starting Lineup</div>',
             unsafe_allow_html=True,
         )
 

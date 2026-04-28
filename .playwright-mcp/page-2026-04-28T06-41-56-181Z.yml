@@ -1,0 +1,307 @@
+- generic [ref=e6]:
+  - navigation "Main navigation" [ref=e8]:
+    - link "The Data Diamond The Data Diamond" [ref=e9] [cursor=pointer]:
+      - /url: "?page=home"
+      - img "The Data Diamond" [ref=e10]
+      - generic [ref=e11]: The Data Diamond
+    - generic [ref=e12]:
+      - button "Games ▾" [ref=e14] [cursor=pointer]
+      - button "Players ▾" [ref=e16] [cursor=pointer]
+      - button "Teams ▾" [ref=e18] [cursor=pointer]
+      - button "Tools ▾" [ref=e20] [cursor=pointer]
+      - button "About ▾" [ref=e22] [cursor=pointer]
+    - generic [ref=e24]:
+      - link "𝕏" [ref=e25] [cursor=pointer]:
+        - /url: https://x.com/TheDataDiamond
+      - link "⌘" [ref=e26] [cursor=pointer]:
+        - /url: https://instagram.com/TheDataDiamond
+  - generic [ref=e31]:
+    - generic [ref=e32]:
+      - generic [ref=e33]: ★
+      - generic [ref=e34]: The Data Diamond
+      - generic [ref=e35]: /
+      - generic [ref=e36]: Rankings
+      - generic [ref=e37]: /
+      - generic [ref=e38]: Teams
+    - generic [ref=e39]:
+      - generic [ref=e40]:
+        - heading "Team Rankings" [level=1] [ref=e42]:
+          - text: Team Rankings
+          - generic [ref=e43]:
+            - link "Link to heading":
+              - /url: "#team-rankings"
+              - img
+        - generic [ref=e44]: Composite ratings across offense, pitching, and defense with ELO and division context. Updated weekly · Apr 27, 2026.
+      - generic [ref=e45]:
+        - generic [ref=e46]:
+          - generic [ref=e47]: "30"
+          - generic [ref=e48]: Teams
+        - generic [ref=e49]:
+          - generic [ref=e50]: "5.0"
+          - generic [ref=e51]: Lg Avg
+  - radiogroup "Layout" [ref=e54] [cursor=pointer]:
+    - generic [ref=e55]:
+      - radio "Standings"
+      - paragraph [ref=e60]: Standings
+    - generic [ref=e61]:
+      - radio "Tiered" [checked] [active]
+      - paragraph [ref=e66]: Tiered
+    - generic [ref=e67]:
+      - radio "By Division"
+      - paragraph [ref=e72]: By Division
+  - radiogroup "League" [ref=e79] [cursor=pointer]:
+    - generic [ref=e80]:
+      - radio "MLB" [checked]
+      - paragraph [ref=e85]: MLB
+    - generic [ref=e86]:
+      - radio "AL"
+      - paragraph [ref=e91]: AL
+    - generic [ref=e92]:
+      - radio "NL"
+      - paragraph [ref=e97]: NL
+  - generic [ref=e136]:
+    - generic [ref=e137]:
+      - generic [ref=e138]: "01"
+      - heading "Tiers" [level=2] [ref=e2116]:
+        - text: Tiers
+        - generic [ref=e141]:
+          - link "Link to heading":
+            - /url: "#power-rankings"
+            - img
+      - generic [ref=e142]: Power-rank cohorts
+    - generic [ref=e143]:
+      - generic [ref=e144]:
+        - generic [ref=e145]: ★Elite
+        - generic [ref=e146]: 6 teams
+        - generic [ref=e147]: World-Series odds in the model's top decile.
+      - generic [ref=e156]:
+        - generic [ref=e2117] [cursor=pointer]:
+          - generic [ref=e2118]: "1"
+          - generic [ref=e2119]: LAD
+          - generic [ref=e2121]: Dodgers
+          - generic [ref=e2122]: ◆ 10.0
+          - generic [ref=e2123]: 20-9
+          - generic [ref=e2124]: ›
+        - generic [ref=e2125] [cursor=pointer]:
+          - generic [ref=e2126]: "2"
+          - generic [ref=e2127]: ATL
+          - generic [ref=e2129]: Braves
+          - generic [ref=e2130]: ◆ 8.1
+          - generic [ref=e2131]: 20-9
+          - generic [ref=e2132]: ›
+        - generic [ref=e2133] [cursor=pointer]:
+          - generic [ref=e2134]: "3"
+          - generic [ref=e2135]: NYY
+          - generic [ref=e2137]: Yankees
+          - generic [ref=e2138]: ◆ 8.0
+          - generic [ref=e2139]: 19-10
+          - generic [ref=e2140]: ›
+        - generic [ref=e2141] [cursor=pointer]:
+          - generic [ref=e2142]: "4"
+          - generic [ref=e2143]: SD
+          - generic [ref=e2145]: Padres
+          - generic [ref=e2146]: ◆ 7.0
+          - generic [ref=e2147]: 19-9
+          - generic [ref=e2148]: ›
+        - generic [ref=e2149] [cursor=pointer]:
+          - generic [ref=e2150]: "5"
+          - generic [ref=e2151]: PIT
+          - generic [ref=e2153]: Pirates
+          - generic [ref=e2154]: ◆ 6.9
+          - generic [ref=e2155]: 16-13
+          - generic [ref=e2156]: ›
+        - generic [ref=e2157] [cursor=pointer]:
+          - generic [ref=e2158]: "6"
+          - generic [ref=e2159]: MIL
+          - generic [ref=e2161]: Brewers
+          - generic [ref=e2162]: ◆ 6.7
+          - generic [ref=e2163]: 14-13
+          - generic [ref=e2164]: ›
+    - generic [ref=e2165]:
+      - generic [ref=e2166]:
+        - generic [ref=e2167]: ★Contender
+        - generic [ref=e2168]: 8 teams
+        - generic [ref=e2169]: October-bound if pitching holds; coin-flip rotations apart.
+      - generic [ref=e2170]:
+        - generic [ref=e2171] [cursor=pointer]:
+          - generic [ref=e2172]: "7"
+          - generic [ref=e2173]: DET
+          - generic [ref=e2175]: Tigers
+          - generic [ref=e2176]: ◆ 6.3
+          - generic [ref=e2177]: 15-14
+          - generic [ref=e2178]: ›
+        - generic [ref=e2179] [cursor=pointer]:
+          - generic [ref=e2180]: "8"
+          - generic [ref=e2181]: CIN
+          - generic [ref=e2183]: Reds
+          - generic [ref=e2184]: ◆ 5.8
+          - generic [ref=e2185]: 18-10
+          - generic [ref=e2186]: ›
+        - generic [ref=e2187] [cursor=pointer]:
+          - generic [ref=e2188]: "9"
+          - generic [ref=e2189]: SEA
+          - generic [ref=e2191]: Mariners
+          - generic [ref=e2192]: ◆ 5.8
+          - generic [ref=e2193]: 14-16
+          - generic [ref=e2194]: ›
+        - generic [ref=e2195] [cursor=pointer]:
+          - generic [ref=e2196]: "10"
+          - generic [ref=e2197]: CHC
+          - generic [ref=e2199]: Cubs
+          - generic [ref=e2200]: ◆ 5.5
+          - generic [ref=e2201]: 17-12
+          - generic [ref=e2202]: ›
+        - generic [ref=e2203] [cursor=pointer]:
+          - generic [ref=e2204]: "11"
+          - generic [ref=e2205]: TEX
+          - generic [ref=e2207]: Rangers
+          - generic [ref=e2208]: ◆ 5.3
+          - generic [ref=e2209]: 14-15
+          - generic [ref=e2210]: ›
+        - generic [ref=e2211] [cursor=pointer]:
+          - generic [ref=e2212]: "12"
+          - generic [ref=e2213]: MIN
+          - generic [ref=e2215]: Twins
+          - generic [ref=e2216]: ◆ 5.0
+          - generic [ref=e2217]: 13-16
+          - generic [ref=e2218]: ›
+        - generic [ref=e2219] [cursor=pointer]:
+          - generic [ref=e2220]: "13"
+          - generic [ref=e2221]: PHI
+          - generic [ref=e2223]: Phillies
+          - generic [ref=e2224]: ◆ 4.9
+          - generic [ref=e2225]: 9-19
+          - generic [ref=e2226]: ›
+        - generic [ref=e2227] [cursor=pointer]:
+          - generic [ref=e2228]: "14"
+          - generic [ref=e2229]: ATH
+          - generic [ref=e2231]: Athletics
+          - generic [ref=e2232]: ◆ 4.9
+          - generic [ref=e2233]: 15-13
+          - generic [ref=e2234]: ›
+    - generic [ref=e2235]:
+      - generic [ref=e2236]:
+        - generic [ref=e2237]: ★Competitive
+        - generic [ref=e2238]: 8 teams
+        - generic [ref=e2239]: Hovering .500 -- one bat or arm away from contender tier.
+      - generic [ref=e2240]:
+        - generic [ref=e2241] [cursor=pointer]:
+          - generic [ref=e2242]: "15"
+          - generic [ref=e2243]: CLE
+          - generic [ref=e2245]: Guardians
+          - generic [ref=e2246]: ◆ 4.6
+          - generic [ref=e2247]: 15-15
+          - generic [ref=e2248]: ›
+        - generic [ref=e2249] [cursor=pointer]:
+          - generic [ref=e2250]: "16"
+          - generic [ref=e2251]: TOR
+          - generic [ref=e2253]: Blue Jays
+          - generic [ref=e2254]: ◆ 4.5
+          - generic [ref=e2255]: 12-16
+          - generic [ref=e2256]: ›
+        - generic [ref=e2257] [cursor=pointer]:
+          - generic [ref=e2258]: "17"
+          - generic [ref=e2259]: BAL
+          - generic [ref=e2261]: Orioles
+          - generic [ref=e2262]: ◆ 4.4
+          - generic [ref=e2263]: 13-15
+          - generic [ref=e2264]: ›
+        - generic [ref=e2265] [cursor=pointer]:
+          - generic [ref=e2266]: "18"
+          - generic [ref=e2267]: AZ
+          - generic [ref=e2269]: D-backs
+          - generic [ref=e2270]: ◆ 4.4
+          - generic [ref=e2271]: 15-12
+          - generic [ref=e2272]: ›
+        - generic [ref=e2273] [cursor=pointer]:
+          - generic [ref=e2274]: "19"
+          - generic [ref=e2275]: STL
+          - generic [ref=e2277]: Cardinals
+          - generic [ref=e2278]: ◆ 3.9
+          - generic [ref=e2279]: 15-13
+          - generic [ref=e2280]: ›
+        - generic [ref=e2281] [cursor=pointer]:
+          - generic [ref=e2282]: "20"
+          - generic [ref=e2283]: MIA
+          - generic [ref=e2285]: Marlins
+          - generic [ref=e2286]: ◆ 3.9
+          - generic [ref=e2287]: 13-16
+          - generic [ref=e2288]: ›
+        - generic [ref=e2289] [cursor=pointer]:
+          - generic [ref=e2290]: "21"
+          - generic [ref=e2291]: TB
+          - generic [ref=e2293]: Rays
+          - generic [ref=e2294]: ◆ 3.2
+          - generic [ref=e2295]: 17-11
+          - generic [ref=e2296]: ›
+        - generic [ref=e2297] [cursor=pointer]:
+          - generic [ref=e2298]: "22"
+          - generic [ref=e2299]: NYM
+          - generic [ref=e2301]: Mets
+          - generic [ref=e2302]: ◆ 3.1
+          - generic [ref=e2303]: 9-19
+          - generic [ref=e2304]: ›
+    - generic [ref=e2305]:
+      - generic [ref=e2306]:
+        - generic [ref=e2307]: ★Rebuilding
+        - generic [ref=e2308]: 8 teams
+        - generic [ref=e2309]: Sub-.450 win expectancy; rolling young talent forward.
+      - generic [ref=e2310]:
+        - generic [ref=e2311] [cursor=pointer]:
+          - generic [ref=e2312]: "23"
+          - generic [ref=e2313]: LAA
+          - generic [ref=e2315]: Angels
+          - generic [ref=e2316]: ◆ 3.0
+          - generic [ref=e2317]: 12-18
+          - generic [ref=e2318]: ›
+        - generic [ref=e2319] [cursor=pointer]:
+          - generic [ref=e2320]: "24"
+          - generic [ref=e2321]: BOS
+          - generic [ref=e2323]: Red Sox
+          - generic [ref=e2324]: ◆ 2.7
+          - generic [ref=e2325]: 12-17
+          - generic [ref=e2326]: ›
+        - generic [ref=e2327] [cursor=pointer]:
+          - generic [ref=e2328]: "25"
+          - generic [ref=e2329]: HOU
+          - generic [ref=e2331]: Astros
+          - generic [ref=e2332]: ◆ 2.5
+          - generic [ref=e2333]: 11-18
+          - generic [ref=e2334]: ›
+        - generic [ref=e2335] [cursor=pointer]:
+          - generic [ref=e2336]: "26"
+          - generic [ref=e2337]: SF
+          - generic [ref=e2339]: Giants
+          - generic [ref=e2340]: ◆ 2.4
+          - generic [ref=e2341]: 13-15
+          - generic [ref=e2342]: ›
+        - generic [ref=e2343] [cursor=pointer]:
+          - generic [ref=e2344]: "27"
+          - generic [ref=e2345]: COL
+          - generic [ref=e2347]: Rockies
+          - generic [ref=e2348]: ◆ 2.0
+          - generic [ref=e2349]: 13-16
+          - generic [ref=e2350]: ›
+        - generic [ref=e2351] [cursor=pointer]:
+          - generic [ref=e2352]: "28"
+          - generic [ref=e2353]: WSH
+          - generic [ref=e2355]: Nationals
+          - generic [ref=e2356]: ◆ 1.5
+          - generic [ref=e2357]: 13-16
+          - generic [ref=e2358]: ›
+        - generic [ref=e2359] [cursor=pointer]:
+          - generic [ref=e2360]: "29"
+          - generic [ref=e2361]: CWS
+          - generic [ref=e2363]: White Sox
+          - generic [ref=e2364]: ◆ 1.1
+          - generic [ref=e2365]: 12-17
+          - generic [ref=e2366]: ›
+        - generic [ref=e2367] [cursor=pointer]:
+          - generic [ref=e2368]: "30"
+          - generic [ref=e2369]: KC
+          - generic [ref=e2371]: Royals
+          - generic [ref=e2372]: ◆ 1.0
+          - generic [ref=e2373]: 11-17
+          - generic [ref=e2374]: ›
+  - generic [ref=e2110]: Methodology ·◆ Score is a 0-10 composite of weighted offense, pitching, and defense sub-scores normalized vs league average (5.0). ELO is a Bayes-shrunk baseball-specific rating; week-over-week rank delta and run-differential carry secondary weight in expected-wins projections.
+  - generic [ref=e2115]: For entertainment and research purposes. Not financial advice.
