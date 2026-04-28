@@ -303,17 +303,18 @@ def _find_main_slate_dg(
 ) -> int | None:
     """Find the main-slate draft group for a given game type.
 
-    The main slate is the one with the most games and earliest start
-    (lowest SortOrder).
+    The featured/current slate always has the lowest SortOrder (usually 1).
+    Stale slates from prior days linger in the lobby with SortOrder=999.
+    We sort by SortOrder first, then by game count as tiebreaker.
     """
     candidates = [
         dg for dg in draftgroups if dg.get("GameTypeId") == game_type_id
     ]
     if not candidates:
         return None
-    # Primary sort: most games; secondary: lowest SortOrder (featured)
+    # Primary sort: lowest SortOrder (featured); secondary: most games
     candidates.sort(
-        key=lambda d: (-d.get("GameCount", 0), d.get("SortOrder", 999))
+        key=lambda d: (d.get("SortOrder", 999), -d.get("GameCount", 0))
     )
     return candidates[0]["DraftGroupId"]
 

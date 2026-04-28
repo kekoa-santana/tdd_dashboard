@@ -17,6 +17,7 @@ from services.data_loader import (
     load_backtest,
     load_dk_props,
 )
+from utils.team_names import team_short
 
 
 # ---------------------------------------------------------------------------
@@ -275,9 +276,9 @@ def _render_ticker(data: dict) -> str:
             score_html = f'<span class="home-ticker-score">{escape(g["time"])}</span>'
         items.append(
             f'<span class="home-ticker-item">'
-            f'<span data-team="{escape(g["away"])}">{escape(g["away"])}</span>'
+            f'<span data-team="{escape(g["away"])}">{escape(team_short(g["away"]))}</span>'
             f' @ '
-            f'<span data-team="{escape(g["home"])}">{escape(g["home"])}</span>'
+            f'<span data-team="{escape(g["home"])}">{escape(team_short(g["home"]))}</span>'
             f' {score_html}'
             f'<span class="home-ticker-dot">&middot;</span>'
             f'</span>'
@@ -354,11 +355,11 @@ def _render_hero(featured: dict) -> str:
             </div>
             <div class="home-hero-teams">
                 <div class="home-hero-team home-hero-team-away">
-                    <div class="home-hero-abbr" data-team="{escape(f["away"])}">{escape(f["away"])}</div>
+                    <div class="home-hero-abbr" data-team="{escape(f["away"])}">{escape(team_short(f["away"]))}</div>
                 </div>
                 <div class="home-hero-at">@</div>
                 <div class="home-hero-team home-hero-team-home">
-                    <div class="home-hero-abbr" data-team="{escape(f["home"])}">{escape(f["home"])}</div>
+                    <div class="home-hero-abbr" data-team="{escape(f["home"])}">{escape(team_short(f["home"]))}</div>
                 </div>
             </div>
             <div class="home-hero-pitchers">
@@ -425,9 +426,9 @@ def _render_best_matchups(matchups: list[dict]) -> str:
         <a href="{_nav_url("Schedule")}" target="_self" class="home-mu-card">
             <div class="home-mu-header">
                 <div class="home-mu-teams">
-                    <span class="home-mu-abbr" data-team="{escape(m["away"])}">{escape(m["away"])}</span>
+                    <span class="home-mu-abbr" data-team="{escape(m["away"])}">{escape(team_short(m["away"]))}</span>
                     <span class="home-mu-at">@</span>
-                    <span class="home-mu-abbr" data-team="{escape(m["home"])}">{escape(m["home"])}</span>
+                    <span class="home-mu-abbr" data-team="{escape(m["home"])}">{escape(team_short(m["home"]))}</span>
                 </div>
                 <div class="home-mu-time">{escape(m["time"])}</div>
             </div>
@@ -548,9 +549,9 @@ def _render_schedule_strip(schedule: list[dict]) -> str:
         <a href="{_nav_url("Schedule")}" target="_self" class="home-game-card">
             <div class="home-game-time">{escape(g["time"])}</div>
             <div class="home-game-teams">
-                <span data-team="{escape(g["away"])}" class="home-game-abbr">{escape(g["away"])}</span>
+                <span data-team="{escape(g["away"])}" class="home-game-abbr">{escape(team_short(g["away"]))}</span>
                 <span class="home-game-at">@</span>
-                <span data-team="{escape(g["home"])}" class="home-game-abbr">{escape(g["home"])}</span>
+                <span data-team="{escape(g["home"])}" class="home-game-abbr">{escape(team_short(g["home"]))}</span>
             </div>
             <div class="home-game-proj">{pitcher_html}</div>
             <div class="home-game-status home-game-status-{status_cls}">{status_html}</div>

@@ -11,6 +11,7 @@ from lib.fantasy_report import (
     PitcherReport,
     GameReport,
 )
+from utils.team_names import team_short, team_full
 
 
 def _pitcher_section_html(report: PitcherReport) -> str:
@@ -18,11 +19,11 @@ def _pitcher_section_html(report: PitcherReport) -> str:
     parts: list[str] = []
 
     # Header
-    label = f"vs {report.opp_abbr}"
+    label = f"vs {team_short(report.opp_abbr)}"
     parts.append(
         f'<div style="font-weight:700; font-size:1rem; margin-bottom:0.3rem;">'
         f'{report.pitcher_name} '
-        f'<span style="color:{SLATE};">({report.team_abbr})</span> '
+        f'<span style="color:{SLATE};">({team_short(report.team_abbr)})</span> '
         f'<span style="color:{SLATE}; font-weight:400;">{label}</span>'
         f'</div>'
     )
@@ -53,7 +54,7 @@ def _pitcher_section_html(report: PitcherReport) -> str:
         ("BATTERS TO WATCH", GOLD, report.key_batters),
         ("BATTERS WHO WILL STRUGGLE", SLATE, report.struggling_batters),
         ("BULLPEN", SLATE, report.bullpen_notes),
-        (f"{report.opp_abbr} BATTING OUTLOOK", GOLD, report.batting_outlook),
+        (f"{team_short(report.opp_abbr)} BATTING OUTLOOK", GOLD, report.batting_outlook),
     ]
 
     for title, color, bullets in sections:
@@ -81,7 +82,7 @@ def _game_card_html(game: GameReport) -> str:
     parts.append(
         f'<div style="font-size:1.1rem; font-weight:700; margin-bottom:0.5rem; '
         f'color:{GOLD};">'
-        f'{game.away_abbr} @ {game.home_abbr} '
+        f'{team_short(game.away_abbr)} @ {team_short(game.home_abbr)} '
         f'<span style="font-weight:400; font-size:0.85rem; color:{SLATE};">'
         f'{game.game_time}</span></div>'
     )
@@ -92,7 +93,7 @@ def _game_card_html(game: GameReport) -> str:
     else:
         parts.append(
             f'<div style="color:{SLATE}; font-size:0.85rem; margin-bottom:0.5rem;">'
-            f'{game.away_abbr} starter: TBD</div>'
+            f'{team_short(game.away_abbr)} starter: TBD</div>'
         )
 
     parts.append('<hr style="border-color:var(--tdd-dark-border); margin:0.6rem 0;">')
@@ -102,7 +103,7 @@ def _game_card_html(game: GameReport) -> str:
     else:
         parts.append(
             f'<div style="color:{SLATE}; font-size:0.85rem;">'
-            f'{game.home_abbr} starter: TBD</div>'
+            f'{team_short(game.home_abbr)} starter: TBD</div>'
         )
 
     return (

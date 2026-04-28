@@ -13,6 +13,7 @@ from services.data_loader import (
 )
 from components.headshot import headshot_html
 from components.diamond_rating import diamond_rating_html
+from utils.team_names import team_short
 from views.player_rankings import _render_ranking_card, _CSS as _RANKING_CSS
 from components.expandable_card import EXPANDABLE_CARD_CSS
 
@@ -228,7 +229,7 @@ def _build_compact_card_html(
     headshot = headshot_html(pid, size=35)
     rating_html = diamond_rating_html(score, size="sm")
 
-    meta = f'<span data-team="{team}">{team}</span>' if team else ""
+    meta = f'<span data-team="{team}">{team_short(team)}</span>' if team else ""
     if age:
         meta = f"{meta} \u00b7 {age}" if meta else str(age)
 

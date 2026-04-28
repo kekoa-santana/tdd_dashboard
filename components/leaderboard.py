@@ -19,6 +19,7 @@ from typing import Iterable, Mapping
 
 from components.headshot import headshot_html
 from utils.html import esc, esc_attr
+from utils.team_names import team_short
 
 
 def _row_html(
@@ -47,7 +48,7 @@ def _row_html(
         name_html = name
 
     team_html = (
-        f'<span class="lb-team" data-team="{team}">{team}</span>' if team else ""
+        f'<span class="lb-team" data-team="{team}">{team_short(team)}</span>' if team else ""
     )
     range_html = f'<span class="lb-range">{range_str}</span>' if range_str else ""
 
@@ -70,7 +71,7 @@ def _watch_row_html(row: Mapping) -> str:
     team = esc_attr(row.get("team", "") or "")
     range_str = esc(row.get("range", "") or "")
 
-    team_html = f' (<span data-team="{team}">{team}</span>)' if team else ""
+    team_html = f' (<span data-team="{team}">{team_short(team)}</span>)' if team else ""
     range_html = f'<span class="lb-watch-range">{range_str}</span>' if range_str else ""
 
     return (

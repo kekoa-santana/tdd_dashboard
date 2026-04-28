@@ -25,6 +25,7 @@ from utils.formatters import fmt_stat
 from components.headshot import headshot_html
 from components.metric_cards import percentile_rank, pctile_color
 from components.diamond_rating import diamond_rating_html_composite
+from utils.team_names import team_full
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +206,7 @@ def page_compare() -> None:
             st.markdown(
                 f'<div style="text-align:center;">'
                 f'<div class="tdd-player-name">{esc(row[name_col])}</div>'
-                f'<div class="tdd-meta" data-team="{esc_attr(team)}">{esc(team)}</div>'
+                f'<div class="tdd-meta" data-team="{esc_attr(team)}">{esc(team_full(team))}</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )

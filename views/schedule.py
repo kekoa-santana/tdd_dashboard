@@ -1041,22 +1041,245 @@ def _parse_wind_category(wind_str: object) -> str:
     return "none"
 
 
-def _schedule_masthead_html(selected_date, n_games: int, n_hitters: int) -> str:
-    """Shared masthead for layout A and B."""
+def _schedule_masthead_html(
+    selected_date, n_games: int, n_hitters: int, n_edges: int = 0,
+) -> str:
+    """Redesigned masthead using .tdd-sched-masthead classes."""
     d = selected_date
-    date_str = d.strftime("%a %b %d")
+    date_str = d.strftime("%a, %b %d")
     year_str = d.strftime("%Y")
-    return (
-        f'<div class="sched-a-masthead">'
-        f'<div class="sched-a-date">{date_str}'
-        f'<span class="sched-a-date-year">&#183; {year_str}</span></div>'
-        f'<div class="sched-a-stats">'
-        f'<div><div class="sched-a-stat-v">{n_games}</div>'
-        f'<div class="sched-a-stat-l">Games</div></div>'
-        f'<div><div class="sched-a-stat-v">{n_hitters}</div>'
-        f'<div class="sched-a-stat-l">Hitters</div></div>'
-        f'</div></div>'
+    full_date = d.strftime("%B %d").replace(" 0", " ")
+    stats = [
+        (str(n_games), "Games"),
+        (str(n_hitters), "Hitters"),
+        (str(n_edges), "Edges"),
+    ]
+    stats_html = "".join(
+        f'<div class="stat"><div class="v">{esc(v)}</div>'
+        f'<div class="l">{esc(l)}</div></div>'
+        for v, l in stats
     )
+    return (
+        '<div class="tdd-sched-masthead">'
+        '<div class="title-block">'
+        f'<div class="eyebrow">MLB Schedule</div>'
+        f'<h1>Games <span class="date">{esc(full_date)}</span></h1>'
+        f'<div class="sub">{esc(year_str)} Regular Season</div>'
+        '</div>'
+        f'<div class="slate-stats">{stats_html}</div>'
+        '</div>'
+    )
+
+
+def _top_edges_html(props_df: pd.DataFrame, name_lookup: dict[int, str], n: int = 5) -> str:
+    """Render the top N prop edges as a rail above the game list."""
+    if props_df.empty or "expected" not in props_df.columns:
+        return ""
+
+    # Compute edge and filter to meaningful ones
+    work = props_df.copy()
+    if "line" not in work.columns or "expected" not in work.columns:
+        return ""
+    work["edge"] = work["expected"] - work["line"]
+    work["abs_edge"] = work["edge"].abs()
+    work = work[work["abs_edge"] > 0.3].sort_values("abs_edge", ascending=False).head(n)
+
+    if work.empty:
+        return ""
+
+    tiles = ""
+    for _, row in work.iterrows():
+        pid = int(row["player_id"]) if pd.notna(row.get("player_id")) else 0
+        name = name_lookup.get(pid, str(pid))
+        stat = str(row.get("stat", ""))
+        edge_val = row["edge"]
+        direction = "over" if edge_val > 0 else "under"
+        edge_str = f"+{edge_val:.1f}" if edge_val > 0 else f"{edge_val:.1f}"
+        line_str = f"{'O' if edge_val > 0 else 'U'} {row.get('line', ''):.1f} {stat}"
+        p_over = row.get("p_over", 0.5)
+        tier = "Lock" if abs(edge_val) > 1.5 else "Strong" if abs(edge_val) > 0.8 else "Lean"
+
+        tiles += (
+            '<div class="e">'
+            f'<div class="tier {esc(tier)}">{esc(tier)}</div>'
+            f'<div class="nm">{esc(name)}</div>'
+            f'<div class="line">{esc(line_str)}</div>'
+            f'<div class="edge-v {esc(direction)}">{esc(edge_str)}</div>'
+            '</div>'
+        )
+
+    return f'<div class="tdd-top-edges">{tiles}</div>'
+
+
+def _game_row_html(
+    game: pd.Series,
+    gpk: int,
+    pitcher_line_lookup: dict[tuple[int, int], str],
+    game_proj: dict[int, dict],
+    game_edges: dict[int, dict],
+    is_open: bool,
+) -> str:
+    """Render a single game as a .tdd-sg 5-column grid row."""
+    away = game.get("away_abbr", "?")
+    home = game.get("home_abbr", "?")
+    time_str = format_game_time(
+        game.get("game_datetime_utc"), fallback=game.get("game_time", ""),
+    )
+    status_raw = game.get("status", "")
+    away_sp = game.get("away_pitcher_name", "") or "TBD"
+    home_sp = game.get("home_pitcher_name", "") or "TBD"
+    away_pid_raw = game.get("away_pitcher_id")
+    home_pid_raw = game.get("home_pitcher_id")
+    away_pid = int(away_pid_raw) if pd.notna(away_pid_raw) else None
+    home_pid = int(home_pid_raw) if pd.notna(home_pid_raw) else None
+
+    # Status
+    if "Progress" in status_raw or "Live" in status_raw:
+        status_html = '<div class="status live"><span class="dot"></span> LIVE</div>'
+    elif "Final" in status_raw:
+        status_html = '<div class="status final">FINAL</div>'
+    else:
+        status_html = f'<div class="status scheduled">{esc(time_str)}</div>'
+
+    # Pitcher hand hints
+    away_hand = ""
+    home_hand = ""
+
+    # Col 1: Time
+    col_time = (
+        '<div class="col-time">'
+        f'<div class="time">{esc(time_str)}</div>'
+        f'{status_html}'
+        '</div>'
+    )
+
+    # Col 2: Teams + pitchers
+    col_teams = (
+        '<div class="col-teams">'
+        '<div class="tm">'
+        f'<span class="abbr" data-team="{esc_attr(away)}">{esc(away)}</span>'
+        f'<span class="pname">{esc(away_sp)}</span>'
+        '</div>'
+        '<div class="tm">'
+        f'<span class="abbr" data-team="{esc_attr(home)}">{esc(home)}</span>'
+        f'<span class="pname">{esc(home_sp)}</span>'
+        '</div>'
+        '</div>'
+    )
+
+    # Col 3: Projections (R, H, HR, K)
+    proj = game_proj.get(gpk, {})
+    proj_r = f"{proj.get('R', 0):.1f}" if proj.get("R") else ""
+    proj_h = f"{proj.get('H', 0):.1f}" if proj.get("H") else ""
+    proj_hr = f"{proj.get('HR', 0):.1f}" if proj.get("HR") else ""
+    proj_k = f"{proj.get('K', 0):.1f}" if proj.get("K") else ""
+
+    col_proj = (
+        '<div class="col-proj">'
+        '<div class="lbl">Projected</div>'
+        '<div class="row">'
+        f'<div class="m"><div class="v">{esc(proj_r)}</div><div class="k">R</div></div>'
+        f'<div class="m"><div class="v">{esc(proj_h)}</div><div class="k">H</div></div>'
+        f'<div class="m"><div class="v">{esc(proj_hr)}</div><div class="k">HR</div></div>'
+        f'<div class="m dim"><div class="v">{esc(proj_k)}</div><div class="k">K</div></div>'
+        '</div>'
+        '</div>'
+    )
+
+    # Col 4: Edges
+    edges = game_edges.get(gpk, {})
+    edge_count = edges.get("count", 0)
+    best_tier = edges.get("tier", "")
+    if edge_count > 0:
+        tier_html = f'<div class="tier-pill {esc(best_tier)}">{esc(best_tier)}</div>' if best_tier else ""
+        count_html = f'<div class="count"><b>{edge_count}</b> edges</div>'
+    else:
+        tier_html = ""
+        count_html = '<div class="count zero">0 edges</div>'
+
+    col_edges = (
+        '<div class="col-edges">'
+        f'{tier_html}'
+        f'{count_html}'
+        '</div>'
+    )
+
+    # Col 5: CTA
+    expanded_cls = " expanded" if is_open else ""
+    col_cta = (
+        '<div class="col-cta">'
+        'Details <span class="arrow">&rsaquo;</span>'
+        '</div>'
+    )
+
+    return (
+        f'<div class="tdd-sg{expanded_cls}">'
+        f'{col_time}{col_teams}{col_proj}{col_edges}{col_cta}'
+        '</div>'
+    )
+
+
+def _build_game_projections(sims: pd.DataFrame) -> dict[int, dict]:
+    """Aggregate game-level R/H/HR/K projections from game_props.
+
+    Uses batter rows for H/HR/R/K (summed across lineup) and
+    pitcher rows for Outs. Avoids double-counting.
+    """
+    result: dict[int, dict] = {}
+    if sims.empty or "game_pk" not in sims.columns:
+        return result
+
+    # Filter to today's games only
+    today_gpks = sims["game_pk"].unique()
+
+    # Batter stats: sum H, R, K across both lineups
+    batters = sims[sims["player_type"] == "batter"] if "player_type" in sims.columns else sims
+    for gpk, grp in batters.groupby("game_pk"):
+        gpk = int(gpk)
+        totals: dict[str, float] = {}
+        for _, row in grp.iterrows():
+            stat = row.get("stat", "")
+            exp = row.get("expected")
+            if pd.notna(exp) and stat in ("H", "R", "K", "HRR"):
+                totals[stat] = totals.get(stat, 0) + float(exp)
+        result[gpk] = totals
+
+    # Pitcher stats: sum HR allowed across both starters
+    pitchers = sims[sims["player_type"] == "pitcher"] if "player_type" in sims.columns else pd.DataFrame()
+    if not pitchers.empty:
+        for gpk, grp in pitchers.groupby("game_pk"):
+            gpk = int(gpk)
+            for _, row in grp.iterrows():
+                stat = row.get("stat", "")
+                exp = row.get("expected")
+                if pd.notna(exp) and stat == "HR":
+                    if gpk not in result:
+                        result[gpk] = {}
+                    result[gpk]["HR"] = result[gpk].get("HR", 0) + float(exp)
+
+    return result
+
+
+def _build_game_edges(sims: pd.DataFrame) -> dict[int, dict]:
+    """Compute per-game edge summary from game_props."""
+    result: dict[int, dict] = {}
+    if sims.empty or "game_pk" not in sims.columns:
+        return result
+
+    for gpk, grp in sims.groupby("game_pk"):
+        gpk = int(gpk)
+        if "p_over" not in grp.columns or "expected" not in grp.columns or "line" not in grp.columns:
+            result[gpk] = {"count": 0, "tier": ""}
+            continue
+        edges = grp[(grp["p_over"] >= 0.63) | (grp["p_over"] <= 0.37)]
+        count = len(edges)
+        if count == 0:
+            result[gpk] = {"count": 0, "tier": ""}
+        else:
+            max_edge = (edges["expected"] - edges["line"]).abs().max()
+            tier = "Lock" if max_edge > 1.5 else "Strong" if max_edge > 0.8 else "Lean"
+            result[gpk] = {"count": count, "tier": tier}
+    return result
 
 
 def _pitcher_proj_line_html(
@@ -1084,11 +1307,29 @@ def _render_layout_a(
     selected_date,
     batter_sims: pd.DataFrame,
 ) -> None:
-    """Direction A: Home-First Mirror -- compact, scannable cards."""
+    """List-view layout with 5-column game rows, top edges rail, and drilldown."""
     n_games = len(schedule)
     n_hitters = len(batter_sims) if not batter_sims.empty else 0
 
-    st.markdown(_schedule_masthead_html(selected_date, n_games, n_hitters), unsafe_allow_html=True)
+    # Pre-compute game projections and edges from sims
+    game_proj = _build_game_projections(sims)
+    game_edges = _build_game_edges(sims)
+    n_edges = sum(e.get("count", 0) for e in game_edges.values())
+
+    # Lookups
+    _lookups = _build_schedule_lookups()
+
+    # Masthead
+    st.markdown(
+        _schedule_masthead_html(selected_date, n_games, n_hitters, n_edges),
+        unsafe_allow_html=True,
+    )
+
+    # Top edges rail
+    if not sims.empty:
+        edges_html = _top_edges_html(sims, _lookups["name_lookup"])
+        if edges_html:
+            st.markdown(edges_html, unsafe_allow_html=True)
 
     if schedule.empty:
         tdd_info("No games scheduled for this date.")
@@ -1098,16 +1339,7 @@ def _render_layout_a(
     if "game_datetime_utc" in schedule.columns:
         schedule = schedule.sort_values("game_datetime_utc", na_position="last")
 
-    # Build hitter count per game_pk for badge
-    hitters_per_game: dict[int, int] = {}
-    if not batter_sims.empty:
-        for gpk, grp in batter_sims.groupby("game_pk"):
-            hitters_per_game[int(gpk)] = len(grp)
-
-    # Lookups + drilldown data (lazy, shared across all games)
-    _lookups = _build_schedule_lookups()
-
-    # Build pitcher projected line lookup from game_props: (game_pk, pitcher_id) -> line str
+    # Build pitcher projected line lookup
     _pitcher_line_lookup: dict[tuple[int, int], str] = {}
     if not sims.empty and "player_type" in sims.columns:
         _p_props = sims[sims["player_type"] == "pitcher"]
@@ -1159,14 +1391,13 @@ def _render_layout_a(
         }
         return _drilldown_data
 
-    # Layout A: styled game cards with button-driven drilldown
+    # Button styles for drilldown toggle
     st.markdown(
         '<style>'
-        '[data-testid="stButton"] button {'
+        '.sched-toggle [data-testid="stButton"] button {'
         '  background: transparent !important;'
         '  border: 1px solid var(--tdd-dark-border) !important;'
-        '  border-top: none !important;'
-        '  border-radius: 0 0 8px 8px !important;'
+        '  border-radius: 0 !important;'
         '  margin-top: -0.5rem !important;'
         '  padding: 0.3rem 1rem !important;'
         '  font-size: 0.7rem !important;'
@@ -1175,7 +1406,7 @@ def _render_layout_a(
         '  letter-spacing: 0.3px !important;'
         '  transition: border-color 0.15s, color 0.15s !important;'
         '}'
-        '[data-testid="stButton"] button:hover {'
+        '.sched-toggle [data-testid="stButton"] button:hover {'
         '  border-color: var(--tdd-gold) !important;'
         '  color: var(--tdd-gold) !important;'
         '  background: rgba(255,255,255,0.03) !important;'
@@ -1184,91 +1415,41 @@ def _render_layout_a(
         unsafe_allow_html=True,
     )
 
-    # Track which games are expanded
+    # Track expanded games
     if "sched_a_open" not in st.session_state:
         st.session_state["sched_a_open"] = set()
 
+    # Render game list
+    st.markdown('<div class="tdd-sg-list">', unsafe_allow_html=True)
+
     for _, game in schedule.iterrows():
         gpk = int(game["game_pk"])
-        away = game.get("away_abbr", "?")
-        home = game.get("home_abbr", "?")
-        away_name = game.get("away_team_name", away)
-        home_name = game.get("home_team_name", home)
-        time_str = format_game_time(
-            game.get("game_datetime_utc"), fallback=game.get("game_time", ""),
-        )
-        status = game.get("status", "")
-        away_sp = game.get("away_pitcher_name", "") or "TBD"
-        home_sp = game.get("home_pitcher_name", "") or "TBD"
-        away_pid_raw = game.get("away_pitcher_id")
-        home_pid_raw = game.get("home_pitcher_id")
-        away_pid = int(away_pid_raw) if pd.notna(away_pid_raw) else None
-        home_pid = int(home_pid_raw) if pd.notna(home_pid_raw) else None
-        nh = hitters_per_game.get(gpk, 0)
         is_open = gpk in st.session_state["sched_a_open"]
 
-        # Status badge
-        if "Progress" in status or "Live" in status:
-            status_html = '<span style="color:var(--tdd-sage); font-weight:700;">&#9679; LIVE</span>'
-        elif "Final" in status:
-            status_html = '<span style="color:var(--tdd-slate);">FINAL</span>'
-        else:
-            status_html = f'<span style="color:var(--tdd-slate);">{esc(time_str)}</span>'
-
-        nh_html = f'<span style="color:var(--tdd-gold); font-size:0.65rem;">{nh} hitters</span>' if nh else ""
-
-        border_color = "var(--tdd-gold)" if is_open else "var(--tdd-dark-border)"
-        card_html = (
-            f'<div style="border:1px solid {border_color}; border-bottom:none; '
-            f'border-radius:8px 8px 0 0; padding:0.7rem 1rem 0.5rem; '
-            f'background:rgba(255,255,255,0.015); display:block !important;">'
-            # Row 1: teams + time
-            f'<div style="display:flex; justify-content:space-between; align-items:baseline;">'
-            f'<div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">'
-            f'<span data-team="{esc_attr(away)}" style="font-family:var(--tdd-font-heading); '
-            f'font-weight:800; font-size:1.05rem;">{esc(away)}</span>'
-            f' <span style="color:var(--tdd-slate); font-size:0.72rem;">{esc(away_name)}</span>'
-            f' <span style="color:var(--tdd-slate); font-size:0.72rem;">@</span> '
-            f'<span data-team="{esc_attr(home)}" style="font-family:var(--tdd-font-heading); '
-            f'font-weight:800; font-size:1.05rem;">{esc(home)}</span>'
-            f' <span style="color:var(--tdd-slate); font-size:0.72rem;">{esc(home_name)}</span>'
-            f'</div>'
-            f'<div style="flex-shrink:0; text-align:right; margin-left:1rem;">'
-            f'<div style="font-size:0.65rem;">{status_html}</div>'
-            f'{nh_html}'
-            f'</div>'
-            f'</div>'
-            # Row 2: pitchers with projected lines
-            f'<div style="display:flex; justify-content:space-between; margin-top:0.3rem; gap:1rem;">'
-            # Away pitcher
-            f'<div style="flex:1; min-width:0;">'
-            f'<div style="color:var(--tdd-cream); font-size:0.75rem; font-weight:600;">{esc(away_sp)}</div>'
-            f'{_pitcher_proj_line_html(gpk, away_pid, _pitcher_line_lookup)}'
-            f'</div>'
-            # Home pitcher
-            f'<div style="flex:1; min-width:0; text-align:right;">'
-            f'<div style="color:var(--tdd-cream); font-size:0.75rem; font-weight:600;">{esc(home_sp)}</div>'
-            f'{_pitcher_proj_line_html(gpk, home_pid, _pitcher_line_lookup)}'
-            f'</div>'
-            f'</div>'
-            f'</div>'
+        # Game row
+        st.markdown(
+            _game_row_html(game, gpk, _pitcher_line_lookup, game_proj, game_edges, is_open),
+            unsafe_allow_html=True,
         )
-        st.markdown(card_html, unsafe_allow_html=True)
 
-        # Toggle button fused to bottom of card
-        if st.button(
-            f"{'Hide' if is_open else 'Show'} Matchups & Projections",
-            key=f"a_btn_{gpk}",
-            use_container_width=True,
-        ):
-            if is_open:
-                st.session_state["sched_a_open"].discard(gpk)
-            else:
-                st.session_state["sched_a_open"].add(gpk)
-            st.rerun()
+        # Toggle button
+        with st.container():
+            st.markdown('<div class="sched-toggle">', unsafe_allow_html=True)
+            if st.button(
+                f"{'Hide' if is_open else 'Show'} Matchups & Projections",
+                key=f"a_btn_{gpk}",
+                use_container_width=True,
+            ):
+                if is_open:
+                    st.session_state["sched_a_open"].discard(gpk)
+                else:
+                    st.session_state["sched_a_open"].add(gpk)
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
-        # Drilldown content when open
+        # Drilldown
         if is_open:
+            st.markdown('<div class="tdd-sg-drill">', unsafe_allow_html=True)
             st.markdown(
                 f'<a href="?page=game_analysis&game_pk={gpk}" target="_self" '
                 f'style="color:var(--tdd-gold); font-size:0.75rem; '
@@ -1290,6 +1471,9 @@ def _render_layout_a(
                 pitcher_sim_samples=_dd["pitcher_sim_samples"],
                 batter_sim_samples=_dd["batter_sim_samples"],
             )
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def page_schedule() -> None:
