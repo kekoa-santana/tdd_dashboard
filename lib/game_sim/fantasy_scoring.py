@@ -124,7 +124,7 @@ def compute_pitcher_fantasy(
     ip = outs / 3.0  # continuous IP for scoring
 
     dk = (
-        DK_PIT_IP * ip * 3.0  # DK scores per out: 0.75 per out = 2.25 per IP
+        DK_PIT_IP * ip  # 2.25 per IP (= 0.75 per out)
         + DK_PIT_K * result.k_samples
         + DK_PIT_ER * result.runs_samples  # using runs as ER proxy
         + DK_PIT_H * result.h_samples
@@ -193,7 +193,7 @@ def compute_season_pitcher_fantasy(
 
     # DK: no save scoring — closer DK value comes from stuff
     dk = (
-        DK_PIT_IP * ip * 3.0  # 0.75 per out = 2.25 per IP, scored per out
+        DK_PIT_IP * ip  # 2.25 per IP (= 0.75 per out)
         + DK_PIT_K * k
         + DK_PIT_ER * er
         + DK_PIT_H * h
