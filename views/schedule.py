@@ -637,6 +637,7 @@ def _render_game_drilldown(
             batter_sims_df=_batter_sims,
             pitcher_sim_samples=pitcher_sim_samples,
             batter_sim_samples=batter_sim_samples,
+            game_props=game_props,
         )
 
     elif section == "Scouting Report":
@@ -671,6 +672,7 @@ def _render_matchup_tab_sidebyside(
     batter_sims_df: pd.DataFrame | None = None,
     pitcher_sim_samples: object | None = None,
     batter_sim_samples: object | None = None,
+    game_props: pd.DataFrame | None = None,
 ) -> None:
     """Lineup matchups for both sides rendered in side-by-side columns."""
     col_away, col_home = st.columns(2)
@@ -687,6 +689,7 @@ def _render_matchup_tab_sidebyside(
                 batter_sims_df=batter_sims_df if batter_sims_df is not None else pd.DataFrame(),
                 pitcher_sim_samples=pitcher_sim_samples,
                 batter_sim_samples=batter_sim_samples,
+                game_props=game_props,
             )
 
 
@@ -712,6 +715,7 @@ def _render_matchup_tab(
     batter_sims_df: pd.DataFrame | None = None,
     pitcher_sim_samples: object | None = None,
     batter_sim_samples: object | None = None,
+    game_props: pd.DataFrame | None = None,
 ) -> None:
     """Team roster with inline matchup scouting on expand.
 
@@ -726,7 +730,6 @@ def _render_matchup_tab(
     Monte Carlo or matchup scoring runs at render time.
     """
     from components.scouting import build_matchup_scouting_bullets, compute_matchup_xwoba_edge
-    from services.data_loader import load_game_props
 
     if pos_lookup is None:
         pos_lookup = {}
@@ -735,10 +738,37 @@ def _render_matchup_tab(
     if batter_sims_df is None:
         batter_sims_df = pd.DataFrame()
 
-    _gp_all = load_game_props()
+    if game_props is None:
+        from services.data_loader import load_game_props
+        game_props = load_game_props()
     game_df = (
-        _gp_all[_gp_all["game_pk"] == gpk] if not _gp_all.empty else pd.DataFrame()
+        game_props[game_props["game_pk"] == gpk] if not game_props.empty else pd.DataFrame()
     )
+
+    # Pre-index DataFrames by player ID to avoid full scans per batter
+    _vuln_by_bid: dict[int, pd.DataFrame] = {}
+    if not vuln_df.empty and "batter_id" in vuln_df.columns:
+        for bid_key, grp in vuln_df.groupby("batter_id"):
+            _vuln_by_bid[int(bid_key)] = grp
+    _str_by_bid: dict[int, pd.DataFrame] = {}
+    if str_df is not None and not str_df.empty and "batter_id" in str_df.columns:
+        for bid_key, grp in str_df.groupby("batter_id"):
+            _str_by_bid[int(bid_key)] = grp
+
+    # Pre-filter batter sims to this game
+    _game_bsims: pd.DataFrame = pd.DataFrame()
+    _bsim_by_bid: dict[int, pd.Series] = {}
+    if not batter_sims_df.empty and "game_pk" in batter_sims_df.columns:
+        _game_bsims = batter_sims_df[batter_sims_df["game_pk"] == gpk]
+        if not _game_bsims.empty and "batter_id" in _game_bsims.columns:
+            for _, _bsr in _game_bsims.iterrows():
+                _bsim_by_bid[int(_bsr["batter_id"])] = _bsr
+
+    # Pre-index game_df by player_id for sim lookups
+    _game_df_by_pid: dict[int, pd.DataFrame] = {}
+    if not game_df.empty and "player_id" in game_df.columns:
+        for pid_key, grp in game_df.groupby("player_id"):
+            _game_df_by_pid[int(pid_key)] = grp
 
     for side_info in sides:
         pitcher_name = side_info["pitcher_name"]
@@ -792,10 +822,23 @@ def _render_matchup_tab(
         total_k_lift = total_bb_lift = 0.0
         n_scored = 0
 
+        # Pre-filter opposing pitcher arsenal once for all batters on this side
+        _matchup_arsenal = pd.DataFrame()
+        _matchup_pitcher_hand: str | None = None
+        if matchup_pid and not arsenal_df.empty:
+            _matchup_arsenal = arsenal_df[arsenal_df["pitcher_id"] == matchup_pid]
+            if not _matchup_arsenal.empty and "pitch_hand" in _matchup_arsenal.columns:
+                _mh = str(_matchup_arsenal["pitch_hand"].iloc[0]).strip().upper()
+                if _mh and _mh[0] in ("L", "R"):
+                    _matchup_pitcher_hand = _mh[0]
+
         # Pitcher card at top
         if pid:
             _p_hand_letter = ""
-            _p_ars_hand = arsenal_df[arsenal_df["pitcher_id"] == pid] if not arsenal_df.empty else pd.DataFrame()
+            if pid == matchup_pid and not _matchup_arsenal.empty:
+                _p_ars_hand = _matchup_arsenal
+            else:
+                _p_ars_hand = arsenal_df[arsenal_df["pitcher_id"] == pid] if not arsenal_df.empty else pd.DataFrame()
             if not _p_ars_hand.empty and "pitch_hand" in _p_ars_hand.columns:
                 _h = str(_p_ars_hand["pitch_hand"].iloc[0]).strip().upper()
                 if _h and _h[0] in ("L", "R"):
@@ -816,12 +859,10 @@ def _render_matchup_tab(
                 if _p_detail_parts:
                     st.markdown(" ".join(_p_detail_parts), unsafe_allow_html=True)
 
-                # Pitcher game sim — read from game_props (same source as Props Lab)
-                if not game_df.empty and "player_id" in game_df.columns:
-                    _p_rows = game_df[
-                        (game_df["player_id"] == pid)
-                        & (game_df.get("player_type", "pitcher") == "pitcher")
-                    ]
+                # Pitcher game sim -- read from pre-indexed game_df
+                _p_gdf = _game_df_by_pid.get(pid, pd.DataFrame())
+                if not _p_gdf.empty:
+                    _p_rows = _p_gdf[_p_gdf.get("player_type", "pitcher") == "pitcher"]
                     if not _p_rows.empty:
                         _render_player_sim_from_props(
                             _p_rows,
@@ -852,22 +893,16 @@ def _render_matchup_tab(
             if _bh and str(_bh).strip().upper()[0] in ("L", "R", "S"):
                 hand_letter = str(_bh).strip().upper()[0]
 
-            # Matchup advantage — from precomputed batter sims
+            # Matchup advantage -- from pre-indexed batter sims
             k_lift = bb_lift = hr_lift = 0.0
-            _bsim_row = None
-            if bid and not batter_sims_df.empty:
-                _bs = batter_sims_df[
-                    (batter_sims_df["game_pk"] == gpk)
-                    & (batter_sims_df["batter_id"] == bid)
-                ]
-                if not _bs.empty:
-                    _bsim_row = _bs.iloc[0]
-                    k_lift = float(_bsim_row.get("matchup_k_lift", 0.0))
-                    bb_lift = float(_bsim_row.get("matchup_bb_lift", 0.0))
-                    hr_lift = float(_bsim_row.get("matchup_hr_lift", 0.0))
-                    total_k_lift += k_lift
-                    total_bb_lift += bb_lift
-                    n_scored += 1
+            _bsim_row = _bsim_by_bid.get(bid) if bid else None
+            if _bsim_row is not None:
+                k_lift = float(_bsim_row.get("matchup_k_lift", 0.0))
+                bb_lift = float(_bsim_row.get("matchup_bb_lift", 0.0))
+                hr_lift = float(_bsim_row.get("matchup_hr_lift", 0.0))
+                total_k_lift += k_lift
+                total_bb_lift += bb_lift
+                n_scored += 1
 
             # Expander label
             arch_tag = f" | {arch}" if arch else ""
@@ -879,20 +914,11 @@ def _render_matchup_tab(
 
                 # Matchup edge via odds-ratio xwOBA
                 _advantage_badge = ""
-                _p_arsenal = pd.DataFrame()
-                _h_vuln = pd.DataFrame()
-                _h_str = pd.DataFrame()
-                _pitcher_hand = None
-                if matchup_pid and bid and not arsenal_df.empty and not vuln_df.empty:
-                    _p_arsenal = arsenal_df[arsenal_df["pitcher_id"] == matchup_pid]
-                    _h_vuln = vuln_df[vuln_df["batter_id"] == bid]
-                    _h_str = (
-                        str_df[str_df["batter_id"] == bid]
-                        if str_df is not None and not str_df.empty
-                        else pd.DataFrame()
-                    )
-                    if not _p_arsenal.empty and "pitch_hand" in _p_arsenal.columns:
-                        _pitcher_hand = str(_p_arsenal["pitch_hand"].iloc[0])
+                _p_arsenal = _matchup_arsenal
+                _h_vuln = _vuln_by_bid.get(bid, pd.DataFrame()) if bid else pd.DataFrame()
+                _h_str = _str_by_bid.get(bid, pd.DataFrame()) if bid else pd.DataFrame()
+                _pitcher_hand = _matchup_pitcher_hand
+                if matchup_pid and bid and not _p_arsenal.empty and not _h_vuln.empty:
                     _batter_hand = hand_letter or None
 
                     if not _p_arsenal.empty and not _h_vuln.empty:
@@ -966,12 +992,10 @@ def _render_matchup_tab(
                 if detail_parts:
                     st.markdown("".join(detail_parts), unsafe_allow_html=True)
 
-                # Batter game sim — read from game_props (same source as Props Lab)
-                if bid and not game_df.empty and "player_id" in game_df.columns:
-                    _b_rows = game_df[
-                        (game_df["player_id"] == bid)
-                        & (game_df.get("player_type", "batter") == "batter")
-                    ]
+                # Batter game sim -- read from pre-indexed game_df
+                _b_gdf = _game_df_by_pid.get(bid, pd.DataFrame()) if bid else pd.DataFrame()
+                if not _b_gdf.empty:
+                    _b_rows = _b_gdf[_b_gdf.get("player_type", "batter") == "batter"]
                     if not _b_rows.empty:
                         _render_player_sim_from_props(
                             _b_rows,
@@ -1219,6 +1243,7 @@ def _game_row_html(
     )
 
 
+@st.cache_data(ttl=300)
 def _build_game_projections(sims: pd.DataFrame) -> dict[int, dict]:
     """Aggregate game-level R/H/HR/K projections from game_props.
 
@@ -1260,6 +1285,7 @@ def _build_game_projections(sims: pd.DataFrame) -> dict[int, dict]:
     return result
 
 
+@st.cache_data(ttl=300)
 def _build_game_edges(sims: pd.DataFrame) -> dict[int, dict]:
     """Compute per-game edge summary from game_props."""
     result: dict[int, dict] = {}
@@ -1539,7 +1565,7 @@ def page_schedule() -> None:
         # Overlay live game status from MLB API so cards reflect
         # current state (In Progress / Final) between refreshes
         try:
-            live_sched = fetch_live_schedule(today.isoformat())
+            live_sched = fetch_live_schedule(today.isoformat(), include_weather=False)
             if (
                 not live_sched.empty
                 and "game_pk" in live_sched.columns
