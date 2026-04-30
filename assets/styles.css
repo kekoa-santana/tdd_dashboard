@@ -120,18 +120,23 @@ h1, h2, h3 {
 /* Hide Streamlit's default chrome */
 [data-testid="stSidebar"] { display: none; }
 [data-testid="stSidebarCollapsedControl"] { display: none; }
-[data-testid="stToolbar"] { display: none; }
-[data-testid="stDecoration"] { display: none; }
-header[data-testid="stHeader"] { display: none; }
-[data-testid="stFooter"] { display: none; }
-footer { display: none; }
-.viewerBadge_container__r5tak { display: none !important; }
-.viewerBadge_link__qRIco { display: none !important; }
+[data-testid="stToolbar"] { display: none !important; }
+[data-testid="stDecoration"] { display: none !important; }
+header[data-testid="stHeader"] { display: none !important; }
+[data-testid="stFooter"] { display: none !important; }
 [data-testid="manage-app-button"] { display: none !important; }
-._profileContainer_gzau3_53 { display: none !important; }
+[data-testid="stStatusWidget"] { display: none !important; }
+[data-testid="stAppDeployButton"] { display: none !important; }
+footer { visibility: hidden !important; height: 0 !important; }
 div[class*="viewerBadge"] { display: none !important; }
 div[class*="profileContainer"] { display: none !important; }
-._bottom_gzau3_39 { display: none !important; }
+div[class*="StatusWidget"] { display: none !important; }
+a[class*="viewerBadge"] { display: none !important; }
+iframe[title="streamlit_badge"] { display: none !important; }
+[class*="Bottom"] > * { display: none !important; }
+.stApp > footer { display: none !important; }
+.stApp iframe[src*="streamlit"] { display: none !important; }
+[data-testid="stBottom"] { display: none !important; }
 div[class*="_bottom"] { display: none !important; }
 
 /* Disable drag-to-zoom and pinch-to-zoom on all Plotly charts.
