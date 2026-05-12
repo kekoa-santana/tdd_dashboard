@@ -124,6 +124,24 @@ def load_pitcher_putaway() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_DATA_TTL)
+def load_pitcher_game_logs() -> pd.DataFrame:
+    """Pitcher game-by-game stats (K, BB, IP, pitches, etc.)."""
+    path = DASHBOARD_DIR / "pitcher_game_logs.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_pitcher_advanced_stats() -> pd.DataFrame:
+    """Pitcher advanced Statcast metrics (zone%, chase%, whiff%, etc.)."""
+    path = DASHBOARD_DIR / "pitcher_advanced.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
 def load_hitter_vulnerability(career: bool = False) -> pd.DataFrame:
     if career:
         path = DASHBOARD_DIR / "hitter_vuln_career.parquet"
@@ -623,10 +641,15 @@ def load_weekly_snapshots(player_type: str) -> dict[str, pd.DataFrame]:
 
 
 @st.cache_data(ttl=600)  # 10-minute TTL for live schedule data
-def fetch_live_schedule(game_date: str | None = None) -> pd.DataFrame:
+def fetch_live_schedule(
+    game_date: str | None = None,
+    include_weather: bool = True,
+) -> pd.DataFrame:
     """Fetch live schedule from MLB Stats API with short TTL cache."""
     from lib.schedule import fetch_todays_schedule
-    return fetch_todays_schedule(game_date=game_date)
+    return fetch_todays_schedule(
+        game_date=game_date, include_weather=include_weather,
+    )
 
 
 @st.cache_data(ttl=600)  # 10-minute TTL for live lineup data
@@ -680,17 +703,25 @@ def backfill_missing_lineups(
     if not missing_pairs:
         return lineups_df
 
-    # Fetch only the games that have incomplete lineups
+    # Fetch only the games that have incomplete lineups (parallel)
     missing_gpks = {gpk for gpk, _ in missing_pairs}
     fetched: list[pd.DataFrame] = []
-    for gpk in missing_gpks:
-        lu = fetch_game_lineups(gpk)
-        if not lu.empty:
-            # Only keep rows for teams that were actually missing
-            missing_teams = {t for g, t in missing_pairs if g == gpk}
-            lu = lu[lu["team_abbr"].isin(missing_teams)]
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(fetch_game_lineups, gpk): gpk for gpk in missing_gpks}
+        for future in as_completed(futures):
+            gpk = futures[future]
+            try:
+                lu = future.result()
+            except Exception:
+                continue
             if not lu.empty:
-                fetched.append(lu)
+                # Only keep rows for teams that were actually missing
+                missing_teams = {t for g, t in missing_pairs if g == gpk}
+                lu = lu[lu["team_abbr"].isin(missing_teams)]
+                if not lu.empty:
+                    fetched.append(lu)
 
     if not fetched:
         return lineups_df
@@ -714,6 +745,33 @@ def fetch_live_boxscores(schedule_df: pd.DataFrame) -> pd.DataFrame:
 def load_milb_factors(player_type: str) -> pd.DataFrame:
     """Load MiLB translation factors (batters or pitchers)."""
     path = DASHBOARD_DIR / f"milb_{player_type}_factors.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_prospect_comps_batters() -> pd.DataFrame:
+    """Load prospect-to-MLB batter comparables."""
+    path = DASHBOARD_DIR / "prospect_comps_batters.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_prospect_comps_pitchers() -> pd.DataFrame:
+    """Load prospect-to-MLB pitcher comparables."""
+    path = DASHBOARD_DIR / "prospect_comps_pitchers.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_milb_priors() -> pd.DataFrame:
+    """Load MiLB Bayesian model priors (distributional, logit scale)."""
+    path = DASHBOARD_DIR / "milb_priors.parquet"
     if not path.exists():
         return pd.DataFrame()
     return pd.read_parquet(path)

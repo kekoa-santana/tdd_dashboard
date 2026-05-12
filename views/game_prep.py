@@ -17,12 +17,21 @@ from services.data_loader import (
     load_roster,
     backfill_missing_lineups,
     fetch_live_schedule, fetch_live_lineups,
+    load_prospect_comps_batters, load_prospect_comps_pitchers, load_milb_priors,
+    load_pitcher_game_logs,
+    load_pitcher_advanced_stats,
+    load_pitcher_location_grid,
 )
 from components.scouting import (
     build_attack_plan, compute_matchup_xwoba_edge, PITCH_DISPLAY,
+    build_comp_proxy_data, build_pitcher_comp_arsenal,
+    assess_walk_strategy,
+    get_pitcher_recent_form,
 )
 from components.headshot import headshot_html
 from components.team_logo import team_logo_html
+from lib.zone_charts import plot_pitcher_location_compact
+from utils.chart_embed import fig_to_base64
 from utils.html import esc, esc_attr
 from utils.helpers import format_game_time
 
@@ -120,8 +129,23 @@ def _render_lineup_optimization_html(
 
     n = min(len(batters), 9)
 
+    # Column header
+    rows = (
+        '<div style="display:flex;align-items:center;padding:3px 0;margin-bottom:2px;'
+        'border-bottom:1px solid var(--tdd-dark-border)">'
+        '<span style="width:1.6rem"></span>'
+        '<span style="padding:0 0.5rem;width:28px"></span>'
+        '<span style="color:var(--tdd-slate);flex:1;font-size:0.7rem;letter-spacing:0.5px"></span>'
+        '<span style="color:var(--tdd-slate);font-size:0.7rem;width:3.5rem;text-align:center">K%</span>'
+        '<span style="color:var(--tdd-slate);font-size:0.7rem;width:3.5rem;text-align:center">BB%</span>'
+        '<span style="color:var(--tdd-slate);font-size:0.7rem;width:3.5rem;text-align:center">wOBA</span>'
+        '<span style="color:var(--tdd-slate);font-size:0.7rem;width:4.5rem;text-align:center">Edge</span>'
+        '<span style="color:var(--tdd-slate);font-size:0.7rem;width:10rem;text-align:left">Approach</span>'
+        '<span style="color:var(--tdd-slate);font-size:0.7rem;width:4.5rem;text-align:right">Matchup</span>'
+        '</div>'
+    )
+
     # Build recommended order rows
-    rows = ""
     for i, b in enumerate(optimal[:n]):
         xw = b["matchup_xwoba"]
         color = SAGE if xw > 0.325 else (EMBER if xw < 0.305 else SLATE)
@@ -132,18 +156,69 @@ def _render_lineup_optimization_html(
             meta_parts.append(pos)
         if label:
             meta_parts.append(label)
-        meta_html = f' <span style="color:var(--tdd-slate);font-size:0.55rem">{esc(", ".join(meta_parts))}</span>' if meta_parts else ""
+        meta_html = f' <span style="color:var(--tdd-slate);font-size:0.7rem">{esc(", ".join(meta_parts))}</span>' if meta_parts else ""
+
+        # Platoon badge
+        platoon_html = ""
+        plan = b.get("plan")
+        if plan and plan.get("platoon") == "favorable":
+            platoon_html = '<span style="color:var(--tdd-sage);font-size:0.6rem;border:1px solid var(--tdd-sage);border-radius:2px;padding:0 3px;margin-left:0.3rem">+</span>'
+        elif plan and plan.get("platoon") == "unfavorable":
+            platoon_html = '<span style="color:var(--tdd-ember);font-size:0.6rem;border:1px solid var(--tdd-ember);border-radius:2px;padding:0 3px;margin-left:0.3rem">&minus;</span>'
+
+        # Edge label
+        edge = b.get("edge")
+        if edge and edge.get("advantage") == "hitter":
+            edge_html = f'<span style="color:var(--tdd-sage);font-size:0.72rem">Hitter</span>'
+        elif edge and edge.get("advantage") == "pitcher":
+            edge_html = f'<span style="color:var(--tdd-ember);font-size:0.72rem">Pitcher</span>'
+        else:
+            edge_html = f'<span style="color:var(--tdd-slate);font-size:0.72rem">Even</span>'
+
+        # Hunt/avoid summary
+        approach_html = ""
+        if plan:
+            hunt_picks = [p["pitch_name"] for p in plan.get("pitch_plans", [])
+                          if p.get("approach") == "hunt" and p.get("tier") == "primary"]
+            avoid_picks = [p["pitch_name"] for p in plan.get("pitch_plans", [])
+                           if p.get("approach") == "avoid" and p.get("tier") == "primary"]
+            parts = []
+            if hunt_picks:
+                parts.append(f'<span style="color:var(--tdd-sage)">Hunt {", ".join(hunt_picks[:2])}</span>')
+            if avoid_picks:
+                parts.append(f'<span style="color:var(--tdd-ember)">Avoid {", ".join(avoid_picks[:1])}</span>')
+            if parts:
+                approach_html = f'<span style="font-size:0.72rem">{" · ".join(parts)}</span>'
+
+        # Bayesian projections
+        bproj = b.get("projections", {})
+        k_pct = bproj.get("projected_k_rate")
+        bb_pct = bproj.get("projected_bb_rate")
+        woba = bproj.get("projected_woba")
+
+        k_color = SAGE if k_pct and k_pct < 0.20 else (EMBER if k_pct and k_pct > 0.28 else SLATE)
+        bb_color = SAGE if bb_pct and bb_pct > 0.10 else (EMBER if bb_pct and bb_pct < 0.06 else SLATE)
+        woba_color = SAGE if woba and woba > 0.340 else (EMBER if woba and woba < 0.300 else SLATE)
+
+        k_html = f'<span style="color:{k_color};font-family:var(--tdd-font-mono);font-size:0.8rem">{k_pct*100:.0f}</span>' if k_pct else '<span style="color:var(--tdd-slate);font-size:0.75rem">--</span>'
+        bb_html = f'<span style="color:{bb_color};font-family:var(--tdd-font-mono);font-size:0.8rem">{bb_pct*100:.0f}</span>' if bb_pct else '<span style="color:var(--tdd-slate);font-size:0.75rem">--</span>'
+        woba_html = f'<span style="color:{woba_color};font-family:var(--tdd-font-mono);font-size:0.8rem">.{int(woba*1000):03d}</span>' if woba else '<span style="color:var(--tdd-slate);font-size:0.75rem">--</span>'
 
         rows += (
-            '<div style="display:flex;align-items:center;padding:4px 0;'
-            'border-bottom:1px solid var(--tdd-dark-border-faint);font-size:0.75rem">'
-            f'<span style="color:var(--tdd-gold);width:1.4rem;text-align:right;'
-            f'font-family:var(--tdd-font-heading);font-weight:700;font-size:0.8rem">{i+1}</span>'
-            f'<span style="padding:0 0.4rem">{headshot_html(b["batter_id"], size=24)}</span>'
+            '<div style="display:flex;align-items:center;padding:5px 0;'
+            'border-bottom:1px solid var(--tdd-dark-border-faint);font-size:0.9rem">'
+            f'<span style="color:var(--tdd-gold);width:1.6rem;text-align:right;'
+            f'font-family:var(--tdd-font-heading);font-weight:700;font-size:1rem">{i+1}</span>'
+            f'<span style="padding:0 0.5rem">{headshot_html(b["batter_id"], size=28)}</span>'
             f'<span style="color:var(--tdd-cream);flex:1;font-family:var(--tdd-font-heading);'
-            f'font-weight:600">{esc(b["batter_name"])}{meta_html}</span>'
+            f'font-weight:600">{esc(b["batter_name"])}{meta_html}{platoon_html}</span>'
+            f'<span style="width:3.5rem;text-align:center">{k_html}</span>'
+            f'<span style="width:3.5rem;text-align:center">{bb_html}</span>'
+            f'<span style="width:3.5rem;text-align:center">{woba_html}</span>'
+            f'<span style="width:4.5rem;text-align:center">{edge_html}</span>'
+            f'<span style="width:10rem;text-align:left">{approach_html}</span>'
             f'<span style="color:{color};font-family:var(--tdd-font-mono);'
-            f'font-weight:700;font-size:0.78rem">.{int(xw*1000):03d}</span>'
+            f'font-weight:700;font-size:0.95rem;width:4.5rem;text-align:right">.{int(xw*1000):03d}</span>'
             '</div>'
         )
 
@@ -180,11 +255,12 @@ def _render_lineup_optimization_html(
     return (
         '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);'
         'border-radius:6px;padding:0.8rem 1rem;margin-bottom:1rem">'
-        '<div style="color:var(--tdd-gold);font-size:0.6rem;font-weight:700;'
+        '<div style="color:var(--tdd-gold);font-size:0.75rem;font-weight:700;'
         'letter-spacing:2px;text-transform:uppercase;margin-bottom:4px">'
         'Recommended Batting Order</div>'
-        f'<div style="color:var(--tdd-slate);font-size:0.6rem;margin-bottom:0.5rem">'
-        f'{esc(opp_abbr)} vs {esc(pitcher_name)} -- ranked by matchup xwOBA</div>'
+        f'<div style="color:var(--tdd-slate);font-size:0.75rem;margin-bottom:0.5rem">'
+        f'{esc(opp_abbr)} vs {esc(pitcher_name)} · '
+        f'K%/BB%/wOBA = Bayesian projections · Matchup = pitch-type matchup quality (avg .315)</div>'
         f'{rows}'
         f'{bench_html}'
         '</div>'
@@ -202,6 +278,8 @@ def _compute_bullpen_matrix(
     arsenal_by_stand_df: pd.DataFrame,
     vuln_df: pd.DataFrame,
     str_df: pd.DataFrame,
+    comps_df: pd.DataFrame | None = None,
+    milb_priors_df: pd.DataFrame | None = None,
 ) -> list[dict]:
     """Compute matchup xwOBA for each reliever vs each batter.
 
@@ -217,6 +295,13 @@ def _compute_bullpen_matrix(
             bid = b["batter_id"]
             h_vul = vuln_df[vuln_df["batter_id"] == bid]
             h_str = str_df[str_df["batter_id"] == bid] if not str_df.empty else pd.DataFrame()
+
+            # Comp fallback for MiLB callups
+            if h_vul.empty and comps_df is not None and not comps_df.empty:
+                h_vul, h_str, _ = build_comp_proxy_data(
+                    bid, comps_df, vuln_df, str_df, milb_priors_df,
+                )
+
             if h_vul.empty:
                 continue
 
@@ -599,24 +684,24 @@ def _render_pitch_plan_row(plan: dict, batter_label: str = "") -> str:
         '<div style="display:flex;justify-content:space-between;align-items:center">'
         '<div style="display:flex;align-items:center;gap:0.5rem">'
         f'<span style="color:var(--tdd-cream);font-family:var(--tdd-font-heading);'
-        f'font-weight:700;font-size:0.82rem">{esc(plan["pitch_name"])}</span>'
-        f'<span style="color:var(--tdd-slate);font-size:0.65rem">{usage_label}</span>'
-        f'<span style="color:var(--tdd-slate);font-size:0.65rem">{velo_str} mph</span>'
+        f'font-weight:700;font-size:0.95rem">{esc(plan["pitch_name"])}</span>'
+        f'<span style="color:var(--tdd-slate);font-size:0.78rem">{usage_label}</span>'
+        f'<span style="color:var(--tdd-slate);font-size:0.78rem">{velo_str} mph</span>'
         '</div>'
         '<div style="display:flex;align-items:center;gap:0.5rem">'
-        f'<span style="color:{style["color"]};font-size:0.6rem;font-weight:700;'
+        f'<span style="color:{style["color"]};font-size:0.72rem;font-weight:700;'
         f'letter-spacing:1px">{style["label"]}</span>'
         f'<span style="color:{style["color"]};font-family:var(--tdd-font-mono);'
-        f'font-weight:700;font-size:0.8rem">.{int(xw*1000):03d}</span>'
+        f'font-weight:700;font-size:0.95rem">.{int(xw*1000):03d}</span>'
         '</div>'
         '</div>'
         # Recommendation text
-        f'<div style="color:var(--tdd-cream);font-size:0.72rem;margin-top:3px;'
+        f'<div style="color:var(--tdd-cream);font-size:0.85rem;margin-top:3px;'
         f'opacity:0.85">{esc(plan["recommendation"])}</div>'
         # Stats row
         '<div style="display:flex;gap:1rem;margin-top:4px">'
-        f'<span style="color:var(--tdd-slate);font-size:0.6rem">Whiff {whiff*100:.0f}%</span>'
-        f'<span style="color:var(--tdd-slate);font-size:0.6rem">xwOBA con '
+        f'<span style="color:var(--tdd-slate);font-size:0.72rem">Whiff {whiff*100:.0f}%</span>'
+        f'<span style="color:var(--tdd-slate);font-size:0.72rem">xwOBA con '
         f'.{int(plan["matchup_xwoba_contact"]*1000):03d}</span>'
         '</div>'
         '</div>'
@@ -631,8 +716,14 @@ def _render_batter_attack_card(
     plan: dict,
     edge: dict,
     putaway_html: str = "",
+    comp_info: dict | None = None,
+    zone_chart_b64: str | None = None,
 ) -> str:
-    """Render a full attack plan card for one batter."""
+    """Render a full attack plan card for one batter.
+
+    When *comp_info* is provided the card is annotated with a MiLB badge,
+    comp names, and (optionally) MiLB rate projections.
+    """
     xw = edge["matchup_xwoba"]
     adv = edge["advantage"]
     if adv == "hitter":
@@ -659,6 +750,15 @@ def _render_batter_attack_card(
             'margin-left:0.4rem">PLATOON -</span>'
         )
 
+    # MiLB comp badge
+    milb_badge_html = ""
+    if comp_info:
+        milb_badge_html = (
+            '<span style="color:var(--tdd-gold);font-size:0.55rem;font-weight:700;'
+            'border:1px solid var(--tdd-gold);border-radius:3px;padding:1px 5px;'
+            'margin-left:0.4rem;letter-spacing:0.5px">MiLB COMP</span>'
+        )
+
     # Batter hand context label
     batter_label = plan.get("batter_label", "")
     hand_html = ""
@@ -666,6 +766,43 @@ def _render_batter_attack_card(
         hand_html = (
             f'<span style="color:var(--tdd-slate);font-size:0.58rem;'
             f'margin-left:0.3rem">({batter_label})</span>'
+        )
+
+    # Comp + MiLB rates subtitle (below the summary line)
+    comp_subtitle_html = ""
+    if comp_info:
+        names = comp_info.get("comp_names", [])
+        sims = comp_info.get("comp_similarities", [])
+        comp_parts = [
+            f'{esc(n)} ({s:.0%})' for n, s in zip(names, sims)
+        ]
+        comp_line = ", ".join(comp_parts)
+
+        # MiLB rate projections
+        rates = comp_info.get("milb_rates", {})
+        rate_parts: list[str] = []
+        _RATE_LABELS = {"k_rate": "K%", "bb_rate": "BB%", "hr_rate": "HR%"}
+        for stat_key, label in _RATE_LABELS.items():
+            r = rates.get(stat_key)
+            if r:
+                mean_pct = r["mean"] * 100
+                p10_pct = r["p10"] * 100
+                p90_pct = r["p90"] * 100
+                rate_parts.append(
+                    f'{label} {mean_pct:.1f} '
+                    f'<span style="opacity:0.5">[{p10_pct:.0f}-{p90_pct:.0f}]</span>'
+                )
+        rates_line = (
+            f'<span style="margin-left:0.6rem">{" &nbsp; ".join(rate_parts)}</span>'
+            if rate_parts else ""
+        )
+
+        comp_subtitle_html = (
+            f'<div style="margin-top:2px;font-size:0.6rem;color:var(--tdd-slate);'
+            f'opacity:0.8">'
+            f'Based on: {comp_line}'
+            f'{rates_line}'
+            f'</div>'
         )
 
     # Pitch plan rows with usage threshold separator
@@ -684,36 +821,132 @@ def _render_batter_attack_card(
             )
         pitch_rows += _render_pitch_plan_row(p, batter_label=_bl)
 
+    # Card border: gold accent for comp-based cards
+    border_style = (
+        'border:1px solid var(--tdd-gold);border-left:3px solid var(--tdd-gold)'
+        if comp_info
+        else 'border:1px solid var(--tdd-dark-border)'
+    )
+
+    # Body content: pitch plans + putaway
+    body_content = f'{pitch_rows}{putaway_html}'
+
+    if zone_chart_b64:
+        # Two-column layout: plans on left, zone chart on right
+        body_html = (
+            '<div style="display:flex;gap:0.8rem;margin-top:0.2rem">'
+            f'<div style="flex:2;min-width:0">{body_content}</div>'
+            f'<div style="flex:0 0 280px;padding-top:0.3rem">'
+            f'<div style="color:var(--tdd-slate);font-size:0.65rem;text-align:center;'
+            f'margin-bottom:2px">Hunt pitch location</div>'
+            f'<img src="{zone_chart_b64}" style="width:100%;border-radius:4px;'
+            f'" />'
+            f'</div>'
+            '</div>'
+        )
+    else:
+        body_html = body_content
+
     return (
-        '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);'
-        'border-radius:6px;padding:1rem;margin-bottom:0.8rem">'
+        f'<div style="background:var(--tdd-dark-card);{border_style};'
+        f'border-radius:6px;padding:1rem;margin-bottom:0.8rem">'
         # Header: order + headshot + name + edge badge
         '<div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.6rem">'
         f'<span style="color:var(--tdd-gold);font-family:var(--tdd-font-heading);'
-        f'font-weight:700;font-size:1.1rem;min-width:1.4rem">{batting_order}</span>'
-        f'{headshot_html(batter_id, size=40)}'
+        f'font-weight:700;font-size:1.4rem;min-width:1.6rem">{batting_order}</span>'
+        f'{headshot_html(batter_id, size=48)}'
         '<div style="flex:1">'
         f'<div style="display:flex;align-items:center;flex-wrap:wrap">'
         f'<span style="color:var(--tdd-cream);font-family:var(--tdd-font-heading);'
-        f'font-weight:700;font-size:0.95rem">{esc(batter_name)}</span>'
-        f'<span style="color:var(--tdd-slate);font-size:0.7rem;margin-left:0.4rem">{esc(team_abbr)}</span>'
+        f'font-weight:700;font-size:1.15rem">{esc(batter_name)}</span>'
+        f'<span style="color:var(--tdd-slate);font-size:0.8rem;margin-left:0.4rem">{esc(team_abbr)}</span>'
         f'{hand_html}'
         f'{platoon_html}'
+        f'{milb_badge_html}'
         '</div>'
-        f'<div style="color:var(--tdd-slate);font-size:0.65rem;margin-top:1px">'
+        f'<div style="color:var(--tdd-slate);font-size:0.78rem;margin-top:2px">'
         f'{esc(plan["summary"])}</div>'
+        f'{comp_subtitle_html}'
         '</div>'
         f'<div style="text-align:right">'
         f'<div style="color:{edge_color};font-family:var(--tdd-font-mono);'
-        f'font-weight:700;font-size:1rem">.{int(xw*1000):03d}</div>'
-        f'<div style="color:{edge_color};font-size:0.55rem;letter-spacing:0.5px">{edge_label}</div>'
+        f'font-weight:700;font-size:1.2rem">.{int(xw*1000):03d}</div>'
+        f'<div style="color:{edge_color};font-size:0.65rem;letter-spacing:0.5px">{edge_label}</div>'
         '</div>'
         '</div>'
-        # Pitch plans
-        f'{pitch_rows}'
-        # Putaway
-        f'{putaway_html}'
+        # Body (with or without zone chart)
+        f'{body_html}'
         '</div>'
+    )
+
+
+def _render_pitcher_overview(
+    pitcher_name: str,
+    pitch_hand: str | None,
+    form: dict | None,
+    walk_strat: dict | None,
+    zone_b64: str | None,
+) -> str:
+    """Render the opposing starter overview card with form + zone chart."""
+    hand_label = f"{'LHP' if pitch_hand == 'L' else 'RHP'}" if pitch_hand else ""
+
+    # Form badge
+    form_html = ""
+    if form:
+        era_color = SAGE if form["era"] < 3.50 else (EMBER if form["era"] > 4.50 else SLATE)
+        form_html = (
+            f'<div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:0.5rem;'
+            f'font-size:0.9rem;font-family:var(--tdd-font-mono)">'
+            f'<span style="color:var(--tdd-slate)">Last {form["n_starts"]} starts:</span>'
+            f'<span style="color:var(--tdd-cream);font-weight:600">{form["avg_ip"]} IP</span>'
+            f'<span style="color:var(--tdd-cream);font-weight:600">{form["k_per_9"]} K/9</span>'
+            f'<span style="color:var(--tdd-cream);font-weight:600">{form["bb_per_9"]} BB/9</span>'
+            f'<span style="color:{era_color};font-weight:600">{form["era"]:.2f} ERA</span>'
+            f'<span style="color:var(--tdd-slate)">{int(form["avg_pitches"])} pitch avg</span>'
+            f'</div>'
+        )
+
+    # Walk strategy callout
+    walk_html = ""
+    if walk_strat:
+        walk_html = (
+            f'<div style="background:rgba(200,169,110,0.06);border:1px solid rgba(200,169,110,0.25);'
+            f'border-radius:4px;padding:0.4rem 0.6rem;margin-top:0.5rem;'
+            f'font-size:0.85rem;color:var(--tdd-gold)">'
+            f'&#9888; {esc(walk_strat["note"])}'
+            f'</div>'
+        )
+
+    # Zone chart image
+    zone_html = ""
+    if zone_b64:
+        zone_html = (
+            f'<div style="margin-top:0.8rem">'
+            f'<div style="color:var(--tdd-slate);font-size:0.78rem;margin-bottom:0.3rem">'
+            f'Pitch location density — where he throws each pitch type (darker = more frequent)</div>'
+            f'<img src="{zone_b64}" style="width:100%;border-radius:4px;'
+            f'" />'
+            f'</div>'
+        )
+
+    return (
+        f'<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);'
+        f'border-radius:6px;padding:1rem;margin-bottom:1rem">'
+        f'<div style="display:flex;align-items:center;gap:0.6rem">'
+        f'<div style="flex:1">'
+        f'<div style="color:var(--tdd-gold);font-family:var(--tdd-font-heading);'
+        f'font-weight:700;font-size:0.75rem;letter-spacing:2px;text-transform:uppercase;'
+        f'margin-bottom:0.3rem">OPPOSING STARTER</div>'
+        f'<span style="color:var(--tdd-cream);font-family:var(--tdd-font-heading);'
+        f'font-weight:700;font-size:1.5rem">{esc(pitcher_name)}</span>'
+        f'<span style="color:var(--tdd-slate);font-size:0.9rem;margin-left:0.5rem">'
+        f'{hand_label}</span>'
+        f'</div>'
+        f'</div>'
+        f'{form_html}'
+        f'{walk_html}'
+        f'{zone_html}'
+        f'</div>'
     )
 
 
@@ -857,6 +1090,11 @@ def page_game_prep() -> None:
     vuln_df = load_hitter_vulnerability(career=True)
     str_df = load_hitter_strength(career=True)
 
+    # MiLB comp data for callups with no MLB pitch-type data
+    comps_df = load_prospect_comps_batters()
+    pitcher_comps_df = load_prospect_comps_pitchers()
+    milb_priors_df = load_milb_priors()
+
     if arsenal_df.empty or vuln_df.empty:
         st.markdown(
             '<div class="pl-empty">Matchup data not available.</div></div>',
@@ -872,10 +1110,27 @@ def page_game_prep() -> None:
         )
         return
 
-    # Render both sides
-    col_away, col_home = st.columns(2)
+    # Load additional data for v2 features
+    location_df = load_pitcher_location_grid()
+    game_logs_df = load_pitcher_game_logs()
+    proj_df = load_projections("pitcher")
+    hitter_proj_df = load_projections("hitter")
+    adv_df = load_pitcher_advanced_stats()
 
-    for side, col in [("away", col_away), ("home", col_home)]:
+    # Build tab labels: "{team} Hitters vs {opposing pitcher}"
+    home_abbr = game.get("home_abbr", "?")
+    away_abbr = game.get("away_abbr", "?")
+    home_sp = game.get("home_pitcher_name") or "TBD"
+    away_sp = game.get("away_pitcher_name") or "TBD"
+    tab_labels = [
+        f"{home_abbr} Hitters vs {away_sp}",
+        f"{away_abbr} Hitters vs {home_sp}",
+    ]
+    tab_first, tab_second = st.tabs(tab_labels)
+
+    # side="away" means away pitcher vs home hitters → first tab
+    # side="home" means home pitcher vs away hitters → second tab
+    for side, tab in [("away", tab_first), ("home", tab_second)]:
         opp_side = "home" if side == "away" else "away"
         pitcher_name = game.get(f"{side}_pitcher_name") or "TBD"
         pid_raw = game.get(f"{side}_pitcher_id")
@@ -885,7 +1140,7 @@ def page_game_prep() -> None:
         opp_team_id = game.get(f"{opp_side}_team_id")
 
         if not pid:
-            with col:
+            with tab:
                 st.markdown(
                     f'<div style="color:var(--tdd-slate);font-size:0.8rem;padding:1rem">'
                     f'{esc(opp_abbr)} lineup: Starting pitcher TBD</div>',
@@ -894,8 +1149,14 @@ def page_game_prep() -> None:
             continue
 
         p_ars = arsenal_df[arsenal_df["pitcher_id"] == pid]
+        pitcher_comp_info = None
+        if p_ars.empty and not pitcher_comps_df.empty:
+            # MiLB callup pitcher: synthesize arsenal from comps
+            p_ars, pitcher_comp_info = build_pitcher_comp_arsenal(
+                pid, pitcher_comps_df, arsenal_df, milb_priors_df,
+            )
         if p_ars.empty:
-            with col:
+            with tab:
                 st.markdown(
                     f'<div style="color:var(--tdd-slate);font-size:0.8rem;padding:1rem">'
                     f'No arsenal data for {esc(pitcher_name)}</div>',
@@ -905,14 +1166,64 @@ def page_game_prep() -> None:
 
         p_hand = str(p_ars["pitch_hand"].iloc[0]) if "pitch_hand" in p_ars.columns else None
 
+        # --- Pitcher Overview (v2) ---
+        form = get_pitcher_recent_form(pid, game_logs_df, n_starts=5)
+        walk_strat = assess_walk_strategy(pid, proj_df, adv_df)
+
+        # Zone heatmap for pitcher overview
+        zone_overview_b64 = None
+        if not location_df.empty:
+            p_loc = location_df[location_df["pitcher_id"] == pid]
+            if not p_loc.empty:
+                try:
+                    fig = plot_pitcher_location_compact(
+                        p_loc, pitcher_name=pitcher_name, batter_stand=None,
+                    )
+                    zone_overview_b64 = fig_to_base64(fig, dpi=120)
+                except Exception:
+                    pass
+
         # Get opposing lineup
         opp_lu = game_lu[game_lu["team_id"] == opp_team_id].sort_values("batting_order")
 
-        with col:
+        with tab:
             st.markdown(
                 _render_game_prep_header(game, side),
                 unsafe_allow_html=True,
             )
+
+            # Pitcher overview with form + zone chart
+            overview_html = _render_pitcher_overview(
+                pitcher_name, p_hand, form, walk_strat, zone_overview_b64,
+            )
+            st.markdown(overview_html, unsafe_allow_html=True)
+
+            # MiLB comp banner for pitcher
+            if pitcher_comp_info:
+                comp_names = pitcher_comp_info.get("comp_names", [])
+                comp_sims = pitcher_comp_info.get("comp_similarities", [])
+                comp_parts = [f'{esc(n)} ({s:.0%})' for n, s in zip(comp_names, comp_sims)]
+                rates = pitcher_comp_info.get("milb_rates", {})
+                rate_parts: list[str] = []
+                for sk, sl in [("k_rate", "K%"), ("bb_rate", "BB%"), ("hr_per_bf", "HR%")]:
+                    r = rates.get(sk)
+                    if r:
+                        rate_parts.append(
+                            f'{sl} {r["mean"]*100:.1f} '
+                            f'<span style="opacity:0.5">[{r["p10"]*100:.0f}-{r["p90"]*100:.0f}]</span>'
+                        )
+                st.markdown(
+                    '<div style="background:rgba(200,169,110,0.08);border:1px solid var(--tdd-gold);'
+                    'border-radius:4px;padding:0.5rem 0.7rem;margin-bottom:0.8rem;font-size:0.65rem">'
+                    '<span style="color:var(--tdd-gold);font-weight:700;letter-spacing:0.5px">'
+                    'MiLB COMP ARSENAL</span>'
+                    f'<span style="color:var(--tdd-slate);margin-left:0.5rem">'
+                    f'Based on: {", ".join(comp_parts)}</span>'
+                    + (f'<div style="color:var(--tdd-cream);margin-top:3px">'
+                       f'{" &nbsp; ".join(rate_parts)}</div>' if rate_parts else '')
+                    + '</div>',
+                    unsafe_allow_html=True,
+                )
 
             if opp_lu.empty:
                 st.markdown(
@@ -951,6 +1262,7 @@ def page_game_prep() -> None:
 
                 plan = None
                 edge = None
+                b_comp_info = None
                 if not h_vul.empty:
                     plan = build_attack_plan(
                         p_ars_plan, h_vul, h_str,
@@ -960,6 +1272,30 @@ def page_game_prep() -> None:
                         p_ars_plan, h_vul, h_str,
                         pitcher_hand=p_hand, batter_hand=b_hand,
                     )
+                elif not comps_df.empty:
+                    # MiLB callup: build synthetic profile from comps
+                    comp_vuln, comp_str, b_comp_info = build_comp_proxy_data(
+                        bid, comps_df, vuln_df, str_df, milb_priors_df,
+                    )
+                    if not comp_vuln.empty:
+                        plan = build_attack_plan(
+                            p_ars_plan, comp_vuln, comp_str,
+                            pitcher_hand=p_hand, batter_hand=b_hand,
+                        )
+                        edge = compute_matchup_xwoba_edge(
+                            p_ars_plan, comp_vuln, comp_str,
+                            pitcher_hand=p_hand, batter_hand=b_hand,
+                        )
+
+                # Look up Bayesian projections for this batter
+                b_proj: dict = {}
+                if not hitter_proj_df.empty:
+                    hp_row = hitter_proj_df[hitter_proj_df["batter_id"] == bid]
+                    if not hp_row.empty:
+                        for col in ("projected_k_rate", "projected_bb_rate", "projected_woba"):
+                            val = hp_row[col].iloc[0] if col in hp_row.columns else None
+                            if pd.notna(val):
+                                b_proj[col] = float(val)
 
                 batter_data.append({
                     "batter_id": bid,
@@ -971,6 +1307,8 @@ def page_game_prep() -> None:
                     "edge": edge,
                     "batter_label": plan.get("batter_label", "") if plan else "",
                     "batter_hand": b_hand,
+                    "comp_info": b_comp_info,
+                    "projections": b_proj,
                 })
 
             # --- Rank all position players by matchup xwOBA ---
@@ -1021,7 +1359,7 @@ def page_game_prep() -> None:
                         st.markdown(ph_html, unsafe_allow_html=True)
 
             # --- Attack plan cards (starters only) ---
-            for b in starters:
+            for i, b in enumerate(starters):
                 bid = b["batter_id"]
                 order = b["current_order"]
                 if b["plan"] is None:
@@ -1039,6 +1377,32 @@ def page_game_prep() -> None:
                         unsafe_allow_html=True,
                     )
                 else:
+                    # Zone chart for top 6 batters
+                    zone_b64 = None
+                    if i < 6 and not location_df.empty and b.get("batter_hand"):
+                        p_loc = location_df[location_df["pitcher_id"] == pid]
+                        if not p_loc.empty:
+                            # Pick best primary hunt/aggressive pitch for zone chart
+                            hunt_pt = None
+                            for pp in b["plan"].get("pitch_plans", []):
+                                if pp.get("tier") == "primary" and pp.get("approach") in ("hunt", "aggressive"):
+                                    hunt_pt = pp["pitch_type"]
+                                    break
+                            if hunt_pt is None:
+                                hunt_pt = b["plan"].get("hunt_pitch")
+                            if hunt_pt:
+                                try:
+                                    bstand = b["batter_hand"].upper()[0] if b["batter_hand"] else None
+                                    fig = plot_pitcher_location_compact(
+                                        p_loc,
+                                        pitch_types=[hunt_pt],
+                                        batter_stand=bstand,
+                                        figsize=(3.5, 3.5),
+                                    )
+                                    zone_b64 = fig_to_base64(fig, dpi=120)
+                                except Exception:
+                                    pass
+
                     pa_html = _build_putaway_html(
                         pid, b.get("batter_hand"), putaway_df,
                     )
@@ -1046,6 +1410,8 @@ def page_game_prep() -> None:
                         bid, b["batter_name"], b["team_abbr"],
                         order, b["plan"], b["edge"],
                         putaway_html=pa_html,
+                        comp_info=b.get("comp_info"),
+                        zone_chart_b64=zone_b64,
                     )
                     st.markdown(card_html, unsafe_allow_html=True)
 
@@ -1081,6 +1447,8 @@ def page_game_prep() -> None:
                         rp_list, starters,
                         arsenal_df, arsenal_by_stand_df,
                         vuln_df, str_df,
+                        comps_df=comps_df,
+                        milb_priors_df=milb_priors_df,
                     )
                     if matrix:
                         bp_html = _render_bullpen_matrix_html(matrix, starters)

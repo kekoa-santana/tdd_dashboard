@@ -105,15 +105,12 @@ def _build_projection_lookup() -> dict:
     proj = load_projections("pitcher")
     if proj.empty or "pitcher_id" not in proj.columns:
         return {}
+    _cols = ["projected_k_rate", "pitcher_name", "projected_bb_rate",
+             "projected_hr_per_bf", "pitch_hand"]
+    _avail = [c for c in _cols if c in proj.columns]
     lookup = {}
-    for _, row in proj.iterrows():
-        lookup[int(row["pitcher_id"])] = {
-            "projected_k_rate": row.get("projected_k_rate"),
-            "pitcher_name": row.get("pitcher_name", ""),
-            "projected_bb_rate": row.get("projected_bb_rate"),
-            "projected_hr_per_bf": row.get("projected_hr_per_bf"),
-            "pitch_hand": row.get("pitch_hand", ""),
-        }
+    for pid, *vals in zip(proj["pitcher_id"].astype(int), *[proj[c] for c in _avail]):
+        lookup[pid] = dict(zip(_avail, vals))
     return lookup
 
 
@@ -121,8 +118,7 @@ def _build_projection_lookup() -> dict:
 def _build_schedule_lookups() -> dict:
     """Build all lookup dicts for schedule cards (cached).
 
-    Extracts iterrows() loops that previously ran on every Streamlit rerender
-    into a single cached function keyed on the underlying parquet TTLs.
+    Uses vectorized pandas operations instead of iterrows() for speed.
     """
     from lib.diamond_rating import score_to_diamonds
 
@@ -131,85 +127,110 @@ def _build_schedule_lookups() -> dict:
     _h_proj = load_projections("hitter")
     _h_count = load_counting("hitter")
 
+    # Archetype lookups (vectorized)
     h_arch_lookup: dict[int, str] = {}
-    if not _h_arch.empty:
-        for _, r in _h_arch.iterrows():
-            h_arch_lookup[int(r["batter_id"])] = r["archetype_name"]
+    if not _h_arch.empty and "batter_id" in _h_arch.columns:
+        h_arch_lookup = dict(zip(
+            _h_arch["batter_id"].astype(int), _h_arch["archetype_name"],
+        ))
 
     p_arch_lookup: dict[int, str] = {}
-    if not _p_arch.empty:
-        for _, r in _p_arch.iterrows():
-            p_arch_lookup[int(r["pitcher_id"])] = r["archetype_name"]
+    if not _p_arch.empty and "pitcher_id" in _p_arch.columns:
+        p_arch_lookup = dict(zip(
+            _p_arch["pitcher_id"].astype(int), _p_arch["archetype_name"],
+        ))
 
     from services.data_loader import load_standings, load_rankings
     standings = load_standings()
 
     _h_rankings = load_rankings("hitters")
     _p_rankings = load_rankings("pitchers")
+
+    # Diamond lookup (vectorized)
     diamond_lookup: dict[int, float] = {}
     if not _h_rankings.empty and "tdd_value_score" in _h_rankings.columns:
-        for _, r in _h_rankings.iterrows():
-            if pd.notna(r.get("tdd_value_score")):
-                diamond_lookup[int(r["batter_id"])] = score_to_diamonds(r["tdd_value_score"])
+        _valid = _h_rankings[_h_rankings["tdd_value_score"].notna()]
+        diamond_lookup.update({
+            int(bid): score_to_diamonds(score)
+            for bid, score in zip(_valid["batter_id"], _valid["tdd_value_score"])
+        })
     if not _p_rankings.empty and "tdd_value_score" in _p_rankings.columns:
-        for _, r in _p_rankings.iterrows():
-            if pd.notna(r.get("tdd_value_score")):
-                diamond_lookup[int(r["pitcher_id"])] = score_to_diamonds(r["tdd_value_score"])
+        _valid = _p_rankings[_p_rankings["tdd_value_score"].notna()]
+        diamond_lookup.update({
+            int(pid): score_to_diamonds(score)
+            for pid, score in zip(_valid["pitcher_id"], _valid["tdd_value_score"])
+        })
 
-    # Hitter stat lookup: batter_id -> {k_rate, bb_rate, grades, ...}
+    # Hitter stat lookup (vectorized)
     h_stat_lookup: dict[int, dict] = {}
-    if not _h_proj.empty:
-        for _, r in _h_proj.iterrows():
-            bid = int(r["batter_id"])
+    if not _h_proj.empty and "batter_id" in _h_proj.columns:
+        for bid, k_rate, bb_rate, bat_hand in zip(
+            _h_proj["batter_id"].astype(int),
+            _h_proj.get("projected_k_rate", pd.Series(dtype=float)),
+            _h_proj.get("projected_bb_rate", pd.Series(dtype=float)),
+            _h_proj.get("batter_stand", pd.Series(dtype=str)),
+        ):
             h_stat_lookup[bid] = {
-                "k_rate": r.get("projected_k_rate"),
-                "bb_rate": r.get("projected_bb_rate"),
+                "k_rate": k_rate if pd.notna(k_rate) else None,
+                "bb_rate": bb_rate if pd.notna(bb_rate) else None,
                 "tdd_value_score": diamond_lookup.get(bid),
-                "bat_hand": r.get("batter_stand"),
+                "bat_hand": bat_hand if pd.notna(bat_hand) else None,
             }
+
+    # Counting stats merge
     if not _h_count.empty and "batter_id" in _h_count.columns:
-        for _, r in _h_count.iterrows():
-            bid = int(r["batter_id"])
-            counting = {
-                "hr": r.get("total_hr_mean"),
-                "total_k": r.get("total_k_mean"),
-                "total_bb": r.get("total_bb_mean"),
-                "total_hr": r.get("total_hr_mean"),
-            }
-            if bid in h_stat_lookup:
-                h_stat_lookup[bid].update(counting)
+        _count_cols = {"total_hr_mean": "hr", "total_k_mean": "total_k",
+                       "total_bb_mean": "total_bb"}
+        _avail = [c for c in _count_cols if c in _h_count.columns]
+        for bid_val, *vals in zip(
+            _h_count["batter_id"].astype(int),
+            *[_h_count[c] for c in _avail],
+        ):
+            counting = dict(zip([_count_cols[c] for c in _avail], vals))
+            counting["total_hr"] = counting.get("hr")
+            if bid_val in h_stat_lookup:
+                h_stat_lookup[bid_val].update(counting)
             else:
-                h_stat_lookup[bid] = {
+                h_stat_lookup[bid_val] = {
                     "k_rate": None, "bb_rate": None,
-                    "tdd_value_score": diamond_lookup.get(bid),
+                    "tdd_value_score": diamond_lookup.get(bid_val),
                     **counting,
                 }
 
-    # Inject scouting grades
+    # Inject scouting grades (vectorized)
     _h_grade_cols = ["grade_hit", "grade_power", "grade_speed", "grade_discipline", "grade_fielding"]
-    if not _h_rankings.empty:
-        for _, r in _h_rankings.iterrows():
-            bid = int(r["batter_id"])
-            grades = {c: int(r[c]) for c in _h_grade_cols if c in r.index and pd.notna(r.get(c))}
-            if bid in h_stat_lookup:
-                h_stat_lookup[bid].update(grades)
-            else:
-                h_stat_lookup[bid] = {
-                    "k_rate": None, "bb_rate": None,
-                    "tdd_value_score": diamond_lookup.get(bid),
-                    **grades,
-                }
+    if not _h_rankings.empty and "batter_id" in _h_rankings.columns:
+        _avail_g = [c for c in _h_grade_cols if c in _h_rankings.columns]
+        if _avail_g:
+            for bid_val, *gvals in zip(
+                _h_rankings["batter_id"].astype(int),
+                *[_h_rankings[c] for c in _avail_g],
+            ):
+                grades = {c: int(v) for c, v in zip(_avail_g, gvals) if pd.notna(v)}
+                if bid_val in h_stat_lookup:
+                    h_stat_lookup[bid_val].update(grades)
+                else:
+                    h_stat_lookup[bid_val] = {
+                        "k_rate": None, "bb_rate": None,
+                        "tdd_value_score": diamond_lookup.get(bid_val),
+                        **grades,
+                    }
 
+    # Pitcher grade lookup (vectorized)
     p_grade_lookup: dict[int, dict] = {}
     _p_grade_cols = ["grade_stuff", "grade_command", "grade_durability"]
-    if not _p_rankings.empty:
-        for _, r in _p_rankings.iterrows():
-            pid = int(r["pitcher_id"])
-            grades = {c: int(r[c]) for c in _p_grade_cols if c in r.index and pd.notna(r.get(c))}
-            grades["tdd_value_score"] = diamond_lookup.get(pid)
-            p_grade_lookup[pid] = grades
+    if not _p_rankings.empty and "pitcher_id" in _p_rankings.columns:
+        _avail_pg = [c for c in _p_grade_cols if c in _p_rankings.columns]
+        if _avail_pg:
+            for pid_val, *gvals in zip(
+                _p_rankings["pitcher_id"].astype(int),
+                *[_p_rankings[c] for c in _avail_pg],
+            ):
+                grades = {c: int(v) for c, v in zip(_avail_pg, gvals) if pd.notna(v)}
+                grades["tdd_value_score"] = diamond_lookup.get(pid_val)
+                p_grade_lookup[pid_val] = grades
 
-    # Grade confidence intervals
+    # Grade confidence intervals (vectorized)
     from services.data_loader import load_hitter_grade_ci, load_pitcher_grade_ci
     _h_ci = load_hitter_grade_ci()
     _p_ci = load_pitcher_grade_ci()
@@ -218,39 +239,51 @@ def _build_schedule_lookups() -> dict:
         "grade_speed_lo", "grade_speed_hi", "grade_discipline_lo", "grade_discipline_hi",
         "grade_fielding_lo", "grade_fielding_hi",
     ]
-    if not _h_ci.empty:
-        for _, r in _h_ci.iterrows():
-            bid = int(r["player_id"])
-            ci_vals = {c: int(r[c]) for c in _h_ci_cols if c in r.index and pd.notna(r.get(c))}
-            if bid in h_stat_lookup:
-                h_stat_lookup[bid].update(ci_vals)
-            else:
-                h_stat_lookup[bid] = ci_vals
+    if not _h_ci.empty and "player_id" in _h_ci.columns:
+        _avail_ci = [c for c in _h_ci_cols if c in _h_ci.columns]
+        if _avail_ci:
+            for bid_val, *cvals in zip(
+                _h_ci["player_id"].astype(int),
+                *[_h_ci[c] for c in _avail_ci],
+            ):
+                ci_vals = {c: int(v) for c, v in zip(_avail_ci, cvals) if pd.notna(v)}
+                if bid_val in h_stat_lookup:
+                    h_stat_lookup[bid_val].update(ci_vals)
+                else:
+                    h_stat_lookup[bid_val] = ci_vals
+
     _p_ci_cols = [
         "grade_stuff_lo", "grade_stuff_hi", "grade_command_lo", "grade_command_hi",
         "grade_durability_lo", "grade_durability_hi",
     ]
-    if not _p_ci.empty:
-        for _, r in _p_ci.iterrows():
-            pid = int(r["player_id"])
-            ci_vals = {c: int(r[c]) for c in _p_ci_cols if c in r.index and pd.notna(r.get(c))}
-            if pid in p_grade_lookup:
-                p_grade_lookup[pid].update(ci_vals)
-            else:
-                p_grade_lookup[pid] = ci_vals
+    if not _p_ci.empty and "player_id" in _p_ci.columns:
+        _avail_pci = [c for c in _p_ci_cols if c in _p_ci.columns]
+        if _avail_pci:
+            for pid_val, *cvals in zip(
+                _p_ci["player_id"].astype(int),
+                *[_p_ci[c] for c in _avail_pci],
+            ):
+                ci_vals = {c: int(v) for c, v in zip(_avail_pci, cvals) if pd.notna(v)}
+                if pid_val in p_grade_lookup:
+                    p_grade_lookup[pid_val].update(ci_vals)
+                else:
+                    p_grade_lookup[pid_val] = ci_vals
 
-    # Position lookup
+    # Position lookup (vectorized)
     _roster = load_roster()
     pos_lookup: dict[int, str] = {}
     if not _roster.empty and "primary_position" in _roster.columns:
-        for _, r in _roster.iterrows():
-            pos_lookup[int(r["player_id"])] = r["primary_position"]
+        pos_lookup = dict(zip(
+            _roster["player_id"].astype(int), _roster["primary_position"],
+        ))
     _prospects = load_rankings("prospect")
     if not _prospects.empty and "primary_position" in _prospects.columns:
-        for _, r in _prospects.iterrows():
-            pid = int(r.get("player_id", r.get("batter_id", 0)))
-            if pid and pid not in pos_lookup:
-                pos_lookup[pid] = r["primary_position"]
+        _id_col = "player_id" if "player_id" in _prospects.columns else "batter_id"
+        for pid_val, pos_val in zip(
+            _prospects[_id_col].astype(int), _prospects["primary_position"],
+        ):
+            if pid_val and pid_val not in pos_lookup:
+                pos_lookup[pid_val] = pos_val
 
     # Projection lookup with injected grades/diamonds
     proj_lookup = _build_projection_lookup()
@@ -259,15 +292,17 @@ def _build_schedule_lookups() -> dict:
         if pid in p_grade_lookup:
             pinfo.update(p_grade_lookup[pid])
 
-    # Name lookup for game props resolution
+    # Name lookup (vectorized)
     name_lookup: dict[int, str] = {}
     if not _h_proj.empty and "batter_name" in _h_proj.columns:
-        for _, r in _h_proj.iterrows():
-            name_lookup[int(r["batter_id"])] = r["batter_name"]
+        name_lookup.update(dict(zip(
+            _h_proj["batter_id"].astype(int), _h_proj["batter_name"],
+        )))
     _pp = load_projections("pitcher")
     if not _pp.empty and "pitcher_name" in _pp.columns:
-        for _, r in _pp.iterrows():
-            name_lookup[int(r["pitcher_id"])] = r["pitcher_name"]
+        name_lookup.update(dict(zip(
+            _pp["pitcher_id"].astype(int), _pp["pitcher_name"],
+        )))
 
     return {
         "h_arch_lookup": h_arch_lookup,
