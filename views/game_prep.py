@@ -251,22 +251,79 @@ def _compute_bullpen_matrix(
     return results
 
 
+_APPEAR_THRESHOLD = 0.30  # ~49 projected games = likely to appear
+
+
+def _render_bullpen_row(rp: dict, batters: list[dict], opacity: float = 1.0) -> str:
+    """Render one reliever row in the bullpen matrix."""
+    LG = 0.315
+    hand = rp.get("pitch_hand", "")
+    hand_str = f' {"L" if hand == "L" else "R"}HP' if hand else ""
+    role = rp.get("role", "")
+    role_html = f' <span style="color:var(--tdd-gold);font-size:0.5rem;font-weight:700">{esc(role)}</span>' if role else ""
+    appear = rp.get("appear_pct", 0)
+    appear_html = f' <span style="color:var(--tdd-slate);font-size:0.45rem">{appear*100:.0f}%</span>' if appear > 0 else ""
+
+    cells = (
+        f'<td style="text-align:left;padding:3px 6px;font-size:0.65rem;'
+        f'color:var(--tdd-cream);white-space:nowrap;opacity:{opacity}">'
+        f'{esc(rp["pitcher_name"])}'
+        f'<span style="color:var(--tdd-slate);font-size:0.5rem">{hand_str}</span>'
+        f'{role_html}{appear_html}</td>'
+    )
+
+    for b in batters:
+        bid = b["batter_id"]
+        xw = rp["matchups"].get(bid)
+        if xw is None:
+            cells += f'<td style="text-align:center;padding:3px 2px;font-size:0.6rem;color:var(--tdd-slate);opacity:{opacity}">--</td>'
+        else:
+            if xw <= LG - 0.030:
+                bg = "rgba(107,163,142,0.25)"
+                fg = SAGE
+            elif xw <= LG - 0.010:
+                bg = "rgba(107,163,142,0.12)"
+                fg = SAGE
+            elif xw >= LG + 0.030:
+                bg = "rgba(212,86,42,0.25)"
+                fg = EMBER
+            elif xw >= LG + 0.010:
+                bg = "rgba(212,86,42,0.12)"
+                fg = EMBER
+            else:
+                bg = "transparent"
+                fg = SLATE
+
+            cells += (
+                f'<td style="text-align:center;padding:3px 2px;font-size:0.6rem;'
+                f'font-family:var(--tdd-font-mono);color:{fg};background:{bg};opacity:{opacity}">'
+                f'.{int(xw*1000):03d}</td>'
+            )
+
+    avg = rp["avg_xwoba"]
+    avg_color = SAGE if avg < LG - 0.010 else (EMBER if avg > LG + 0.010 else SLATE)
+    cells += (
+        f'<td style="text-align:center;padding:3px 4px;font-size:0.62rem;'
+        f'font-family:var(--tdd-font-mono);font-weight:700;color:{avg_color};opacity:{opacity}">'
+        f'.{int(avg*1000):03d}</td>'
+    )
+
+    return f'<tr style="border-bottom:1px solid var(--tdd-dark-border-faint)">{cells}</tr>'
+
+
 def _render_bullpen_matrix_html(
     matrix: list[dict],
     batters: list[dict],
 ) -> str:
-    """Render bullpen matchup heatmap as HTML table."""
+    """Render bullpen matchup heatmap with probable/unlikely split."""
     if not matrix or not batters:
         return ""
 
-    LG = 0.315
-
-    # Header row with batter last names
+    # Header row
     header = '<th style="text-align:left;padding:3px 6px;font-size:0.6rem;color:var(--tdd-gold)">Reliever</th>'
     for b in batters:
         parts = b["batter_name"].split()
         short = parts[-1] if len(parts) > 1 else parts[0]
-        # Truncate long names
         if len(short) > 8:
             short = short[:7] + "."
         header += (
@@ -276,61 +333,27 @@ def _render_bullpen_matrix_html(
         )
     header += '<th style="text-align:center;padding:3px 4px;font-size:0.55rem;color:var(--tdd-gold)">AVG</th>'
 
-    # Body rows
+    # Split probable vs unlikely
+    probable = [rp for rp in matrix if rp.get("appear_pct", 0) >= _APPEAR_THRESHOLD]
+    unlikely = [rp for rp in matrix if rp.get("appear_pct", 0) < _APPEAR_THRESHOLD]
+
     rows = ""
-    for rp in matrix:
-        hand = rp.get("pitch_hand", "")
-        hand_str = f' {"L" if hand == "L" else "R"}HP' if hand else ""
-        role = rp.get("role", "")
-        role_html = f' <span style="color:var(--tdd-gold);font-size:0.5rem;font-weight:700">{esc(role)}</span>' if role else ""
+    for rp in probable:
+        rows += _render_bullpen_row(rp, batters, opacity=1.0)
 
-        cells = (
-            f'<td style="text-align:left;padding:3px 6px;font-size:0.65rem;'
-            f'color:var(--tdd-cream);white-space:nowrap">'
-            f'{esc(rp["pitcher_name"])}'
-            f'<span style="color:var(--tdd-slate);font-size:0.5rem">{hand_str}</span>'
-            f'{role_html}</td>'
+    if unlikely:
+        n_cols = len(batters) + 2
+        rows += (
+            f'<tr><td colspan="{n_cols}" style="padding:4px 6px;border-top:1px dashed var(--tdd-slate);'
+            f'border-bottom:none">'
+            f'<span style="color:var(--tdd-slate);font-size:0.5rem;letter-spacing:1px;opacity:0.5">'
+            f'LESS LIKELY</span></td></tr>'
         )
+        for rp in unlikely:
+            rows += _render_bullpen_row(rp, batters, opacity=0.6)
 
-        for b in batters:
-            bid = b["batter_id"]
-            xw = rp["matchups"].get(bid)
-            if xw is None:
-                cells += '<td style="text-align:center;padding:3px 2px;font-size:0.6rem;color:var(--tdd-slate)">--</td>'
-            else:
-                # Color scale: green (low xwOBA = pitcher wins) to red (high = hitter wins)
-                if xw <= LG - 0.030:
-                    bg = "rgba(107,163,142,0.25)"
-                    fg = SAGE
-                elif xw <= LG - 0.010:
-                    bg = "rgba(107,163,142,0.12)"
-                    fg = SAGE
-                elif xw >= LG + 0.030:
-                    bg = "rgba(212,86,42,0.25)"
-                    fg = EMBER
-                elif xw >= LG + 0.010:
-                    bg = "rgba(212,86,42,0.12)"
-                    fg = EMBER
-                else:
-                    bg = "transparent"
-                    fg = SLATE
-
-                cells += (
-                    f'<td style="text-align:center;padding:3px 2px;font-size:0.6rem;'
-                    f'font-family:var(--tdd-font-mono);color:{fg};background:{bg}">'
-                    f'.{int(xw*1000):03d}</td>'
-                )
-
-        # Average column
-        avg = rp["avg_xwoba"]
-        avg_color = SAGE if avg < LG - 0.010 else (EMBER if avg > LG + 0.010 else SLATE)
-        cells += (
-            f'<td style="text-align:center;padding:3px 4px;font-size:0.62rem;'
-            f'font-family:var(--tdd-font-mono);font-weight:700;color:{avg_color}">'
-            f'.{int(avg*1000):03d}</td>'
-        )
-
-        rows += f'<tr style="border-bottom:1px solid var(--tdd-dark-border-faint)">{cells}</tr>'
+    probable_label = f"{len(probable)} probable" if probable else ""
+    unlikely_label = f", {len(unlikely)} depth" if unlikely else ""
 
     return (
         '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);'
@@ -339,7 +362,8 @@ def _render_bullpen_matrix_html(
         'letter-spacing:2px;text-transform:uppercase;margin-bottom:6px">'
         'Bullpen Matchup Matrix</div>'
         '<div style="color:var(--tdd-slate);font-size:0.55rem;margin-bottom:6px">'
-        'Matchup xwOBA per reliever vs each batter. Green = pitcher advantage, red = hitter advantage.</div>'
+        f'Matchup xwOBA per reliever vs each batter ({probable_label}{unlikely_label}). '
+        'Green = pitcher advantage, red = hitter advantage.</div>'
         '<table style="width:100%;border-collapse:collapse">'
         f'<thead><tr style="border-bottom:1px solid var(--tdd-dark-border)">{header}</tr></thead>'
         f'<tbody>{rows}</tbody>'
@@ -975,11 +999,15 @@ def page_game_prep() -> None:
                     rr_row = rr[rr["pitcher_id"] == rp_pid]
                     rp_hand = str(rr_row["pitch_hand"].iloc[0]) if not rr_row.empty and "pitch_hand" in rr_row.columns and pd.notna(rr_row["pitch_hand"].iloc[0]) else None
                     rp_role = str(rr_row["role"].iloc[0]) if not rr_row.empty and "role" in rr_row.columns else ""
+                    # Appearance probability: projected games / 162
+                    proj_games = float(rr_row["total_games_mean"].iloc[0]) if not rr_row.empty and "total_games_mean" in rr_row.columns and pd.notna(rr_row["total_games_mean"].iloc[0]) else 0.0
+                    appear_pct = proj_games / 162.0
                     rp_list.append({
                         "pitcher_id": rp_pid,
                         "pitcher_name": r["player_name"],
                         "pitch_hand": rp_hand,
                         "role": rp_role,
+                        "appear_pct": appear_pct,
                     })
 
                 if rp_list and starters:
