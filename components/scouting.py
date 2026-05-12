@@ -605,6 +605,9 @@ def build_attack_plan(
         p_contact = 1.0 - matchup_whiff
         pitch_xwoba = p_contact * matchup_xwoba_con
 
+        # Weak contact flag: batter makes contact but it's poor quality
+        weak_contact = (matchup_whiff < 0.22 and matchup_xwoba_con < 0.270)
+
         # Determine approach tag
         if pitch_xwoba >= LG_XWOBA + 0.040:
             approach = "hunt"       # batter crushes this
@@ -647,6 +650,21 @@ def build_attack_plan(
 
         recommendation = ". ".join(rec_parts) if rec_parts else ""
 
+        # Weak contact annotations
+        if weak_contact:
+            if approach == "neutral":
+                recommendation = (
+                    f"Contact likely but weak ({matchup_xwoba_con:.3f} xwOBA). "
+                    f"Lay off in hitter's counts."
+                )
+            elif approach in ("defensive", "avoid"):
+                recommendation += ". Weak contact out likely"
+            elif approach in ("hunt", "aggressive"):
+                recommendation += (
+                    f". Contact quality is weak ({matchup_xwoba_con:.3f}), "
+                    f"look to drive the count"
+                )
+
         pitch_plans.append({
             "pitch_type": pt,
             "pitch_name": pt_name,
@@ -656,6 +674,7 @@ def build_attack_plan(
             "matchup_xwoba": pitch_xwoba,
             "matchup_whiff": matchup_whiff,
             "matchup_xwoba_contact": matchup_xwoba_con,
+            "weak_contact": weak_contact,
             "pitcher_whiff": p_whiff,
             "hitter_whiff": h_whiff,
             "hitter_chase": h_chase,
@@ -800,6 +819,376 @@ def build_attack_plan(
         "primary_threshold": PRIMARY_THRESH,
         "secondary_threshold": SECONDARY_THRESH,
     }
+
+
+# ---------------------------------------------------------------------------
+# Comp-based proxy data for MiLB callups
+# ---------------------------------------------------------------------------
+
+
+def build_comp_proxy_data(
+    batter_id: int,
+    comps_df: pd.DataFrame,
+    all_vuln_df: pd.DataFrame,
+    all_str_df: pd.DataFrame,
+    milb_priors_df: pd.DataFrame | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict | None]:
+    """Build synthetic vuln/str DataFrames from prospect MLB comps.
+
+    For a MiLB callup with no MLB pitch-type data, uses their top
+    prospect comps' career pitch-type profiles as a proxy.  Rates are
+    similarity-weighted across comps, with synthetic sample sizes that
+    cause ~30% regression toward league average in the matchup engine.
+
+    Parameters
+    ----------
+    batter_id : int
+        The prospect's player_id.
+    comps_df : pd.DataFrame
+        Full ``prospect_comps_batters.parquet`` (all prospects).
+    all_vuln_df, all_str_df : pd.DataFrame
+        Full career vulnerability / strength parquets (all MLB batters).
+    milb_priors_df : pd.DataFrame | None
+        ``milb_priors.parquet`` for rate projections (optional).
+
+    Returns
+    -------
+    (vuln_df, str_df, comp_info) — synthetic data shaped like the real
+    parquets, plus a dict of comp metadata.  Returns (empty, empty, None)
+    when no usable comps exist.
+    """
+    if comps_df.empty or "player_id" not in comps_df.columns:
+        return pd.DataFrame(), pd.DataFrame(), None
+
+    player_comps = comps_df[comps_df["player_id"] == batter_id].sort_values(
+        "similarity_score", ascending=False,
+    ).head(3)
+
+    if player_comps.empty:
+        return pd.DataFrame(), pd.DataFrame(), None
+
+    comp_ids = player_comps["comp_player_id"].tolist()
+    sim_weights = dict(zip(
+        player_comps["comp_player_id"],
+        player_comps["similarity_score"],
+    ))
+
+    # ---- Vulnerability data from comps ----
+    if all_vuln_df.empty or "batter_id" not in all_vuln_df.columns:
+        return pd.DataFrame(), pd.DataFrame(), None
+    cv = all_vuln_df[all_vuln_df["batter_id"].isin(comp_ids)].copy()
+    if cv.empty:
+        return pd.DataFrame(), pd.DataFrame(), None
+
+    cv["_sim"] = cv["batter_id"].map(sim_weights)
+
+    # Synthetic sample sizes: moderate counts → ~30% regression to lg avg
+    # whiff stability ~50 swings → 35 gives 0.70 weight
+    # xwOBA stability ~30 BIP  → 20 gives 0.67 weight
+    SYNTH_PITCHES = 60
+    SYNTH_SWINGS = 35
+    SYNTH_OZ = 25
+    SYNTH_BIP = 20
+
+    vuln_rows: list[dict] = []
+    for pt, g in cv.groupby("pitch_type"):
+        w = g["_sim"].values
+        w_sum = w.sum()
+        if w_sum <= 0:
+            continue
+
+        # Similarity-weighted count totals (then convert to rates)
+        sw = g["swings"].fillna(0).values
+        wh = g["whiffs"].fillna(0).values
+        oz = g["out_of_zone_pitches"].fillna(0).values
+        cs = g["chase_swings"].fillna(0).values
+        pt_count = g["pitches"].fillna(0).values
+        csw_count = g["csw"].fillna(0).values
+        bip_count = g["bip"].fillna(0).values
+        hh_count = g["hard_hits"].fillna(0).values
+
+        sw_w = (w * sw).sum() / w_sum
+        wh_w = (w * wh).sum() / w_sum
+        oz_w = (w * oz).sum() / w_sum
+        cs_w = (w * cs).sum() / w_sum
+        pt_w = (w * pt_count).sum() / w_sum
+        csw_w = (w * csw_count).sum() / w_sum
+        bip_w = (w * bip_count).sum() / w_sum
+        hh_w = (w * hh_count).sum() / w_sum
+
+        whiff_rate = wh_w / sw_w if sw_w > 10 else np.nan
+        chase_rate = cs_w / oz_w if oz_w > 10 else np.nan
+        csw_pct = csw_w / pt_w if pt_w > 10 else np.nan
+        hh_rate = hh_w / bip_w if bip_w > 10 else 0.0
+
+        family = (
+            g["pitch_family"].iloc[0]
+            if "pitch_family" in g.columns and pd.notna(g["pitch_family"].iloc[0])
+            else None
+        )
+
+        vuln_rows.append({
+            "batter_id": batter_id,
+            "batter_stand": "R",  # placeholder — overridden later if known
+            "pitch_type": pt,
+            "pitch_family": family,
+            "pitches": SYNTH_PITCHES,
+            "swings": SYNTH_SWINGS,
+            "whiffs": int(round(SYNTH_SWINGS * whiff_rate)) if pd.notna(whiff_rate) else 0,
+            "out_of_zone_pitches": SYNTH_OZ,
+            "chase_swings": int(round(SYNTH_OZ * chase_rate)) if pd.notna(chase_rate) else 0,
+            "called_strikes": 0,
+            "csw": int(round(SYNTH_PITCHES * csw_pct)) if pd.notna(csw_pct) else 0,
+            "bip": SYNTH_BIP,
+            "hard_hits": int(round(SYNTH_BIP * hh_rate)),
+            "barrels_proxy": 0,
+            "whiff_rate": whiff_rate if pd.notna(whiff_rate) else None,
+            "chase_rate": chase_rate if pd.notna(chase_rate) else None,
+            "csw_pct": csw_pct if pd.notna(csw_pct) else None,
+            "xwoba_contact": np.nan,  # filled from str data below
+        })
+
+    synth_vuln = pd.DataFrame(vuln_rows) if vuln_rows else pd.DataFrame()
+
+    # ---- Strength / contact quality data from comps ----
+    cs_df = all_str_df[all_str_df["batter_id"].isin(comp_ids)].copy()
+    str_rows: list[dict] = []
+    if not cs_df.empty:
+        cs_df["_sim"] = cs_df["batter_id"].map(sim_weights)
+        for pt, g in cs_df.groupby("pitch_type"):
+            w = g["_sim"].values
+            w_sum = w.sum()
+            if w_sum <= 0:
+                continue
+
+            bip_arr = g["bip"].fillna(0).values
+            hh_arr = g["hard_hits"].fillna(0).values
+            bar_arr = g["barrels_proxy"].fillna(0).values
+
+            bip_w = (w * bip_arr).sum() / w_sum
+            hh_w = (w * hh_arr).sum() / w_sum
+            bar_w = (w * bar_arr).sum() / w_sum
+
+            hh_rate = hh_w / bip_w if bip_w > 10 else np.nan
+            bar_rate = bar_w / bip_w if bip_w > 10 else np.nan
+
+            # Similarity × BIP–weighted xwOBA on contact
+            xwoba_vals = g["xwoba_contact"].values
+            valid = pd.notna(xwoba_vals) & (bip_arr > 0)
+            if valid.any():
+                xw_num = (w[valid] * bip_arr[valid] * xwoba_vals[valid]).sum()
+                xw_den = (w[valid] * bip_arr[valid]).sum()
+                xwoba_con = xw_num / xw_den if xw_den > 0 else np.nan
+            else:
+                xwoba_con = np.nan
+
+            family = (
+                g["pitch_family"].iloc[0]
+                if "pitch_family" in g.columns and pd.notna(g["pitch_family"].iloc[0])
+                else None
+            )
+
+            str_rows.append({
+                "batter_id": batter_id,
+                "batter_stand": "R",
+                "pitch_type": pt,
+                "pitch_family": family,
+                "bip": SYNTH_BIP,
+                "barrels_proxy": int(round(SYNTH_BIP * bar_rate)) if pd.notna(bar_rate) else 0,
+                "hard_hits": int(round(SYNTH_BIP * hh_rate)) if pd.notna(hh_rate) else 0,
+                "barrel_rate_contact": bar_rate,
+                "hard_hit_rate": hh_rate,
+                "xwoba_contact": xwoba_con,
+            })
+
+    synth_str = pd.DataFrame(str_rows) if str_rows else pd.DataFrame()
+
+    # Merge xwoba_contact from str into vuln (matchup engine checks both)
+    if not synth_str.empty and not synth_vuln.empty:
+        xwoba_map = synth_str.set_index("pitch_type")["xwoba_contact"].to_dict()
+        synth_vuln["xwoba_contact"] = synth_vuln["pitch_type"].map(xwoba_map)
+
+    # ---- MiLB rate projections (optional enrichment) ----
+    milb_rates: dict[str, dict] = {}
+    if milb_priors_df is not None and not milb_priors_df.empty:
+        player_priors = milb_priors_df[
+            (milb_priors_df["player_id"] == batter_id)
+            & (milb_priors_df["player_type"] == "batter")
+        ]
+        for _, row in player_priors.iterrows():
+            milb_rates[row["stat"]] = {
+                "mean": row["prior_rate_mean"],
+                "p10": row["prior_rate_p10"],
+                "p90": row["prior_rate_p90"],
+            }
+
+    comp_info = {
+        "comp_names": player_comps["comp_name"].tolist(),
+        "comp_similarities": player_comps["similarity_score"].tolist(),
+        "milb_rates": milb_rates,
+    }
+
+    return synth_vuln, synth_str, comp_info
+
+
+def build_pitcher_comp_arsenal(
+    pitcher_id: int,
+    comps_df: pd.DataFrame,
+    all_arsenal_df: pd.DataFrame,
+    milb_priors_df: pd.DataFrame | None = None,
+) -> tuple[pd.DataFrame, dict | None]:
+    """Build a synthetic pitcher arsenal from prospect pitcher comps.
+
+    When a MiLB callup starts with no MLB Statcast data, uses their top
+    prospect comps' arsenal profiles (similarity-weighted) so the matchup
+    engine has something to work with.
+
+    Returns
+    -------
+    (arsenal_df, comp_info) — synthetic arsenal shaped like
+    ``pitcher_arsenal.parquet``, plus comp metadata.
+    Returns (empty, None) when no usable comps exist.
+    """
+    if comps_df.empty or "player_id" not in comps_df.columns:
+        return pd.DataFrame(), None
+
+    player_comps = comps_df[comps_df["player_id"] == pitcher_id].sort_values(
+        "similarity_score", ascending=False,
+    ).head(5)
+
+    if player_comps.empty:
+        return pd.DataFrame(), None
+
+    comp_ids = player_comps["comp_player_id"].tolist()
+    sim_weights = dict(zip(
+        player_comps["comp_player_id"],
+        player_comps["similarity_score"],
+    ))
+
+    if all_arsenal_df.empty or "pitcher_id" not in all_arsenal_df.columns:
+        return pd.DataFrame(), None
+
+    ca = all_arsenal_df[all_arsenal_df["pitcher_id"].isin(comp_ids)].copy()
+    if ca.empty:
+        return pd.DataFrame(), None
+
+    ca["_sim"] = ca["pitcher_id"].map(sim_weights)
+
+    # Infer pitch hand from comps (majority vote)
+    pitch_hand = None
+    if "pitch_hand" in ca.columns:
+        hands = ca.drop_duplicates("pitcher_id")[["pitcher_id", "pitch_hand", "_sim"]]
+        if not hands.empty:
+            pitch_hand = hands.sort_values("_sim", ascending=False)["pitch_hand"].iloc[0]
+
+    # For each pitch type present in any comp, build similarity-weighted row
+    arsenal_rows: list[dict] = []
+    for pt, g in ca.groupby("pitch_type"):
+        w = g["_sim"].values
+        w_sum = w.sum()
+        if w_sum <= 0:
+            continue
+
+        def _wavg(col: str, default: float = 0.0) -> float:
+            vals = g[col].fillna(default).values if col in g.columns else np.full(len(g), default)
+            return float((w * vals).sum() / w_sum)
+
+        usage = _wavg("usage_pct")
+        if usage < 0.02:  # skip negligible pitch types
+            continue
+
+        whiff_rate = _wavg("whiff_rate", 0.25)
+        csw_pct = _wavg("csw_pct", 0.28)
+        xwoba = _wavg("xwoba_against", 0.315)
+        velo = _wavg("avg_velo", 90.0)
+        pfx_x = _wavg("avg_pfx_x", 0.0)
+        pfx_z = _wavg("avg_pfx_z", 0.0)
+        hh_rate = _wavg("hard_hit_rate_against", 0.35)
+        barrel_rate = _wavg("barrel_rate_against", 0.06)
+
+        # Synthetic counts (moderate)
+        SYNTH_PITCHES = 200
+        total_p = int(round(SYNTH_PITCHES * usage))
+        if total_p < 5:
+            continue
+
+        swing_rate = 0.45  # approximate
+        synth_swings = int(round(total_p * swing_rate))
+        synth_bip = int(round(total_p * 0.20))
+
+        family = (
+            g["pitch_family"].iloc[0]
+            if "pitch_family" in g.columns and pd.notna(g["pitch_family"].iloc[0])
+            else None
+        )
+
+        arsenal_rows.append({
+            "pitcher_id": pitcher_id,
+            "pitch_hand": pitch_hand,
+            "pitch_type": pt,
+            "pitches": total_p,
+            "total_pitches": SYNTH_PITCHES,
+            "usage_pct": usage,
+            "swings": synth_swings,
+            "whiffs": int(round(synth_swings * whiff_rate)),
+            "called_strikes": 0,
+            "csw": int(round(total_p * csw_pct)),
+            "bip": synth_bip,
+            "barrels_proxy": int(round(synth_bip * barrel_rate)),
+            "hard_hits": int(round(synth_bip * hh_rate)),
+            "xwoba_against": xwoba,
+            "avg_velo": velo,
+            "avg_pfx_x": pfx_x,
+            "avg_pfx_z": pfx_z,
+            "whiff_rate": whiff_rate,
+            "csw_pct": csw_pct,
+            "barrel_rate_against": barrel_rate,
+            "hard_hit_rate_against": hh_rate,
+            "pitch_family": family,
+            "season": 2026,
+        })
+
+    synth_arsenal = pd.DataFrame(arsenal_rows) if arsenal_rows else pd.DataFrame()
+
+    if synth_arsenal.empty:
+        return pd.DataFrame(), None
+
+    # Renormalize usage to sum to 1.0
+    total_usage = synth_arsenal["usage_pct"].sum()
+    if total_usage > 0:
+        synth_arsenal["usage_pct"] = synth_arsenal["usage_pct"] / total_usage
+
+    # MiLB rate projections
+    milb_rates: dict[str, dict] = {}
+    if milb_priors_df is not None and not milb_priors_df.empty:
+        player_priors = milb_priors_df[
+            (milb_priors_df["player_id"] == pitcher_id)
+            & (milb_priors_df["player_type"] == "pitcher")
+        ]
+        for _, row in player_priors.iterrows():
+            milb_rates[row["stat"]] = {
+                "mean": row["prior_rate_mean"],
+                "p10": row["prior_rate_p10"],
+                "p90": row["prior_rate_p90"],
+            }
+
+    # Comp names (only those with arsenal data)
+    comps_with_data = [
+        cid for cid in comp_ids
+        if not all_arsenal_df[all_arsenal_df["pitcher_id"] == cid].empty
+    ]
+    comp_info = {
+        "comp_names": [
+            player_comps[player_comps["comp_player_id"] == cid]["comp_name"].iloc[0]
+            for cid in comps_with_data
+        ],
+        "comp_similarities": [
+            sim_weights[cid] for cid in comps_with_data
+        ],
+        "milb_rates": milb_rates,
+    }
+
+    return synth_arsenal, comp_info
 
 
 # ---------------------------------------------------------------------------
@@ -1311,3 +1700,144 @@ def render_scouting_html(report) -> None:
             f'{"".join(all_bullets)}</div>',
             unsafe_allow_html=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# Walk Strategy Assessment
+# ---------------------------------------------------------------------------
+
+
+def assess_walk_strategy(
+    pitcher_id: int,
+    proj_df: pd.DataFrame,
+    adv_df: pd.DataFrame,
+) -> dict | None:
+    """Assess whether patience/walk strategy is recommended against a pitcher.
+
+    Parameters
+    ----------
+    pitcher_id : int
+        The opposing pitcher's ID.
+    proj_df : pd.DataFrame
+        Pitcher projections with ``projected_bb_rate`` column.
+    adv_df : pd.DataFrame
+        Pitcher advanced stats with ``zone_pct``, ``bb_pct`` columns.
+
+    Returns
+    -------
+    dict | None
+        Walk strategy recommendation, or None if not noteworthy.
+    """
+    if proj_df.empty and adv_df.empty:
+        return None
+
+    bb_rate_proj = None
+    bb_rate_obs = None
+    zone_pct = None
+
+    # Projected BB rate (Bayesian, regressed toward mean)
+    if not proj_df.empty and "projected_bb_rate" in proj_df.columns:
+        row = proj_df[proj_df["pitcher_id"] == pitcher_id]
+        if not row.empty:
+            bb_rate_proj = float(row["projected_bb_rate"].iloc[0])
+
+    # Observed / current-season BB rate + zone%
+    if not adv_df.empty:
+        row = adv_df[adv_df["pitcher_id"] == pitcher_id]
+        if not row.empty:
+            if "zone_pct" in adv_df.columns:
+                val = row["zone_pct"].iloc[0]
+                if pd.notna(val):
+                    zone_pct = float(val)
+            if "bb_pct" in adv_df.columns:
+                val = row["bb_pct"].iloc[0]
+                if pd.notna(val):
+                    bb_rate_obs = float(val)
+
+    # Use the higher of projected vs observed — coaching cares about recent tendency
+    bb_rate = max(filter(None, [bb_rate_proj, bb_rate_obs]), default=None)
+    if bb_rate is None:
+        return None
+
+    # Thresholds
+    high_bb = bb_rate >= 0.095  # top quartile walk rate
+    low_zone = zone_pct is not None and zone_pct < 0.42  # below league avg ~0.44
+
+    if not high_bb and not low_zone:
+        return None
+
+    pct_str = f"{bb_rate * 100:.1f}%"
+    parts: list[str] = []
+    if high_bb:
+        parts.append(f"Walks {pct_str} of batters faced")
+    if low_zone:
+        zone_str = f"{zone_pct * 100:.0f}%"
+        parts.append(f"low zone rate ({zone_str})")
+
+    note = "Patient approach — " + ", ".join(parts) + ". Discipline rewarded."
+
+    return {
+        "bb_rate": bb_rate,
+        "zone_pct": zone_pct,
+        "note": note,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Pitcher Recent Form Helper
+# ---------------------------------------------------------------------------
+
+
+def get_pitcher_recent_form(
+    pitcher_id: int,
+    game_logs_df: pd.DataFrame,
+    n_starts: int = 5,
+) -> dict | None:
+    """Summarize a pitcher's recent starting performance.
+
+    Parameters
+    ----------
+    pitcher_id : int
+        The pitcher to look up.
+    game_logs_df : pd.DataFrame
+        Full pitcher game logs with columns: pitcher_id, is_starter,
+        game_pk, innings_pitched, strike_outs, walks, earned_runs,
+        number_of_pitches.
+    n_starts : int
+        Number of recent starts to summarize.
+
+    Returns
+    -------
+    dict | None
+        Summary stats, or None if fewer than 2 starts found.
+    """
+    if game_logs_df.empty:
+        return None
+
+    starts = game_logs_df[
+        (game_logs_df["pitcher_id"] == pitcher_id)
+        & (game_logs_df["is_starter"] == True)  # noqa: E712
+    ].sort_values("game_pk", ascending=False).head(n_starts)
+
+    if len(starts) < 2:
+        return None
+
+    total_ip = starts["innings_pitched"].sum()
+    if total_ip <= 0:
+        return None
+
+    n = len(starts)
+    avg_ip = total_ip / n
+    k_per_9 = starts["strike_outs"].sum() * 9 / total_ip
+    bb_per_9 = starts["walks"].sum() * 9 / total_ip
+    era = starts["earned_runs"].sum() * 9 / total_ip
+    avg_pitches = starts["number_of_pitches"].mean()
+
+    return {
+        "n_starts": n,
+        "avg_ip": round(avg_ip, 1),
+        "k_per_9": round(k_per_9, 1),
+        "bb_per_9": round(bb_per_9, 1),
+        "era": round(era, 2),
+        "avg_pitches": round(avg_pitches, 0),
+    }

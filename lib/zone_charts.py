@@ -451,3 +451,124 @@ def plot_matchup_overlay(
     add_watermark(fig)
     fig.tight_layout()
     return fig
+
+
+def plot_pitcher_location_compact(
+    location_df: pd.DataFrame,
+    pitch_types: list[str] | None = None,
+    pitcher_name: str = "",
+    batter_stand: str | None = None,
+    figsize: tuple[float, float] = (14, 3.5),
+) -> plt.Figure:
+    """Compact single-row pitch location heatmap for Game Prep cards.
+
+    Similar to :func:`plot_pitcher_location_heatmap` but optimised for
+    small inline display: one row of subplots, no cell annotations,
+    no watermark.
+
+    Parameters
+    ----------
+    location_df : pd.DataFrame
+        Filtered to one pitcher. Columns: pitch_type, batter_stand,
+        grid_row, grid_col, pitches.
+    pitch_types : list[str] | None
+        Which pitch types to show. If None, uses top 4 by volume.
+    pitcher_name : str
+        Optional suptitle text.
+    batter_stand : str | None
+        Filter to 'L' or 'R'. None = all batters combined.
+    figsize : tuple[float, float]
+        Figure size in inches.
+
+    Returns
+    -------
+    plt.Figure
+    """
+    from config import PITCH_DISPLAY
+
+    df = location_df.copy()
+    if batter_stand:
+        df = df[df["batter_stand"] == batter_stand]
+
+    if df.empty:
+        fig, ax = plt.subplots(figsize=figsize)
+        fig.patch.set_alpha(0)
+        ax.set_facecolor("none")
+        ax.text(0.5, 0.5, "No location data", color=SLATE,
+                ha="center", va="center", transform=ax.transAxes, fontsize=8)
+        return fig
+
+    # Aggregate across batter_stand if not filtered
+    agg = df.groupby(["pitch_type", "grid_row", "grid_col"]).agg(
+        pitches=("pitches", "sum"),
+    ).reset_index()
+
+    # Determine pitch types to show
+    if pitch_types is None:
+        pt_totals = agg.groupby("pitch_type")["pitches"].sum().sort_values(ascending=False)
+        pitch_types = pt_totals.head(4).index.tolist()
+
+    n_pt = len(pitch_types)
+    if n_pt == 0:
+        fig, ax = plt.subplots(figsize=figsize)
+        fig.patch.set_alpha(0)
+        ax.set_facecolor("none")
+        return fig
+
+    fig, axes = plt.subplots(1, n_pt, figsize=figsize)
+    fig.patch.set_alpha(0)
+
+    if n_pt == 1:
+        axes = [axes]
+
+    # Gold-based colormap — use card bg as the "zero" color so it blends
+    _CARD_BG = "#1A1917"
+    cmap = mcolors.LinearSegmentedColormap.from_list(
+        "gold_heat", [_CARD_BG, "#4a3d25", GOLD, "#f5e6c8"], N=256,
+    )
+
+    for idx, pt in enumerate(pitch_types):
+        ax = axes[idx]
+        ax.set_facecolor(_CARD_BG)
+
+        pt_df = agg[agg["pitch_type"] == pt]
+        total = pt_df["pitches"].sum()
+        if total == 0:
+            ax.text(0.5, 0.5, "No data", color=SLATE,
+                    ha="center", va="center", transform=ax.transAxes, fontsize=7)
+            _draw_zone_frame(ax)
+            ax.set_xticklabels([])
+            ax.set_yticklabels([])
+            label = PITCH_DISPLAY.get(pt, pt)
+            ax.set_title(label, color=CREAM, fontsize=12, fontweight="bold")
+            continue
+
+        # Build density grid (fraction of pitches in each cell)
+        pt_df = pt_df.copy()
+        pt_df["pct"] = pt_df["pitches"] / total
+        grid = _build_grid(pt_df, "pct")
+
+        ax.pcolormesh(
+            _X_EDGES, _Z_EDGES, grid,
+            cmap=cmap, vmin=0, vmax=max(0.12, np.nanmax(grid)),
+            shading="flat", zorder=2,
+        )
+
+        _draw_zone_frame(ax)
+
+        # Remove technical tick labels, add context labels for first subplot
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+        ax.tick_params(length=0)
+        if idx == 0:
+            ax.set_ylabel("High → Low", color=SLATE, fontsize=8, labelpad=4)
+            ax.set_xlabel("Inside → Outside", color=SLATE, fontsize=8, labelpad=4)
+
+        label = PITCH_DISPLAY.get(pt, pt)
+        ax.set_title(label, color=CREAM, fontsize=12, fontweight="bold")
+
+    if pitcher_name:
+        fig.suptitle(pitcher_name, color=GOLD, fontsize=14, fontweight="bold", y=1.02)
+
+    fig.tight_layout()
+    return fig
