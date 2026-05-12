@@ -752,19 +752,45 @@ def page_game_prep() -> None:
         '<div class="pl-page-eyebrow">The Data Diamond</div>'
         '<h1 class="pl-page-title">Game Prep Report</h1>'
         '<p class="pl-page-sub">'
-        'Pitcher attack plans, matchup edges, and approach recommendations. '
-        'What a hitting coach would tell the lineup before first pitch.'
+        'Recommended lineups, pitcher attack plans, and bullpen matchup strategy. '
+        'Who to start and how to approach each at-bat.'
         '</p>'
         '</div>'
         '</header>',
         unsafe_allow_html=True,
     )
 
-    # Load schedule
-    schedule = load_todays_games()
+    # Date selector: today + next 2 days
+    from datetime import date
+    utc_now = datetime.now(timezone.utc)
+    et_now = utc_now - timedelta(hours=4)
+    today = et_now.date()
+    date_options = [today + timedelta(days=d) for d in range(3)]
+    date_labels = []
+    for d in date_options:
+        if d == today:
+            date_labels.append(f"{d.strftime('%a %b %d')} (Today)")
+        else:
+            date_labels.append(d.strftime("%a %b %d"))
+
+    dcol1, dcol2 = st.columns([1, 3])
+    with dcol1:
+        sel_date_idx = st.selectbox(
+            "Date", range(len(date_options)),
+            format_func=lambda i: date_labels[i],
+            key="gp_date_sel", label_visibility="collapsed",
+        )
+    sel_date = date_options[sel_date_idx]
+
+    # Load schedule for selected date
+    if sel_date == today:
+        schedule = load_todays_games()
+    else:
+        schedule = fetch_live_schedule(sel_date.isoformat())
+
     if schedule.empty:
         st.markdown(
-            '<div class="pl-empty">No games scheduled today.</div></div>',
+            f'<div class="pl-empty">No games scheduled for {sel_date.strftime("%b %d")}.</div></div>',
             unsafe_allow_html=True,
         )
         return
@@ -776,20 +802,55 @@ def page_game_prep() -> None:
         away = g.get("away_abbr", "?")
         home = g.get("home_abbr", "?")
         t = format_game_time(g.get("game_datetime_utc"), fallback=g.get("game_time", ""))
-        game_labels.append(f"{away} @ {home} - {t}")
+        ap = g.get("away_pitcher_name") or "TBD"
+        hp = g.get("home_pitcher_name") or "TBD"
+        game_labels.append(f"{away} ({ap}) @ {home} ({hp}) - {t}")
         game_pks.append(int(g["game_pk"]))
 
-    sel_idx = st.selectbox(
-        "Select Game", range(len(game_labels)),
-        format_func=lambda i: game_labels[i],
-        key="gp_game_sel", label_visibility="collapsed",
-    )
+    with dcol2:
+        sel_idx = st.selectbox(
+            "Select Game", range(len(game_labels)),
+            format_func=lambda i: game_labels[i],
+            key="gp_game_sel", label_visibility="collapsed",
+        )
     gpk = game_pks[sel_idx]
     game = schedule[schedule["game_pk"] == gpk].iloc[0]
 
-    # Load data
-    lineups = load_todays_lineups()
-    lineups = backfill_missing_lineups(schedule, lineups)
+    # Load lineups -- build from roster for all position players
+    if sel_date == today:
+        lineups = load_todays_lineups()
+        lineups = backfill_missing_lineups(schedule, lineups)
+    else:
+        lineups = pd.DataFrame()
+        lineups = backfill_missing_lineups(schedule, lineups)
+
+    # If lineups are still empty (future games), build from roster
+    if lineups.empty:
+        roster_all = load_roster()
+        if not roster_all.empty:
+            rows = []
+            for _, g in schedule.iterrows():
+                _gpk = int(g["game_pk"])
+                for side in ("away", "home"):
+                    team_abbr = g.get(f"{side}_abbr", "")
+                    team_id = g.get(f"{side}_team_id")
+                    team_pos = roster_all[
+                        (roster_all["team_abbr"] == team_abbr)
+                        & (roster_all["roster_status"] == "active")
+                        & (~roster_all["primary_position"].isin(["SP", "RP"]))
+                    ]
+                    for i, (_, r) in enumerate(team_pos.iterrows(), 1):
+                        rows.append({
+                            "game_pk": _gpk,
+                            "team_id": team_id,
+                            "team_abbr": team_abbr,
+                            "batter_id": int(r["player_id"]),
+                            "batter_name": r["player_name"],
+                            "batting_order": i,
+                            "lineup_source": "roster",
+                        })
+            if rows:
+                lineups = pd.DataFrame(rows)
     arsenal_df = load_pitcher_arsenal()
     arsenal_by_stand_df = load_pitcher_arsenal_by_stand()
     putaway_df = load_pitcher_putaway()
@@ -912,23 +973,28 @@ def page_game_prep() -> None:
                     "batter_hand": b_hand,
                 })
 
-            # --- Split starters (order 1-9) vs bench (10+) ---
-            # Build position lookup from roster
+            # --- Rank all position players by matchup xwOBA ---
             roster_df = load_roster()
             pos_lookup: dict[int, str] = {}
             if not roster_df.empty:
                 for _, r in roster_df.iterrows():
                     pos_lookup[int(r["player_id"])] = r.get("primary_position", "")
 
-            # Add position to all batters
             for b in batter_data:
                 b["position"] = pos_lookup.get(b["batter_id"], "")
 
-            starters = [b for b in batter_data if b["current_order"] <= 9]
-            bench_from_lineup = [b for b in batter_data if b["current_order"] > 9]
+            # Always rank by matchup xwOBA: top 9 = recommended starters
+            all_scoreable = sorted(
+                [b for b in batter_data if b["edge"] is not None],
+                key=lambda x: x["matchup_xwoba"], reverse=True,
+            )
+            starters = all_scoreable[:9]
+            bench_pool = all_scoreable[9:]
+            for i, b in enumerate(starters):
+                b["current_order"] = i + 1
 
             bench_data: list[dict] = []
-            for b in bench_from_lineup:
+            for b in bench_pool:
                 bench_data.append({
                     "batter_id": b["batter_id"],
                     "batter_name": b["batter_name"],
@@ -937,7 +1003,7 @@ def page_game_prep() -> None:
                 })
             bench_data.sort(key=lambda x: x["matchup_xwoba"], reverse=True)
 
-            # --- Lineup Optimization card ---
+            # --- Recommended Lineup card ---
             scoreable = [b for b in starters if b["edge"] is not None]
             if len(scoreable) >= 4:
                 opt_html = _render_lineup_optimization_html(
@@ -946,8 +1012,8 @@ def page_game_prep() -> None:
                 if opt_html:
                     st.markdown(opt_html, unsafe_allow_html=True)
 
-            # --- Pinch-Hit Opportunities ---
-            if bench_data and scoreable:
+            # --- Pinch-Hit Opportunities (placeholder for official lineups) ---
+            if False and bench_data and scoreable:  # disabled until official lineups
                 ph_opps = _find_pinch_hit_opportunities(scoreable, bench_data)
                 if ph_opps:
                     ph_html = _render_pinch_hit_html(ph_opps, pitcher_name)
