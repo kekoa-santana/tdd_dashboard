@@ -115,6 +115,15 @@ def load_pitcher_arsenal_by_stand() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_DATA_TTL)
+def load_pitcher_putaway() -> pd.DataFrame:
+    """Pitcher 2-strike putaway pitch selection and location by batter hand."""
+    path = DASHBOARD_DIR / "pitcher_putaway.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
 def load_hitter_vulnerability(career: bool = False) -> pd.DataFrame:
     if career:
         path = DASHBOARD_DIR / "hitter_vuln_career.parquet"
