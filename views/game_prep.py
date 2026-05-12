@@ -11,6 +11,7 @@ from config import GOLD, EMBER, SAGE, SLATE, CREAM
 from services.data_loader import (
     load_todays_games, load_todays_lineups,
     load_pitcher_arsenal, load_pitcher_arsenal_by_stand,
+    load_pitcher_putaway,
     load_hitter_vulnerability, load_hitter_strength,
     load_projections, load_pitcher_archetypes, load_hitter_archetypes,
     load_roster,
@@ -348,6 +349,83 @@ def _render_bullpen_matrix_html(
 
 
 # ---------------------------------------------------------------------------
+# Putaway pitch helpers
+# ---------------------------------------------------------------------------
+
+_LOC_LABELS = {
+    "up": "up in zone",
+    "low": "down in zone",
+    "off_plate": "off the plate",
+}
+
+
+def _build_putaway_html(
+    pitcher_id: int,
+    batter_stand: str | None,
+    putaway_df: pd.DataFrame,
+) -> str:
+    """Build a compact 2-strike putaway summary for a batter's card."""
+    if putaway_df.empty or not batter_stand:
+        return ""
+
+    stand = batter_stand.upper()[0] if batter_stand else None
+    if stand not in ("L", "R"):
+        return ""
+
+    rows = putaway_df[
+        (putaway_df["pitcher_id"] == pitcher_id)
+        & (putaway_df["batter_stand"] == stand)
+    ].sort_values("usage_2k_pct", ascending=False)
+
+    if rows.empty:
+        return ""
+
+    top = rows.iloc[0]
+    pt_name = PITCH_DISPLAY.get(top["pitch_type"], top["pitch_type"])
+    usage_pct = top["usage_2k_pct"]
+    whiff = top.get("whiff_rate_2k")
+
+    # Primary location
+    loc_pcts = {
+        "up": top.get("loc_up_pct", 0) or 0,
+        "low": top.get("loc_low_pct", 0) or 0,
+        "off_plate": top.get("loc_off_plate_pct", 0) or 0,
+    }
+    best_loc = max(loc_pcts, key=loc_pcts.get)
+    best_loc_pct = loc_pcts[best_loc]
+    loc_label = _LOC_LABELS.get(best_loc, best_loc)
+
+    # Secondary putaway if exists
+    secondary = ""
+    if len(rows) >= 2:
+        r2 = rows.iloc[1]
+        if r2["usage_2k_pct"] >= 0.20:
+            pt2 = PITCH_DISPLAY.get(r2["pitch_type"], r2["pitch_type"]).lower()
+            secondary = f', {r2["usage_2k_pct"]*100:.0f}% {pt2}'
+
+    whiff_str = f", {whiff*100:.0f}% whiff" if pd.notna(whiff) and whiff > 0 else ""
+    hand_label = "LHB" if stand == "L" else "RHB"
+
+    return (
+        '<div style="margin-top:6px;padding:6px 8px;'
+        'border:1px solid var(--tdd-dark-border);border-radius:4px;'
+        'background:rgba(200,169,110,0.06)">'
+        '<div style="display:flex;justify-content:space-between;align-items:center">'
+        f'<span style="color:var(--tdd-gold);font-size:0.58rem;font-weight:700;'
+        f'letter-spacing:1px">2-STRIKE PUTAWAY vs {hand_label}</span>'
+        '</div>'
+        f'<div style="color:var(--tdd-cream);font-size:0.7rem;margin-top:2px">'
+        f'{usage_pct*100:.0f}% {pt_name.lower()}{whiff_str}'
+        f'{secondary}'
+        f'</div>'
+        f'<div style="color:var(--tdd-slate);font-size:0.6rem;margin-top:1px">'
+        f'{best_loc_pct*100:.0f}% located {loc_label}'
+        f'</div>'
+        '</div>'
+    )
+
+
+# ---------------------------------------------------------------------------
 # HTML renderers
 # ---------------------------------------------------------------------------
 
@@ -406,6 +484,7 @@ def _render_batter_attack_card(
     batting_order: int,
     plan: dict,
     edge: dict,
+    putaway_html: str = "",
 ) -> str:
     """Render a full attack plan card for one batter."""
     xw = edge["matchup_xwoba"]
@@ -486,6 +565,8 @@ def _render_batter_attack_card(
         '</div>'
         # Pitch plans
         f'{pitch_rows}'
+        # Putaway
+        f'{putaway_html}'
         '</div>'
     )
 
@@ -565,6 +646,7 @@ def page_game_prep() -> None:
     lineups = backfill_missing_lineups(schedule, lineups)
     arsenal_df = load_pitcher_arsenal()
     arsenal_by_stand_df = load_pitcher_arsenal_by_stand()
+    putaway_df = load_pitcher_putaway()
     vuln_df = load_hitter_vulnerability(career=True)
     str_df = load_hitter_strength(career=True)
 
@@ -681,6 +763,7 @@ def page_game_prep() -> None:
                     "plan": plan,
                     "edge": edge,
                     "batter_label": plan.get("batter_label", "") if plan else "",
+                    "batter_hand": b_hand,
                 })
 
             # --- Split starters (order 1-9) vs bench (10+) ---
@@ -736,9 +819,13 @@ def page_game_prep() -> None:
                         unsafe_allow_html=True,
                     )
                 else:
+                    pa_html = _build_putaway_html(
+                        pid, b.get("batter_hand"), putaway_df,
+                    )
                     card_html = _render_batter_attack_card(
                         bid, b["batter_name"], b["team_abbr"],
                         order, b["plan"], b["edge"],
+                        putaway_html=pa_html,
                     )
                     st.markdown(card_html, unsafe_allow_html=True)
 
