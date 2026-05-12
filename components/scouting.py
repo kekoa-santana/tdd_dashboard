@@ -465,6 +465,344 @@ def build_matchup_scouting_bullets(
 
 
 # ---------------------------------------------------------------------------
+# Pitcher Attack Plan (per-batter approach recommendations)
+# ---------------------------------------------------------------------------
+
+def build_attack_plan(
+    arsenal_df: pd.DataFrame,
+    vuln_df: pd.DataFrame,
+    str_df: pd.DataFrame,
+    *,
+    pitcher_hand: str | None = None,
+    batter_hand: str | None = None,
+) -> dict:
+    """Generate a prescriptive attack plan for a batter vs a pitcher.
+
+    Returns a dict with:
+        summary        -- one-line approach summary (what to do)
+        pitch_plans    -- list of per-pitch dicts with approach recommendations
+        platoon        -- "favorable" | "unfavorable" | None
+        matchup_xwoba  -- overall matchup xwOBA
+        hunt_pitch     -- pitch type to sit on (best xwOBA for hitter)
+        avoid_pitch    -- pitch type to lay off (worst xwOBA for hitter)
+    """
+    from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE, LEAGUE_AVG_OVERALL
+
+    LG_XWOBA = LEAGUE_AVG_OVERALL.get("xwoba", 0.315)
+
+    empty = {
+        "summary": "", "pitch_plans": [], "platoon": None,
+        "matchup_xwoba": LG_XWOBA, "hunt_pitch": None, "avoid_pitch": None,
+    }
+
+    p_df = arsenal_df.copy()
+    p_df = p_df[p_df["pitches"] >= 20]
+    if p_df.empty:
+        return empty
+
+    v_df = vuln_df.copy()
+    v_df = v_df[v_df["pitches"] >= 15] if "pitches" in v_df.columns else v_df
+    if not v_df.empty:
+        v_df = v_df.sort_values("pitches", ascending=False).drop_duplicates(
+            subset=["pitch_type"], keep="first",
+        )
+    s_df = str_df.copy() if not str_df.empty else pd.DataFrame()
+    if not s_df.empty and "pitches" in s_df.columns:
+        s_df = s_df.sort_values("pitches", ascending=False).drop_duplicates(
+            subset=["pitch_type"], keep="first",
+        )
+
+    # Platoon
+    platoon = None
+    if pitcher_hand and batter_hand:
+        ph = pitcher_hand.upper()[0] if pitcher_hand else None
+        bh = batter_hand.upper()[0] if batter_hand else None
+        if ph and bh and bh != "S":
+            platoon = "favorable" if ph != bh else "unfavorable"
+
+    # Analyze each pitch type
+    pitch_plans: list[dict] = []
+
+    for _, row in p_df.iterrows():
+        pt = row["pitch_type"]
+        pt_name = PITCH_DISPLAY.get(pt, pt)
+        usage = row.get("usage_pct", 0)
+        if usage <= 0:
+            continue
+
+        lg = LEAGUE_AVG_BY_PITCH_TYPE.get(pt, LEAGUE_AVG_OVERALL)
+        lg_whiff = lg.get("whiff_rate", 0.25)
+        lg_xwoba_con = lg.get("xwoba_contact", 0.320)
+        lg_chase = lg.get("chase_rate", 0.30)
+
+        p_whiff = row.get("whiff_rate", lg_whiff)
+        if pd.isna(p_whiff):
+            p_whiff = lg_whiff
+        p_velo = row.get("avg_velo", np.nan)
+        p_xwoba = row.get("xwoba_against", lg_xwoba_con)
+        if pd.isna(p_xwoba):
+            p_xwoba = lg_xwoba_con
+
+        # Hitter data
+        h_row = v_df[v_df["pitch_type"] == pt]
+        s_row = s_df[s_df["pitch_type"] == pt] if not s_df.empty else pd.DataFrame()
+
+        h_whiff = lg_whiff
+        h_swings = 0
+        if len(h_row) > 0 and "swings" in h_row.columns and "whiffs" in h_row.columns:
+            sw = h_row["swings"].iloc[0]
+            wh = h_row["whiffs"].iloc[0]
+            if pd.notna(sw) and sw >= 10:
+                h_whiff = wh / sw
+                h_swings = int(sw)
+
+        h_chase = lg_chase
+        h_oz = 0
+        if len(h_row) > 0 and "chase_swings" in h_row.columns and "out_of_zone_pitches" in h_row.columns:
+            cs = h_row["chase_swings"].iloc[0]
+            oz = h_row["out_of_zone_pitches"].iloc[0]
+            if pd.notna(oz) and oz >= 10:
+                h_chase = cs / oz
+                h_oz = int(oz)
+
+        h_xwoba_con = lg_xwoba_con
+        h_bip = 0
+        if len(s_row) > 0 and "xwoba_contact" in s_row.columns:
+            val = s_row["xwoba_contact"].iloc[0]
+            n = s_row["bip"].iloc[0] if "bip" in s_row.columns else 0
+            if pd.notna(val) and pd.notna(n) and n >= 10:
+                h_xwoba_con = val
+                h_bip = int(n)
+        elif len(h_row) > 0 and "xwoba_contact" in h_row.columns:
+            val = h_row["xwoba_contact"].iloc[0]
+            n = h_row["bip"].iloc[0] if "bip" in h_row.columns else 0
+            if pd.notna(val) and pd.notna(n) and n >= 10:
+                h_xwoba_con = val
+                h_bip = int(n)
+
+        h_hh = np.nan
+        if len(s_row) > 0 and "hard_hit_rate" in s_row.columns:
+            h_hh = s_row["hard_hit_rate"].iloc[0]
+
+        # --- Classify this pitch for the batter ---
+        # Odds-ratio matchup xwOBA for this pitch type
+        _clamp = lambda x: max(0.01, min(0.99, x))
+        p_w = _clamp(p_whiff)
+        b_w = _clamp(h_whiff)
+        lg_w = _clamp(lg_whiff)
+        matchup_whiff = (p_w * b_w / lg_w) / (
+            p_w * b_w / lg_w + (1 - p_w) * (1 - b_w) / (1 - lg_w)
+        )
+
+        _scale = 0.7
+        p_x = _clamp(p_xwoba / _scale)
+        b_x = _clamp(h_xwoba_con / _scale)
+        lg_x = _clamp(lg_xwoba_con / _scale)
+        matchup_xwoba_con = (p_x * b_x / lg_x) / (
+            p_x * b_x / lg_x + (1 - p_x) * (1 - b_x) / (1 - lg_x)
+        ) * _scale
+
+        p_contact = 1.0 - matchup_whiff
+        pitch_xwoba = p_contact * matchup_xwoba_con
+
+        # Determine approach tag
+        if pitch_xwoba >= LG_XWOBA + 0.040:
+            approach = "hunt"       # batter crushes this
+        elif pitch_xwoba >= LG_XWOBA + 0.015:
+            approach = "aggressive" # batter has edge
+        elif pitch_xwoba <= LG_XWOBA - 0.040:
+            approach = "avoid"      # pitcher's weapon
+        elif pitch_xwoba <= LG_XWOBA - 0.015:
+            approach = "defensive"  # pitcher has edge
+        else:
+            approach = "neutral"
+
+        # Generate approach recommendation text
+        rec_parts: list[str] = []
+        if approach == "hunt":
+            rec_parts.append("Sit on this pitch")
+            if h_xwoba_con >= 0.400 and h_bip >= 20:
+                rec_parts.append(f"does damage on contact (.{int(h_xwoba_con*1000):03d})")
+            if h_whiff < lg_whiff * 0.75 and h_swings >= 20:
+                rec_parts.append(f"rarely whiffs ({h_whiff*100:.0f}%)")
+        elif approach == "aggressive":
+            rec_parts.append("Look to drive")
+            if h_xwoba_con >= 0.380 and h_bip >= 20:
+                rec_parts.append(f"solid contact quality (.{int(h_xwoba_con*1000):03d})")
+        elif approach == "avoid":
+            if matchup_whiff >= 0.35:
+                rec_parts.append("Take unless 2-strike")
+            else:
+                rec_parts.append("Lay off out of zone")
+            if h_whiff > lg_whiff * 1.20 and h_swings >= 20:
+                rec_parts.append(f"high whiff rate ({h_whiff*100:.0f}%)")
+            if h_chase > lg_chase * 1.20 and h_oz >= 20:
+                rec_parts.append(f"chases ({h_chase*100:.0f}%)")
+        elif approach == "defensive":
+            rec_parts.append("Be selective")
+            if h_chase > lg_chase * 1.10 and h_oz >= 20:
+                rec_parts.append(f"watch chase tendency ({h_chase*100:.0f}%)")
+        else:
+            rec_parts.append("Neutral matchup")
+
+        recommendation = ". ".join(rec_parts) if rec_parts else ""
+
+        pitch_plans.append({
+            "pitch_type": pt,
+            "pitch_name": pt_name,
+            "usage": usage,
+            "approach": approach,
+            "recommendation": recommendation,
+            "matchup_xwoba": pitch_xwoba,
+            "matchup_whiff": matchup_whiff,
+            "matchup_xwoba_contact": matchup_xwoba_con,
+            "pitcher_whiff": p_whiff,
+            "hitter_whiff": h_whiff,
+            "hitter_chase": h_chase,
+            "hitter_xwoba_contact": h_xwoba_con,
+            "hitter_bip": h_bip,
+            "velo": p_velo if pd.notna(p_velo) else None,
+        })
+
+    if not pitch_plans:
+        return empty
+
+    # Sort by usage
+    pitch_plans.sort(key=lambda x: x["usage"], reverse=True)
+
+    # --- Usage tiers ---
+    # Primary (>=10%): pitches the batter should game-plan around
+    # Secondary (5-10%): worth knowing, shown below threshold line
+    # Rare (<5%): mentioned but not actionable
+    PRIMARY_THRESH = 0.10
+    SECONDARY_THRESH = 0.05
+
+    for p in pitch_plans:
+        if p["usage"] >= PRIMARY_THRESH:
+            p["tier"] = "primary"
+        elif p["usage"] >= SECONDARY_THRESH:
+            p["tier"] = "secondary"
+        else:
+            p["tier"] = "rare"
+
+    primary = [p for p in pitch_plans if p["tier"] == "primary"]
+
+    # --- Limit hunt pitches ---
+    # A batter can't "sit on" every pitch. Among primary pitches,
+    # allow at most 2 "hunt" tags. The rest get demoted to "aggressive".
+    # Also: only the best xwOBA primary pitch gets "hunt" if there are 3+
+    # primary pitches tagged hunt/aggressive.
+    hunt_primary = sorted(
+        [p for p in primary if p["approach"] == "hunt"],
+        key=lambda x: x["matchup_xwoba"], reverse=True,
+    )
+    if len(hunt_primary) > 2:
+        for p in hunt_primary[2:]:
+            p["approach"] = "aggressive"
+            # Re-generate recommendation
+            parts = ["Look to drive"]
+            if p["hitter_xwoba_contact"] >= 0.380 and p["hitter_bip"] >= 20:
+                parts.append(f"solid contact quality (.{int(p['hitter_xwoba_contact']*1000):03d})")
+            p["recommendation"] = ". ".join(parts)
+
+    # Secondary/rare pitches that are "hunt" get demoted to "aggressive"
+    for p in pitch_plans:
+        if p["tier"] != "primary" and p["approach"] == "hunt":
+            p["approach"] = "aggressive"
+            parts = ["Look to drive if it's there"]
+            if p["hitter_xwoba_contact"] >= 0.380 and p["hitter_bip"] >= 20:
+                parts.append(f"contact quality (.{int(p['hitter_xwoba_contact']*1000):03d})")
+            p["recommendation"] = ". ".join(parts)
+
+    # --- Overall matchup xwOBA ---
+    total_usage = sum(p["usage"] for p in pitch_plans)
+    matchup_xwoba = (
+        sum(p["usage"] * p["matchup_xwoba"] for p in pitch_plans) / total_usage
+        if total_usage > 0 else LG_XWOBA
+    )
+
+    # Identify best and worst
+    hunt_pitch = max(pitch_plans, key=lambda x: x["matchup_xwoba"])
+    avoid_pitch = min(pitch_plans, key=lambda x: x["matchup_xwoba"])
+
+    # --- Build game plan summary ---
+    # Priority: 1) what to hunt (max 2), 2) what to drive, 3) what to avoid
+    hunt_picks = [p for p in primary if p["approach"] == "hunt"]
+    agg_picks = [p for p in primary if p["approach"] == "aggressive"]
+    avoid_picks = [p for p in primary if p["approach"] in ("avoid", "defensive")]
+    neutral_picks = [p for p in primary if p["approach"] == "neutral"]
+
+    summary_parts: list[str] = []
+
+    # Check if everything is hittable (all primary are hunt/aggressive)
+    all_hittable = len(avoid_picks) == 0 and len(neutral_picks) == 0
+    all_tough = len(hunt_picks) == 0 and len(agg_picks) == 0
+
+    if all_hittable and len(primary) >= 3:
+        # Special case: batter has edge on entire arsenal
+        best = max(primary, key=lambda x: x["matchup_xwoba"])
+        summary_parts.append(
+            f"Batter has edge across the arsenal. "
+            f"Hunt the {best['pitch_name'].lower()}, be aggressive on everything"
+        )
+    elif all_tough:
+        # Special case: pitcher dominates
+        least_bad = max(primary, key=lambda x: x["matchup_xwoba"])
+        summary_parts.append(
+            f"Tough matchup. Be selective, best chance is the "
+            f"{least_bad['pitch_name'].lower()}"
+        )
+    else:
+        # Normal case: mix of edges
+        if hunt_picks:
+            names = " and ".join(p["pitch_name"].lower() for p in hunt_picks[:2])
+            summary_parts.append(f"Hunt the {names}")
+        if agg_picks and not hunt_picks:
+            names = " and ".join(p["pitch_name"].lower() for p in agg_picks[:2])
+            summary_parts.append(f"Look to drive the {names}")
+        elif agg_picks and hunt_picks:
+            names = " and ".join(p["pitch_name"].lower() for p in agg_picks[:1])
+            summary_parts.append(f"drive the {names} if it's there")
+
+        if avoid_picks:
+            names = " and ".join(p["pitch_name"].lower() for p in avoid_picks[:2])
+            high_whiff = any(p["matchup_whiff"] >= 0.35 for p in avoid_picks)
+            if high_whiff:
+                summary_parts.append(f"take the {names} unless two strikes")
+            else:
+                summary_parts.append(f"lay off the {names}")
+
+    if not summary_parts:
+        summary_parts.append("No strong pitch-type edges")
+
+    summary = ", ".join(summary_parts) + "."
+    summary = summary[0].upper() + summary[1:]
+
+    # Batter hand label for UI context
+    batter_label = None
+    if batter_hand:
+        bh = batter_hand.upper()[0] if batter_hand else None
+        if bh == "L":
+            batter_label = "LHB"
+        elif bh == "R":
+            batter_label = "RHB"
+        elif bh == "S":
+            batter_label = "Switch"
+
+    return {
+        "summary": summary,
+        "pitch_plans": pitch_plans,
+        "platoon": platoon,
+        "matchup_xwoba": matchup_xwoba,
+        "hunt_pitch": hunt_pitch["pitch_type"] if hunt_pitch else None,
+        "avoid_pitch": avoid_pitch["pitch_type"] if avoid_pitch else None,
+        "batter_label": batter_label,
+        "primary_threshold": PRIMARY_THRESH,
+        "secondary_threshold": SECONDARY_THRESH,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Scouting Card (casual-friendly narrative report)
 # ---------------------------------------------------------------------------
 

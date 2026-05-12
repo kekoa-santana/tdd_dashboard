@@ -2418,7 +2418,7 @@ hr {
 .home-game-list { display: flex; flex-direction: column; }
 .home-game-card {
     display: grid;
-    grid-template-columns: 100px 1fr 70px 90px;
+    grid-template-columns: 90px auto 1fr;
     align-items: center;
     gap: 12px;
     padding: 0.7rem 0.2rem;
@@ -2448,6 +2448,14 @@ hr {
     color: var(--tdd-slate);
     font-size: 0.75rem;
 }
+.home-game-detail {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    text-align: right;
+    min-width: 0;
+}
 .home-game-proj { text-align: right; font-variant-numeric: tabular-nums; }
 .home-game-projv {
     color: var(--tdd-gold);
@@ -2467,12 +2475,15 @@ hr {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
+    flex: 1 1 auto;
 }
 .home-game-status {
-    text-align: right;
     font-size: 0.72rem;
     font-weight: 600;
     font-family: var(--tdd-font-heading);
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 .home-game-status-in\ progress,
 .home-game-status-live { color: var(--tdd-sage); }

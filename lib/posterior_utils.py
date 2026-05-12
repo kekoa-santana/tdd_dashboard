@@ -14,7 +14,10 @@ import numpy as np
 import pandas as pd
 from scipy.special import expit
 
-from lib.game_sim._sim_utils import safe_logit as _safe_logit
+def _safe_logit(p: np.ndarray | float, eps: float = 1e-6) -> np.ndarray | float:
+    """Logit transform with clipping to avoid log(0)."""
+    p = np.clip(p, eps, 1.0 - eps)
+    return np.log(p / (1.0 - p))
 
 logger = logging.getLogger(__name__)
 

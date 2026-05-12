@@ -106,6 +106,15 @@ def load_pitcher_arsenal() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_DATA_TTL)
+def load_pitcher_arsenal_by_stand() -> pd.DataFrame:
+    """Pitcher arsenal splits by batter hand (L/R usage, whiff, xwOBA)."""
+    path = DASHBOARD_DIR / "pitcher_arsenal_by_stand.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
 def load_hitter_vulnerability(career: bool = False) -> pd.DataFrame:
     if career:
         path = DASHBOARD_DIR / "hitter_vuln_career.parquet"
@@ -940,6 +949,58 @@ def load_pitcher_grade_ci() -> pd.DataFrame:
         ``grade_*_hi``, and ``diamond_rating_lo/hi`` columns.
     """
     path = DASHBOARD_DIR / "pitcher_grade_ci.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+# ---------------------------------------------------------------------------
+# Park / Umpire / Weather / Bullpen loaders
+# ---------------------------------------------------------------------------
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_park_factors() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "park_factors.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_hr_park_factors() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "hr_park_factors.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_umpire_tendencies() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "umpire_tendencies.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_weather_effects() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "weather_effects.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_team_bullpen_profiles() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "team_bullpen_profiles.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_reliever_rankings() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "reliever_rankings.parquet"
     if not path.exists():
         return pd.DataFrame()
     return pd.read_parquet(path)
