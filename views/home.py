@@ -543,7 +543,7 @@ def _render_schedule_strip(schedule: list[dict]) -> str:
 
         pitcher_away = escape(g.get("away_pitcher", "")) or "TBD"
         pitcher_home = escape(g.get("home_pitcher", "")) or "TBD"
-        pitcher_html = f'<span class="home-game-pitchers">{pitcher_away} vs {pitcher_home}</span>'
+        pitcher_html = f'{pitcher_away} vs {pitcher_home}'
 
         rows.append(f'''
         <a href="{_nav_url("Schedule")}" target="_self" class="home-game-card">
@@ -553,8 +553,10 @@ def _render_schedule_strip(schedule: list[dict]) -> str:
                 <span class="home-game-at">@</span>
                 <span data-team="{escape(g["home"])}" class="home-game-abbr">{escape(team_short(g["home"]))}</span>
             </div>
-            <div class="home-game-proj">{pitcher_html}</div>
-            <div class="home-game-status home-game-status-{status_cls}">{status_html}</div>
+            <div class="home-game-detail">
+                <span class="home-game-pitchers">{pitcher_html}</span>
+                <span class="home-game-status home-game-status-{status_cls}">{status_html}</span>
+            </div>
         </a>
         ''')
     return f'<div class="home-game-list">{"".join(rows)}</div>'

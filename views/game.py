@@ -14,6 +14,8 @@ from services.data_loader import (
     load_hitter_strength, load_projections, load_hitter_archetypes,
     load_pitcher_archetypes, load_bf_priors,
     fetch_live_schedule, fetch_live_lineups, backfill_missing_lineups,
+    load_park_factors, load_hr_park_factors, load_umpire_tendencies,
+    load_reliever_rankings, load_roster,
 )
 from components.team_logo import team_logo_html
 from components.headshot import headshot_html
@@ -217,94 +219,6 @@ def _render_pitcher_duel_html(game: pd.Series, lookups: dict) -> str:
     return f'<div class="tdd-pduel">{cards}</div>'
 
 
-def _render_edge_call_html(game: pd.Series, game_props: pd.DataFrame) -> str:
-    """Diamond Edge Call box with headline pick + top 3 edges."""
-    if game_props.empty or "expected" not in game_props.columns or "line" not in game_props.columns:
-        return (
-            '<div class="tdd-edgecall">'
-            '<div class="ec-eyebrow">Diamond Edge</div>'
-            '<div class="ec-primary">No projection data available</div>'
-            '</div>'
-        )
-
-    work = game_props.copy()
-    work["edge"] = work["expected"] - work["line"]
-    work["abs_edge"] = work["edge"].abs()
-    work = work.dropna(subset=["edge"])
-    if work.empty:
-        return (
-            '<div class="tdd-edgecall">'
-            '<div class="ec-eyebrow">Diamond Edge</div>'
-            '<div class="ec-primary">No significant edges found</div>'
-            '</div>'
-        )
-
-    top3 = work.nlargest(3, "abs_edge")
-    best = top3.iloc[0]
-    name = best.get("player_name", str(best.get("player_id", "")))
-    stat = best.get("stat", "")
-    edge = best["edge"]
-    direction = "Over" if edge > 0 else "Under"
-    edge_str = f"+{edge:.1f}" if edge > 0 else f"{edge:.1f}"
-    line_val = best.get("line", 0)
-    p_over = best.get("p_over", 0.5)
-
-    primary = f"{name} {stat} {direction} {line_val:.1f}"
-    secondary = f"Model projects {best.get('expected', 0):.1f} vs line {line_val:.1f}. Edge: {edge_str}."
-
-    n_edges = len(work[(work["p_over"] >= 0.63) | (work["p_over"] <= 0.37)])
-
-    # Runner-up edges (2nd and 3rd)
-    runners_html = ""
-    if len(top3) > 1:
-        runner_rows = ""
-        for _, row in top3.iloc[1:].iterrows():
-            r_name = row.get("player_name", str(row.get("player_id", "")))
-            r_stat = row.get("stat", "")
-            r_edge = row["edge"]
-            r_dir = "O" if r_edge > 0 else "U"
-            r_edge_str = f"+{r_edge:.1f}" if r_edge > 0 else f"{r_edge:.1f}"
-            r_line = row.get("line", 0)
-            r_p_over = row.get("p_over", 0.5)
-            r_color = "var(--tdd-sage)" if r_edge > 0 else "var(--tdd-ember)"
-            runner_rows += (
-                '<div style="display:flex;justify-content:space-between;align-items:baseline;'
-                'padding:0.4rem 0;border-bottom:1px solid var(--tdd-dark-border-faint)">'
-                '<div>'
-                f'<span style="color:var(--tdd-cream);font-family:var(--tdd-font-heading);'
-                f'font-weight:600;font-size:0.85rem">{esc(r_name)}</span>'
-                f'<span style="color:var(--tdd-slate);font-size:0.72rem;margin-left:0.5rem">'
-                f'{esc(r_stat)} {r_dir} {r_line:.1f}</span>'
-                '</div>'
-                '<div style="display:flex;gap:0.8rem;align-items:baseline">'
-                f'<span style="color:var(--tdd-slate);font-size:0.68rem">{r_p_over:.0%}</span>'
-                f'<span style="color:{r_color};font-family:var(--tdd-font-heading);'
-                f'font-weight:700;font-size:0.85rem">{esc(r_edge_str)}</span>'
-                '</div>'
-                '</div>'
-            )
-        runners_html = (
-            f'<div style="margin-top:0.6rem;padding-top:0.6rem;'
-            f'border-top:1px solid var(--tdd-dark-border)">'
-            f'{runner_rows}'
-            f'</div>'
-        )
-
-    return (
-        '<div class="tdd-edgecall">'
-        '<div class="ec-eyebrow">Diamond Edge</div>'
-        f'<div class="ec-primary">{esc(primary)}</div>'
-        f'<div class="ec-secondary">{esc(secondary)}</div>'
-        '<div class="ec-meta">'
-        f'<span>P(over) <b>{p_over:.0%}</b></span>'
-        f'<span>Edges <b>{n_edges}</b></span>'
-        f'<span>Best <b>{edge_str}</b></span>'
-        '</div>'
-        f'{runners_html}'
-        '</div>'
-    )
-
-
 def _render_key_matchups_html(
     game: pd.Series,
     batter_sims: pd.DataFrame,
@@ -369,6 +283,677 @@ def _render_key_matchups_html(
         '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);padding:0.8rem 1rem">'
         '<div class="gsec-head">Key Matchups</div>'
         f'{rows}'
+        '</div>'
+    )
+
+
+def _render_xwoba_leaderboard_html(
+    game: pd.Series,
+    lineups: pd.DataFrame,
+) -> str:
+    """Leaderboard of all batters in this game ranked by matchup xwOBA."""
+    gpk = game["game_pk"]
+    if lineups.empty or "game_pk" not in lineups.columns:
+        return ""
+
+    game_lu = lineups[lineups["game_pk"] == gpk]
+    if game_lu.empty:
+        return ""
+
+    arsenal_df = load_pitcher_arsenal()
+    vuln_df = load_hitter_vulnerability(career=True)
+    str_df = load_hitter_strength(career=True)
+
+    if arsenal_df.empty or vuln_df.empty:
+        return ""
+
+    away_pid_raw = game.get("away_pitcher_id")
+    home_pid_raw = game.get("home_pitcher_id")
+    away_pid = int(away_pid_raw) if pd.notna(away_pid_raw) else None
+    home_pid = int(home_pid_raw) if pd.notna(home_pid_raw) else None
+    away_team = game.get("away_team_id")
+    home_team = game.get("home_team_id")
+
+    entries: list[tuple[float, int, str, str, str]] = []  # (xwoba, bid, name, team, adv)
+
+    for _, row in game_lu.iterrows():
+        bid = int(row.get("batter_id", 0))
+        if not bid:
+            continue
+        batter_name = row.get("batter_name", str(bid))
+        team_id = row.get("team_id")
+        team_abbr = row.get("team_abbr", "")
+
+        # Determine opposing pitcher
+        if team_id == away_team:
+            opp_pid = home_pid
+        elif team_id == home_team:
+            opp_pid = away_pid
+        else:
+            continue
+        if not opp_pid:
+            continue
+
+        _p_ars = arsenal_df[arsenal_df["pitcher_id"] == opp_pid]
+        _h_vul = vuln_df[vuln_df["batter_id"] == bid]
+        _h_str = str_df[str_df["batter_id"] == bid] if not str_df.empty else pd.DataFrame()
+        if _p_ars.empty or _h_vul.empty:
+            continue
+
+        _ph = str(_p_ars["pitch_hand"].iloc[0]) if "pitch_hand" in _p_ars.columns else None
+        _bh = str(_h_vul["batter_stand"].iloc[0]) if "batter_stand" in _h_vul.columns else None
+
+        edge = compute_matchup_xwoba_edge(_p_ars, _h_vul, _h_str, pitcher_hand=_ph, batter_hand=_bh)
+        entries.append((edge["matchup_xwoba"], bid, batter_name, team_abbr, edge["advantage"]))
+
+    if not entries:
+        return ""
+
+    # Sort by xwOBA descending
+    entries.sort(key=lambda x: x[0], reverse=True)
+
+    LG_XWOBA = 0.315
+    rows = ""
+    for rank, (xw, bid, name, team, adv) in enumerate(entries, 1):
+        if adv == "hitter":
+            color = "var(--tdd-sage)"
+        elif adv == "pitcher":
+            color = "var(--tdd-ember)"
+        else:
+            color = "var(--tdd-slate)"
+
+        # Bar width relative to max possible (~0.500)
+        bar_pct = min(xw / 0.500 * 100, 100)
+        lg_pct = LG_XWOBA / 0.500 * 100
+
+        rows += (
+            '<div style="display:flex;gap:8px;align-items:center;'
+            'padding:0.35rem 0;border-bottom:1px solid var(--tdd-dark-border-faint)">'
+            f'<span style="color:var(--tdd-slate);font-size:0.65rem;width:1.2rem;text-align:right">{rank}</span>'
+            f'{headshot_html(bid, size=28)}'
+            '<div style="flex:1;min-width:0">'
+            f'<div style="display:flex;justify-content:space-between;align-items:baseline">'
+            f'<span style="color:var(--tdd-cream);font-family:var(--tdd-font-heading);font-weight:700;font-size:0.78rem">{esc(name)}'
+            f'<span style="color:var(--tdd-slate);font-size:0.62rem;margin-left:0.3rem">{esc(team)}</span></span>'
+            f'<span style="color:{color};font-family:var(--tdd-font-mono);font-weight:700;font-size:0.78rem">.{int(xw*1000):03d}</span>'
+            '</div>'
+            f'<div style="position:relative;height:4px;background:var(--tdd-dark-border);border-radius:2px;margin-top:2px">'
+            f'<div style="position:absolute;left:{lg_pct:.1f}%;top:-1px;bottom:-1px;width:1px;background:var(--tdd-slate);opacity:0.5"></div>'
+            f'<div style="width:{bar_pct:.1f}%;height:100%;background:{color};border-radius:2px"></div>'
+            '</div>'
+            '</div>'
+            '</div>'
+        )
+
+    return (
+        '<div style="padding:0.2rem 0">'
+        '<div style="color:var(--tdd-slate);font-size:0.6rem;margin-bottom:0.5rem">'
+        'Odds-ratio xwOBA per batter vs opposing starter (league avg .315)</div>'
+        f'{rows}'
+        '</div>'
+    )
+
+
+def _render_weather_park_html(game: pd.Series) -> str:
+    """Weather conditions + park factor card."""
+    venue = game.get("venue_name", "")
+    venue_id = game.get("venue_id")
+
+    # Look up venue name from hr_park_factors if not in game data
+    if not venue and pd.notna(venue_id):
+        hpf = load_hr_park_factors()
+        if not hpf.empty and "venue_id" in hpf.columns and "venue_name" in hpf.columns:
+            match = hpf[hpf["venue_id"] == int(venue_id)]
+            if not match.empty:
+                venue = str(match.iloc[0]["venue_name"])
+    temp = game.get("weather_temp")
+    wind_speed = game.get("weather_wind_speed")
+    wind_dir = game.get("weather_wind_direction", "")
+    condition = game.get("weather_condition", "")
+
+    # Weather row
+    weather_parts = []
+    if pd.notna(temp):
+        weather_parts.append(f"{int(temp)}&deg;F")
+    if pd.notna(wind_speed) and wind_dir:
+        weather_parts.append(f"{int(wind_speed)} mph {esc(wind_dir)}")
+    if condition:
+        weather_parts.append(esc(condition))
+    weather_line = " &middot; ".join(weather_parts) if weather_parts else "Not available"
+
+    # Park factors
+    pf_html = ""
+    if pd.notna(venue_id):
+        pf_df = load_park_factors()
+        if not pf_df.empty and "venue_id" in pf_df.columns:
+            venue_pf = pf_df[pf_df["venue_id"] == int(venue_id)]
+            if not venue_pf.empty:
+                pf_items = ""
+                for _, row in venue_pf.iterrows():
+                    stat = row.get("stat", "")
+                    pf_val = row.get("park_factor_regressed", 1.0)
+                    if pd.isna(pf_val):
+                        continue
+                    pf_pct = (pf_val - 1) * 100
+                    if abs(pf_pct) < 1:
+                        pf_color = "var(--tdd-slate)"
+                        pf_label = "neutral"
+                    elif pf_pct > 0:
+                        pf_color = "var(--tdd-ember)"
+                        pf_label = f"+{pf_pct:.0f}%"
+                    else:
+                        pf_color = "var(--tdd-sage)"
+                        pf_label = f"{pf_pct:.0f}%"
+                    pf_items += (
+                        '<div class="pd-v">'
+                        f'<div class="pd-vv" style="color:{pf_color}">{esc(pf_label)}</div>'
+                        f'<div class="pd-vl">{esc(stat)}</div>'
+                        '</div>'
+                    )
+                if pf_items:
+                    pf_html = f'<div class="pd-vitals" style="margin-top:0.6rem">{pf_items}</div>'
+
+    return (
+        '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);padding:0.8rem 1rem">'
+        '<div class="gsec-head">Weather + Park</div>'
+        f'<div style="color:var(--tdd-cream);font-size:0.85rem;margin-bottom:0.3rem">{esc(venue)}</div>'
+        f'<div style="color:var(--tdd-slate);font-size:0.78rem">{weather_line}</div>'
+        f'{pf_html}'
+        '</div>'
+    )
+
+
+def _render_umpire_html(game: pd.Series) -> str:
+    """Home plate umpire tendency card."""
+    ump_name = game.get("hp_umpire_name", "")
+    if not ump_name:
+        return (
+            '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);padding:0.8rem 1rem">'
+            '<div class="gsec-head">Home Plate Umpire</div>'
+            '<div style="color:var(--tdd-slate);font-size:0.78rem">Not yet assigned</div>'
+            '</div>'
+        )
+
+    ump_df = load_umpire_tendencies()
+    if ump_df.empty or "hp_umpire_name" not in ump_df.columns:
+        return (
+            '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);padding:0.8rem 1rem">'
+            '<div class="gsec-head">Home Plate Umpire</div>'
+            f'<div style="color:var(--tdd-cream);font-size:0.85rem">{esc(ump_name)}</div>'
+            '<div style="color:var(--tdd-slate);font-size:0.78rem">No tendency data</div>'
+            '</div>'
+        )
+
+    match = ump_df[ump_df["hp_umpire_name"] == ump_name]
+    if match.empty:
+        # Fall back to league-average tendencies
+        items = ""
+        for label in ["K Tendency", "BB Tendency", "HR Tendency"]:
+            items += (
+                '<div class="pd-v">'
+                '<div class="pd-vv" style="color:var(--tdd-slate)">neutral</div>'
+                f'<div class="pd-vl">{esc(label)}</div>'
+                '</div>'
+            )
+        return (
+            '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);padding:0.8rem 1rem">'
+            '<div class="gsec-head">Home Plate Umpire</div>'
+            f'<div style="color:var(--tdd-cream);font-family:var(--tdd-font-heading);font-weight:700;font-size:0.85rem">{esc(ump_name)}</div>'
+            '<div style="color:var(--tdd-slate);font-size:0.72rem;margin-bottom:0.4rem">Using league-average umpire tendencies</div>'
+            f'<div class="pd-vitals">{items}</div>'
+            '</div>'
+        )
+
+    u = match.iloc[0]
+    games = int(u.get("games", 0))
+
+    # Build tendency items
+    items = ""
+    for stat, lift_col, label in [
+        ("K", "k_logit_lift", "K Tendency"),
+        ("BB", "bb_logit_lift", "BB Tendency"),
+        ("HR", "hr_logit_lift", "HR Tendency"),
+    ]:
+        lift = u.get(lift_col, 0)
+        if pd.isna(lift):
+            continue
+        lift = float(lift)
+        if abs(lift) < 0.02:
+            color = "var(--tdd-slate)"
+            desc = "neutral"
+        elif lift > 0:
+            color = "var(--tdd-ember)"
+            desc = f"+{lift:.2f}"
+        else:
+            color = "var(--tdd-sage)"
+            desc = f"{lift:.2f}"
+        items += (
+            '<div class="pd-v">'
+            f'<div class="pd-vv" style="color:{color}">{esc(desc)}</div>'
+            f'<div class="pd-vl">{esc(label)}</div>'
+            '</div>'
+        )
+
+    return (
+        '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);padding:0.8rem 1rem">'
+        '<div class="gsec-head">Home Plate Umpire</div>'
+        f'<div style="color:var(--tdd-cream);font-family:var(--tdd-font-heading);font-weight:700;font-size:0.85rem">{esc(ump_name)}</div>'
+        f'<div style="color:var(--tdd-slate);font-size:0.72rem;margin-bottom:0.4rem">{games} career games</div>'
+        f'<div class="pd-vitals">{items}</div>'
+        '</div>'
+    )
+
+
+def _render_bullpen_html(game: pd.Series, side: str) -> str:
+    """Bullpen card for one team showing top relievers."""
+    team_id = game.get(f"{side}_team_id")
+    team_abbr = game.get(f"{side}_abbr", "?")
+
+    if pd.isna(team_id):
+        return _stub_section(f"Bullpen {team_abbr}")
+
+    team_id = int(team_id)
+
+    # Get relievers for this team via roster
+    roster_df = load_roster()
+    rr_df = load_reliever_rankings()
+
+    if roster_df.empty or rr_df.empty:
+        return _stub_section(f"Bullpen {team_abbr}")
+
+    # Map pitcher_id → team_abbr from roster
+    team_pitchers = roster_df[roster_df["team_abbr"] == team_abbr]
+    if team_pitchers.empty:
+        return _stub_section(f"Bullpen {team_abbr}")
+
+    team_pids = set(team_pitchers["player_id"].astype(int))
+    team_rr = rr_df[rr_df["pitcher_id"].isin(team_pids)].copy()
+
+    if team_rr.empty:
+        return _stub_section(f"Bullpen {team_abbr}")
+
+    # Sort by role priority then value
+    role_order = {"CL": 0, "SU": 1, "MR": 2, "LR": 3}
+    team_rr["_role_ord"] = team_rr["role"].map(role_order).fillna(4)
+    team_rr = team_rr.sort_values(["_role_ord", "tdd_value_score"], ascending=[True, False])
+
+    # Get names from roster
+    name_map = dict(zip(
+        team_pitchers["player_id"].astype(int),
+        team_pitchers["player_name"],
+    ))
+
+    rows = ""
+    for _, r in team_rr.head(5).iterrows():
+        pid = int(r["pitcher_id"])
+        name = name_map.get(pid, str(pid))
+        # Shorten long names
+        if len(name) > 16:
+            parts = name.split()
+            name = f"{parts[0][0]}. {' '.join(parts[1:])}" if len(parts) > 1 else name[:16]
+        role = r.get("role", "?")
+        hand = r.get("pitch_hand", "?")
+        k_pct = r.get("k_pct", 0)
+        bb_pct = r.get("bb_pct", 0)
+
+        role_color = {
+            "CL": "var(--tdd-ember)", "SU": "var(--tdd-gold)",
+            "MR": "var(--tdd-slate)", "LR": "var(--tdd-slate)",
+        }.get(role, "var(--tdd-slate)")
+
+        rows += (
+            '<div style="display:flex;justify-content:space-between;align-items:center;'
+            'padding:0.35rem 0;border-bottom:1px solid var(--tdd-dark-border-faint)">'
+            '<div style="display:flex;gap:0.4rem;align-items:baseline;flex:1;min-width:0">'
+            f'{headshot_html(pid, size=24)}'
+            f'<span style="color:var(--tdd-cream);font-size:0.78rem;font-weight:600">{esc(name)}</span>'
+            f'<span style="color:var(--tdd-slate);font-size:0.65rem">{esc(hand)}HP</span>'
+            '</div>'
+            '<div style="display:flex;gap:0.6rem;align-items:baseline">'
+            f'<span style="color:var(--tdd-slate);font-size:0.65rem">K:{k_pct*100 if pd.notna(k_pct) else 0:.0f}%</span>'
+            f'<span style="color:{role_color};font-family:var(--tdd-font-heading);'
+            f'font-weight:700;font-size:0.72rem">{esc(role)}</span>'
+            '</div>'
+            '</div>'
+        )
+
+    return (
+        '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);padding:0.8rem 1rem">'
+        f'<div class="gsec-head">Bullpen {esc(team_abbr)}</div>'
+        f'{rows}'
+        '</div>'
+    )
+
+
+def _describe_arsenal(pid: int) -> tuple[str, str]:
+    """Return (primary weapon description, top pitch for K narrative).
+
+    E.g. ("changeup-heavy LHP", "changeup (49% whiff)")
+    """
+    arsenal_df = load_pitcher_arsenal()
+    if arsenal_df.empty:
+        return "", ""
+    pa = arsenal_df[arsenal_df["pitcher_id"] == pid].copy()
+    if pa.empty:
+        return "", ""
+
+    pa = pa.sort_values("usage_pct", ascending=False)
+    hand = str(pa.iloc[0].get("pitch_hand", "R"))
+    hand_label = "LHP" if hand == "L" else "RHP"
+
+    # Top whiff pitch (min 15% usage)
+    whiff_candidates = pa[pa["usage_pct"] >= 0.15].copy()
+    if whiff_candidates.empty:
+        whiff_candidates = pa.head(3)
+    best_whiff = whiff_candidates.sort_values("whiff_rate", ascending=False).iloc[0]
+    whiff_pt = str(best_whiff.get("pitch_type", ""))
+    whiff_rate = float(best_whiff.get("whiff_rate", 0))
+
+    _PT_NAMES = {
+        "FF": "four-seam", "SI": "sinker", "FC": "cutter",
+        "SL": "slider", "CU": "curveball", "KC": "knuckle-curve",
+        "CH": "changeup", "FS": "splitter", "ST": "sweeper",
+        "SV": "slurve", "KN": "knuckleball",
+    }
+    whiff_name = _PT_NAMES.get(whiff_pt, whiff_pt)
+
+    # Arsenal shape description
+    primary = pa.iloc[0]
+    primary_pt = str(primary.get("pitch_type", ""))
+    primary_name = _PT_NAMES.get(primary_pt, primary_pt)
+    primary_usage = float(primary.get("usage_pct", 0))
+
+    # Count pitch families
+    breaking = pa[pa["pitch_type"].isin(["SL", "CU", "KC", "ST", "SV"])]["usage_pct"].sum()
+    offspeed = pa[pa["pitch_type"].isin(["CH", "FS"])]["usage_pct"].sum()
+
+    if primary_usage >= 0.55:
+        shape = f"{primary_name}-heavy {hand_label}"
+    elif breaking >= 0.35:
+        shape = f"breaking ball-heavy {hand_label}"
+    elif offspeed >= 0.25:
+        shape = f"{hand_label} with a strong offspeed mix"
+    else:
+        shape = f"{hand_label} with a balanced arsenal"
+
+    whiff_desc = f"{whiff_name} ({whiff_rate*100:.0f}% whiff)" if whiff_rate > 0.20 else whiff_name
+
+    return shape, whiff_desc
+
+
+def _render_game_plan_html(
+    game: pd.Series,
+    game_props: pd.DataFrame,
+    batter_sims: pd.DataFrame,
+    lookups: dict,
+) -> str:
+    """Auto-generated narrative game plan for each side.
+
+    Generates pitcher-specific scouting narratives with arsenal context,
+    matchup dynamics, and environment notes.
+    """
+    gpk = game["game_pk"]
+
+    # Gather both sides' pitcher data for game-level framing
+    side_data = {}
+    for side in ["away", "home"]:
+        pitch_side = "home" if side == "away" else "away"
+        pid_raw = game.get(f"{pitch_side}_pitcher_id")
+        pid = int(pid_raw) if pd.notna(pid_raw) else None
+        proj = lookups["proj"]
+        p_proj = proj.get(pid, {}) if pid else {}
+        side_data[side] = {
+            "pid": pid,
+            "pitcher_name": game.get(f"{pitch_side}_pitcher_name") or "TBD",
+            "k_rate": float(p_proj.get("projected_k_rate", 0)) if p_proj.get("projected_k_rate") else 0,
+            "bb_rate": float(p_proj.get("projected_bb_rate", 0)) if p_proj.get("projected_bb_rate") else 0,
+        }
+
+    # Game-level framing
+    away_k = side_data["away"]["k_rate"]
+    home_k = side_data["home"]["k_rate"]
+    away_bb = side_data["away"]["bb_rate"]
+    home_bb = side_data["home"]["bb_rate"]
+    avg_k = (away_k + home_k) / 2 if (away_k > 0 and home_k > 0) else 0
+    avg_bb = (away_bb + home_bb) / 2 if (away_bb > 0 and home_bb > 0) else 0
+
+    game_frame = ""
+    if avg_k > 0:
+        if avg_k >= 0.26:
+            game_frame = "Both starters miss bats — expect a low-contact, high-strikeout game."
+        elif avg_k <= 0.19:
+            game_frame = "Neither starter is a big K threat — expect balls in play and a higher-scoring game."
+        elif abs(away_k - home_k) >= 0.06:
+            high_side = "away" if away_k > home_k else "home"
+            high_name = side_data[high_side]["pitcher_name"]
+            game_frame = f"Pitching mismatch: {esc(high_name)} has a clear stuff advantage in this one."
+        if avg_bb >= 0.09:
+            game_frame += " Both pitchers walk hitters — free baserunners will be in play." if game_frame else "Walk-prone starters on both sides — free baserunners will drive this game."
+
+    blocks = ""
+
+    for side in ["away", "home"]:
+        pitch_side = "home" if side == "away" else "away"
+        pitcher_name = side_data[side]["pitcher_name"]  # pitcher facing THIS side's batters
+        # Wait — side_data[side] has the pitcher facing the OTHER side's batters
+        # We need the pitcher that THIS side's batters face
+        pitcher_name = game.get(f"{pitch_side}_pitcher_name") or "TBD"
+        pid = side_data[side]["pid"]  # this is the pitcher the other side faces
+        # Fix: the pitcher facing side's batters is on pitch_side
+        pid_raw = game.get(f"{pitch_side}_pitcher_id")
+        pid = int(pid_raw) if pd.notna(pid_raw) else None
+        batting_abbr = game.get(f"{side}_abbr", "?")
+
+        if pid is None:
+            continue
+
+        proj = lookups["proj"]
+        p_proj = proj.get(pid, {}) if pid else {}
+        k_rate = float(p_proj.get("projected_k_rate", 0)) if p_proj.get("projected_k_rate") else 0
+        bb_rate = float(p_proj.get("projected_bb_rate", 0)) if p_proj.get("projected_bb_rate") else 0
+
+        # Pitcher game-level props
+        p_props = game_props[
+            (game_props["player_id"] == pid)
+            & (game_props["player_type"] == "pitcher")
+        ] if not game_props.empty and "player_type" in game_props.columns else pd.DataFrame()
+
+        exp_k, exp_bb, exp_ip = 0.0, 0.0, 0.0
+        ump_k, wx_k = 0.0, 0.0
+        if not p_props.empty:
+            stat_map = {}
+            for _, row in p_props.iterrows():
+                stat_map[row["stat"]] = float(row["expected"]) if pd.notna(row.get("expected")) else 0
+            exp_k = stat_map.get("K", 0)
+            exp_bb = stat_map.get("BB", 0)
+            exp_ip = float(p_props.iloc[0].get("expected_ip", 0)) if pd.notna(p_props.iloc[0].get("expected_ip")) else 0
+            ump_k = float(p_props.iloc[0].get("umpire_k_lift", 0)) if pd.notna(p_props.iloc[0].get("umpire_k_lift")) else 0
+            wx_k = float(p_props.iloc[0].get("weather_k_lift", 0)) if pd.notna(p_props.iloc[0].get("weather_k_lift")) else 0
+
+        # Batter matchup data
+        side_batters = batter_sims[
+            (batter_sims["game_pk"] == gpk)
+            & (batter_sims["team_abbr"] == batting_abbr)
+        ] if not batter_sims.empty and "team_abbr" in batter_sims.columns else pd.DataFrame()
+
+        # Guard: skip if no projection data at all
+        if k_rate == 0 and side_batters.empty:
+            continue
+
+        # Arsenal info
+        arsenal_shape, top_whiff_pitch = _describe_arsenal(pid) if pid else ("", "")
+
+        # === Pitcher scouting narrative ===
+        narrative_parts = []
+
+        # Guard for missing projections
+        if k_rate == 0:
+            narrative_parts.append(
+                f"{esc(pitcher_name)} — limited projection data available. "
+                f"Approach with standard game plan."
+            )
+        else:
+            # Varied pitcher profile sentence based on archetype
+            if k_rate >= 0.28 and bb_rate <= 0.06:
+                profile = f"an elite arm who dominates the zone — {k_rate*100:.0f}% K rate with pinpoint command ({bb_rate*100:.0f}% BB)"
+            elif k_rate >= 0.28 and bb_rate >= 0.09:
+                profile = f"a high-K arm with wildness — {k_rate*100:.0f}% K rate but walks {bb_rate*100:.0f}% of batters"
+            elif k_rate >= 0.23 and bb_rate <= 0.06:
+                profile = f"a strike-thrower who limits free passes — {k_rate*100:.0f}% K, {bb_rate*100:.0f}% BB"
+            elif k_rate >= 0.23:
+                profile = f"solid strikeout ability ({k_rate*100:.0f}% K) with some walk risk ({bb_rate*100:.0f}% BB)"
+            elif k_rate <= 0.18:
+                profile = f"a contact manager — {k_rate*100:.0f}% K rate means balls in play, and that's where the offense can attack"
+            else:
+                profile = f"a mid-rotation arm — {k_rate*100:.0f}% K rate, {bb_rate*100:.0f}% BB rate"
+
+            if arsenal_shape:
+                profile = f"{arsenal_shape}, {profile}"
+            else:
+                profile = f"{esc(pitcher_name)} is {profile}"
+                arsenal_shape = ""
+
+            if arsenal_shape:
+                narrative_parts.append(f"{esc(pitcher_name)} is a {profile}.")
+            else:
+                narrative_parts.append(f"{profile}.")
+
+            # Game projection line (when available)
+            if exp_k > 0:
+                narrative_parts.append(
+                    f"Game projection: <b>{exp_k:.1f} K</b>, "
+                    f"<b>{exp_bb:.1f} BB</b>, <b>{exp_ip:.1f} IP</b>."
+                )
+
+            # Arsenal-specific approach advice
+            if top_whiff_pitch and k_rate >= 0.22:
+                narrative_parts.append(
+                    f"His {top_whiff_pitch} is the primary out pitch — "
+                    f"batters who can lay off it have the edge."
+                )
+            elif bb_rate >= 0.09:
+                narrative_parts.append(
+                    f"Be patient at the plate — he walks {bb_rate*100:.0f}% of hitters "
+                    f"and will put himself in hitter's counts."
+                )
+
+        # Environment notes (only when meaningful)
+        env_parts = []
+        if abs(ump_k) >= 0.03:
+            env_parts.append("K-friendly zone" if ump_k > 0 else "hitter-friendly zone")
+        if abs(wx_k) >= 0.02:
+            env_parts.append("weather boosts Ks" if wx_k > 0 else "weather suppresses Ks")
+        if env_parts:
+            narrative_parts.append(f"Environment: {', '.join(env_parts)}.")
+
+        # === Matchup dynamics ===
+        dynamics = []
+        if not side_batters.empty and "matchup_k_lift" in side_batters.columns:
+            sb = side_batters.copy()
+            # Cap extreme lifts for display
+            sb["matchup_k_lift_capped"] = sb["matchup_k_lift"].clip(-0.60, 0.60)
+
+            # Highest K risk — with arsenal context
+            worst_k = sb.nlargest(1, "matchup_k_lift_capped")
+            if not worst_k.empty:
+                w = worst_k.iloc[0]
+                lift = float(w["matchup_k_lift_capped"])
+                if lift > 0.15:
+                    whiff_note = f" — the {top_whiff_pitch} is the weapon" if top_whiff_pitch else ""
+                    dynamics.append(
+                        f'<b>{esc(w["batter_name"])}</b> is the toughest matchup '
+                        f'in this lineup (K lift +{lift:.2f}){whiff_note}'
+                    )
+
+            # Best contact matchup
+            best_k = sb.nsmallest(1, "matchup_k_lift_capped")
+            if not best_k.empty:
+                b = best_k.iloc[0]
+                lift = float(b["matchup_k_lift_capped"])
+                if lift < -0.10:
+                    dynamics.append(
+                        f'<b>{esc(b["batter_name"])}</b> has the best contact profile '
+                        f'against this arsenal (K lift {lift:.2f})'
+                    )
+
+            # Walk upside (only for walk-prone pitchers)
+            if bb_rate >= 0.08 and "expected_bb" in sb.columns:
+                high_bb = sb[sb["expected_bb"] >= 0.5]
+                if len(high_bb) >= 2:
+                    names = ", ".join(high_bb.nlargest(2, "expected_bb")["batter_name"].tolist())
+                    dynamics.append(
+                        f'Walk upside for <b>{esc(names)}</b> — this pitcher puts '
+                        f'runners on at a {bb_rate*100:.0f}% clip'
+                    )
+
+            # HR threat
+            if "expected_hr" in sb.columns:
+                hr_threats = sb[sb["expected_hr"] >= 0.20]
+                if not hr_threats.empty:
+                    best_hr = hr_threats.nlargest(1, "expected_hr").iloc[0]
+                    dynamics.append(
+                        f'<b>{esc(best_hr["batter_name"])}</b> carries the most '
+                        f'HR upside ({best_hr["expected_hr"]:.2f} expected)'
+                    )
+
+            # Lineup-wide K risk assessment
+            avg_lift = float(sb["matchup_k_lift_capped"].mean())
+            if avg_lift > 0.10:
+                dynamics.append(
+                    "This lineup profiles as K-prone against this arsenal — "
+                    "disciplined at-bats will be key"
+                )
+            elif avg_lift < -0.10:
+                dynamics.append(
+                    "This lineup has a collective contact advantage — "
+                    "expect balls in play early"
+                )
+
+        # === Render ===
+        narrative_html = ""
+        for p in narrative_parts:
+            narrative_html += (
+                f'<div style="color:var(--tdd-cream);font-size:0.82rem;'
+                f'line-height:1.5;margin-bottom:0.4rem">{p}</div>'
+            )
+
+        dynamics_html = ""
+        if dynamics:
+            for d in dynamics[:4]:
+                dynamics_html += (
+                    f'<div style="color:var(--tdd-cream);font-size:0.78rem;'
+                    f'padding:0.25rem 0;border-bottom:1px solid var(--tdd-dark-border-faint)">'
+                    f'<span style="color:var(--tdd-gold);margin-right:0.4rem">&#9670;</span>{d}'
+                    f'</div>'
+                )
+
+        blocks += (
+            f'<div class="col-6">'
+            '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);padding:0.8rem 1rem">'
+            f'<div class="gsec-head">{esc(batting_abbr)} Game Plan vs {esc(pitcher_name)}</div>'
+            f'{narrative_html}'
+            f'{dynamics_html}'
+            '</div>'
+            '</div>'
+        )
+
+    if not blocks:
+        return ""
+
+    # Game-level framing above the two side panels
+    frame_html = ""
+    if game_frame:
+        frame_html = (
+            f'<div style="color:var(--tdd-cream);font-size:0.85rem;font-weight:600;'
+            f'text-align:center;padding:0.5rem;margin-bottom:0.3rem;'
+            f'background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border)">'
+            f'{game_frame}</div>'
+        )
+
+    return (
+        '<div class="section">'
+        f'{frame_html}'
+        f'<div class="grid12">{blocks}</div>'
         '</div>'
     )
 
@@ -508,18 +1093,7 @@ def page_game() -> None:
     # Hero scoreboard
     parts.append(_render_hero_html(game, lookups))
 
-    # Row 1: Edge Call + Key Matchups (grid 6+6)
-    edge_html = _render_edge_call_html(game, game_props_df)
-    matchups_html = _render_key_matchups_html(game, batter_sims, lookups) if is_today_game else _stub_section("Key Matchups")
-
-    parts.append(
-        '<div class="section grid12">'
-        f'<div class="col-6">{edge_html}</div>'
-        f'<div class="col-6">{matchups_html}</div>'
-        '</div>'
-    )
-
-    # Row 2: Pitcher duel (full width)
+    # Row 1: Pitcher duel (full width)
     parts.append(
         '<div class="section">'
         '<div class="gsec-head">Starting Pitchers</div>'
@@ -527,19 +1101,35 @@ def page_game() -> None:
         '</div>'
     )
 
-    # Row 3: Weather + Umpire stubs (grid 6+6)
+    # Row 2: Edge Call + Key Matchups (grid 6+6)
+    matchups_html = _render_key_matchups_html(game, batter_sims, lookups) if is_today_game else _stub_section("Key Matchups")
+
     parts.append(
         '<div class="section grid12">'
-        f'<div class="col-6">{_stub_section("Weather + Park")}</div>'
-        f'<div class="col-6">{_stub_section("Home Plate Umpire")}</div>'
+        
+        f'<div class="col-6">{matchups_html}</div>'
         '</div>'
     )
 
-    # Row 4: Bullpen + H2H + News stubs (grid 4+4+4)
+    # Row 2b: Game Plan narratives (grid 6+6)
+    if is_today_game:
+        game_plan_html = _render_game_plan_html(game, game_props_df, batter_sims, lookups)
+        if game_plan_html:
+            parts.append(game_plan_html)
+
+    # Row 3: Weather + Umpire (grid 6+6)
     parts.append(
         '<div class="section grid12">'
-        f'<div class="col-4">{_stub_section("Bullpen Away")}</div>'
-        f'<div class="col-4">{_stub_section("Bullpen Home")}</div>'
+        f'<div class="col-6">{_render_weather_park_html(game)}</div>'
+        f'<div class="col-6">{_render_umpire_html(game)}</div>'
+        '</div>'
+    )
+
+    # Row 4: Bullpen + H2H (grid 4+4+4)
+    parts.append(
+        '<div class="section grid12">'
+        f'<div class="col-4">{_render_bullpen_html(game, "away")}</div>'
+        f'<div class="col-4">{_render_bullpen_html(game, "home")}</div>'
         f'<div class="col-4">{_stub_section("H2H Record")}</div>'
         '</div>'
     )
@@ -552,6 +1142,13 @@ def page_game() -> None:
     # === INTERACTIVE SECTIONS (need Streamlit widgets) ============
     # These use st.columns, st.plotly_chart, etc. so they can't be
     # part of the single HTML blob above.
+
+    # xwOBA Matchup Leaderboard (collapsible)
+    if is_today_game and not lineups.empty:
+        xwoba_lb = _render_xwoba_leaderboard_html(game, lineups)
+        if xwoba_lb:
+            with st.expander("xwOBA Matchup Leaderboard", expanded=False):
+                st.markdown(xwoba_lb, unsafe_allow_html=True)
 
     # Pitcher sim distributions (Plotly charts)
     if is_today_game and not game_props_df.empty:

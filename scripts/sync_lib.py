@@ -41,22 +41,8 @@ FILE_MAP: dict[str, str] = {
     "schedule.py":          "data/schedule.py",
     "db.py":                "data/db.py",
     "game_predictions.py":  "models/game_predictions.py",
-    # game_sim/ package — PA-by-PA simulator used by update_in_season for
-    # todays_sims.parquet. Keep in sync so live dashboard predictions use
-    # the same softmax + bullpen tier + per-batter BIP enrichments that
-    # confident_picks.py uses.
-    "game_sim/__init__.py":          "models/game_sim/__init__.py",
-    "game_sim/_sim_utils.py":        "models/game_sim/_sim_utils.py",
-    "game_sim/batter_pa_model.py":   "models/game_sim/batter_pa_model.py",
-    "game_sim/batter_simulator.py":  "models/game_sim/batter_simulator.py",
-    "game_sim/bip_model.py":         "models/game_sim/bip_model.py",
-    "game_sim/bullpen_model.py":     "models/game_sim/bullpen_model.py",
-    "game_sim/exit_model.py":        "models/game_sim/exit_model.py",
-    "game_sim/fantasy_scoring.py":   "models/game_sim/fantasy_scoring.py",
-    "game_sim/pa_outcome_model.py":  "models/game_sim/pa_outcome_model.py",
-    "game_sim/pitch_count_model.py": "models/game_sim/pitch_count_model.py",
-    "game_sim/simulator.py":         "models/game_sim/simulator.py",
-    "game_sim/tto_model.py":         "models/game_sim/tto_model.py",
+    # game_sim/ package removed -- sims now run exclusively in player_profiles
+    # via confident_picks.py. No longer synced to tdd-dashboard.
 }
 
 # Verify targets: module name -> list of names to import
@@ -89,8 +75,6 @@ def _fix_imports(content: str) -> str:
     """
     # Specific mappings first (longest prefix wins)
     mappings = [
-        (r'\bfrom\s+src\.models\.game_sim\.',  'from lib.game_sim.'),
-        (r'\bimport\s+src\.models\.game_sim\.', 'import lib.game_sim.'),
         (r'\bfrom\s+src\.models\.',            'from lib.'),
         (r'\bimport\s+src\.models\.',          'import lib.'),
         (r'\bfrom\s+src\.utils\.',             'from lib.'),

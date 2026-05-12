@@ -2,13 +2,14 @@
 """
 Dashboard post-update script.
 
-Runs the projection engine's in-season update (conjugate updating,
-schedule fetch, game simulations), then handles dashboard-specific
-bookkeeping: weekly snapshots, update metadata, and artifact manifest.
+Handles dashboard-specific bookkeeping: weekly snapshots, update
+metadata, artifact manifest, prediction archiving, roster export,
+and game odds collection.
 
 All model work (DB queries, conjugate updating, K samples, matchup
-simulation) lives in the player_profiles repo. This script delegates
-to it via subprocess.
+simulation, game sims) lives in the player_profiles repo.  This script
+delegates projection updates via subprocess and consumes pre-computed
+parquets for everything else.
 
 Usage
 -----
@@ -17,7 +18,8 @@ Usage
     python scripts/update_in_season.py --skip-schedule    # skip API calls
     python scripts/update_in_season.py --skip-engine      # skip projection engine, just do bookkeeping
     python scripts/update_in_season.py --snapshot          # force a weekly snapshot
-    python scripts/update_in_season.py --schedule-only    # refresh schedule/lineups/sims only (hourly mode)
+    python scripts/update_in_season.py --schedule-only    # roster moves + odds only (10-min mode)
+    python scripts/update_in_season.py --post-sims        # post-sim bookkeeping (game preds reshape + odds + metadata)
 """
 from __future__ import annotations
 
@@ -61,57 +63,6 @@ _MAJOR_MOVE_KEYWORDS = [
 
 _PRECOMPUTE_GROUPS = ["team", "rankings", "game_data", "health"]
 
-# Statuses indicating a game has not yet started. Anything outside this set
-# (In Progress, Final, Game Over, Postponed, Cancelled, Suspended, etc.)
-# counts as "the slate has moved past its start window", so we can begin
-# surfacing the next day's projections.
-_PREGAME_STATUSES = {"Scheduled", "Pre-Game", "Warmup", "Delayed Start"}
-
-
-def _all_today_games_started(schedule: "pd.DataFrame") -> bool:
-    """Return True when every row in ``schedule`` is past the pre-game phase."""
-    if schedule.empty or "status" not in schedule.columns:
-        return False
-    statuses = schedule["status"].fillna("").astype(str).str.strip()
-    return bool((~statuses.isin(_PREGAME_STATUSES)).all())
-
-
-# ---------------------------------------------------------------------------
-# Weather / umpire parsing helpers
-# ---------------------------------------------------------------------------
-
-def _parse_temp_bucket(temp_str: object) -> str:
-    """Convert temperature string to weather bucket."""
-    if not temp_str:
-        return "warm"
-    try:
-        temp = int(temp_str)
-    except (ValueError, TypeError):
-        return "warm"
-    if temp < 55:
-        return "cold"
-    if temp < 70:
-        return "cool"
-    if temp < 85:
-        return "warm"
-    return "hot"
-
-
-def _parse_wind_category(wind_str: object) -> str:
-    """Convert wind string to category."""
-    if not wind_str:
-        return "none"
-    w = str(wind_str).lower()
-    if "calm" in w or w.strip() == "":
-        return "none"
-    if "out" in w:
-        return "out"
-    if "in from" in w or "in," in w:
-        return "in"
-    if "l to r" in w or "r to l" in w:
-        return "cross"
-    return "none"
-
 
 # ---------------------------------------------------------------------------
 # Roster export
@@ -144,7 +95,7 @@ def export_roster() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Roster move detection → precompute trigger
+# Roster move detection -> precompute trigger
 # ---------------------------------------------------------------------------
 
 def _trigger_precompute(groups: list[str]) -> bool:
@@ -241,7 +192,7 @@ def check_roster_moves(game_date: str) -> bool:
     new_major = major[major["transaction_id"].isin(new_ids)]
     for _, move in new_major.iterrows():
         logger.info(
-            "NEW ROSTER MOVE: %s — %s",
+            "NEW ROSTER MOVE: %s -- %s",
             move.get("player_name", "Unknown"),
             move.get("description", move.get("type_desc", "")),
         )
@@ -272,689 +223,8 @@ def _save_roster_state(
 
 
 # ---------------------------------------------------------------------------
-# Schedule-only refresh (hourly mode)
+# Game predictions (reads confident_picks output)
 # ---------------------------------------------------------------------------
-
-def _lineups_changed(new_lineups: "pd.DataFrame", schedule: "pd.DataFrame") -> bool:
-    """Compare freshly fetched lineups/starters against what is on disk.
-
-    Returns True if any pitcher or lineup batter changed, meaning sims
-    need to be re-run.
-    """
-    import pandas as pd
-
-    old_lu_path = DASHBOARD_DIR / "todays_lineups.parquet"
-    old_sched_path = DASHBOARD_DIR / "todays_games.parquet"
-
-    # --- Check pitcher changes via schedule ---
-    if old_sched_path.exists() and not schedule.empty:
-        old_sched = pd.read_parquet(old_sched_path)
-        pitcher_cols = [c for c in ["away_pitcher_id", "home_pitcher_id"] if c in schedule.columns and c in old_sched.columns]
-        if pitcher_cols and "game_pk" in old_sched.columns:
-            old_pitchers = old_sched.set_index("game_pk")[pitcher_cols].sort_index()
-            new_pitchers = schedule.set_index("game_pk")[pitcher_cols].sort_index()
-            # Only compare games present in both
-            common = old_pitchers.index.intersection(new_pitchers.index)
-            if len(common) > 0:
-                old_cmp = old_pitchers.loc[common].fillna(0)
-                new_cmp = new_pitchers.loc[common].fillna(0)
-                if not old_cmp.equals(new_cmp):
-                    logger.info("Pitcher change detected")
-                    return True
-            # New games added
-            if len(schedule) != len(old_sched):
-                logger.info("Game count changed (%d -> %d)", len(old_sched), len(schedule))
-                return True
-
-    # --- Check lineup batter changes ---
-    if new_lineups.empty:
-        return False
-    if not old_lu_path.exists():
-        logger.info("No previous lineups on disk")
-        return True
-
-    old_lu = pd.read_parquet(old_lu_path)
-    if old_lu.empty:
-        return True
-
-    id_col = "batter_id" if "batter_id" in new_lineups.columns else "player_id"
-    old_id_col = "batter_id" if "batter_id" in old_lu.columns else "player_id"
-    if id_col not in new_lineups.columns or old_id_col not in old_lu.columns:
-        return True
-
-    old_by_game = old_lu.groupby("game_pk")[old_id_col].apply(lambda s: frozenset(s.dropna().astype(int)))
-    new_by_game = new_lineups.groupby("game_pk")[id_col].apply(lambda s: frozenset(s.dropna().astype(int)))
-
-    for gpk in new_by_game.index:
-        if gpk not in old_by_game.index:
-            logger.info("New lineup for game %s", gpk)
-            return True
-        if new_by_game[gpk] != old_by_game[gpk]:
-            logger.info("Lineup change detected for game %s", gpk)
-            return True
-
-    return False
-
-
-def run_schedule_refresh(game_date: str) -> bool:
-    """Fetch schedule/lineups and re-run sims using existing projections.
-
-    This is the lightweight 30-min mode: no DB queries, no conjugate
-    updates -- just MLB API calls and Monte Carlo sims with whatever
-    projections and K samples are already on disk.
-
-    Uses the PA-by-PA game simulator (Layer 3 v2) for multi-stat
-    projections: K, BB, H, HR, IP, pitches, fantasy points.
-
-    Returns True if sims were re-run (lineup/pitcher change detected),
-    False if skipped (no changes).
-    """
-    import numpy as np
-    import pandas as pd
-    from lib.schedule import fetch_todays_schedule, fetch_all_lineups
-    from lib.game_sim.simulator import simulate_game
-    from lib.game_sim.pa_outcome_model import GameContext
-    from lib.game_sim.bullpen_model import TeamBullpenProfile
-    from lib.game_sim.exit_model import ExitModel
-    from lib.game_sim.tto_model import build_all_tto_lifts
-    from lib.game_sim.pitch_count_model import build_pitch_count_features
-    from lib.game_sim.fantasy_scoring import compute_pitcher_fantasy
-    from lib.matchup import score_matchup, score_matchup_bb, score_matchup_hr
-    from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
-
-    # Fetch schedule
-    logger.info("Fetching schedule for %s...", game_date)
-    schedule = fetch_todays_schedule(game_date)
-    if schedule.empty:
-        logger.info("No games scheduled for %s", game_date)
-        return False
-
-    # Once all of today's games have moved past pre-game, also pull
-    # tomorrow's schedule so the same pipeline produces lineups + sims
-    # for the next slate. Tomorrow's rows get roster-backfilled lineups
-    # exactly like today's do before lineups are posted.
-    if _all_today_games_started(schedule):
-        tomorrow = (date.fromisoformat(game_date) + timedelta(days=1)).isoformat()
-        tomorrow_schedule = fetch_todays_schedule(tomorrow)
-        if not tomorrow_schedule.empty:
-            logger.info(
-                "Today's slate is underway — extending fetch to %s (%d games)",
-                tomorrow, len(tomorrow_schedule),
-            )
-            schedule = pd.concat(
-                [schedule, tomorrow_schedule], ignore_index=True,
-            )
-
-    # Fetch lineups
-    lineups = fetch_all_lineups(schedule)
-
-    # Check for changes before committing to full sim run
-    changed = _lineups_changed(lineups, schedule)
-
-    # Always save fresh schedule and lineups
-    schedule.to_parquet(DASHBOARD_DIR / "todays_games.parquet", index=False)
-    logger.info("Saved schedule: %d games", len(schedule))
-
-    # Tag API lineups with source
-    if not lineups.empty:
-        lineups["lineup_source"] = "api"
-
-    # --- Backfill roster batters for games missing API lineups ---
-    roster_path = DASHBOARD_DIR / "roster.parquet"
-    roster_df = pd.read_parquet(roster_path) if roster_path.exists() else pd.DataFrame()
-    if not roster_df.empty and not schedule.empty:
-        api_game_teams: set[tuple[int, str]] = set()
-        if not lineups.empty:
-            for _, _lr in lineups.iterrows():
-                api_game_teams.add((int(_lr["game_pk"]), str(_lr["team_abbr"])))
-
-        roster_rows: list[pd.DataFrame] = []
-        _pitcher_pos = {"SP", "RP", "P"}
-
-        # Detect two-way players (pitchers who also have hitter projections)
-        _h_proj_path = DASHBOARD_DIR / "hitter_projections.parquet"
-        _two_way_ids: set[int] = set()
-        if _h_proj_path.exists():
-            _h_proj = pd.read_parquet(_h_proj_path, columns=["batter_id"])
-            _hitter_ids = set(_h_proj["batter_id"].dropna().astype(int))
-            _pitcher_roster = roster_df[
-                roster_df["primary_position"].isin(_pitcher_pos)
-            ]
-            for _, _pr in _pitcher_roster.iterrows():
-                if int(_pr["player_id"]) in _hitter_ids:
-                    _two_way_ids.add(int(_pr["player_id"]))
-            if _two_way_ids:
-                logger.info("Two-way players detected: %s", _two_way_ids)
-
-        for _, _g in schedule.iterrows():
-            _gpk = int(_g["game_pk"])
-            for _side in ["away", "home"]:
-                _team_abbr = _g.get(f"{_side}_abbr", "")
-                _team_id = _g.get(f"{_side}_team_id")
-                if (_gpk, _team_abbr) in api_game_teams:
-                    continue
-                # Active position players who have played recently
-                # Include two-way players even though their primary_position is a pitcher role
-                _team_roster = roster_df[
-                    (roster_df["team_abbr"] == _team_abbr)
-                    & (roster_df["roster_status"] == "active")
-                    & (
-                        (~roster_df["primary_position"].isin(_pitcher_pos))
-                        | (roster_df["player_id"].isin(_two_way_ids))
-                    )
-                ].copy()
-                if _team_roster.empty:
-                    continue
-                # Sort by recency, take top 14
-                if "last_game_date" in _team_roster.columns:
-                    _team_roster = _team_roster.sort_values(
-                        "last_game_date", ascending=False, na_position="last",
-                    )
-                _team_roster = _team_roster.head(14)
-                _r_lu = pd.DataFrame({
-                    "batter_id": _team_roster["player_id"].values,
-                    "batter_name": _team_roster["player_name"].values,
-                    "batting_order": range(1, len(_team_roster) + 1),
-                    "game_pk": _gpk,
-                    "team_id": _team_id,
-                    "team_abbr": _team_abbr,
-                    "lineup_source": "roster",
-                })
-                roster_rows.append(_r_lu)
-
-        if roster_rows:
-            roster_combined = pd.concat(roster_rows, ignore_index=True)
-            lineups = (
-                pd.concat([lineups, roster_combined], ignore_index=True)
-                if not lineups.empty else roster_combined
-            )
-            logger.info("Backfilled roster batters: %d players across %d team-games",
-                        len(roster_combined), len(roster_rows))
-
-    if not lineups.empty:
-        lineups.to_parquet(DASHBOARD_DIR / "todays_lineups.parquet", index=False)
-        n_api = (lineups["lineup_source"] == "api").sum()
-        n_roster = (lineups["lineup_source"] == "roster").sum()
-        logger.info("Saved lineups: %d batters (%d API, %d roster) across %d games",
-                     len(lineups), n_api, n_roster, lineups["game_pk"].nunique())
-    else:
-        logger.info("No lineups available yet")
-
-    if not changed:
-        logger.info("No lineup or pitcher changes detected -- skipping sims")
-        return False
-
-    # --- Load existing projections and posterior samples ---
-    p_path = DASHBOARD_DIR / "pitcher_projections.parquet"
-    k_path = DASHBOARD_DIR / "pitcher_k_samples.npz"
-
-    if not p_path.exists() or not k_path.exists():
-        logger.warning("Missing projections or K samples — cannot simulate. "
-                        "Run a full update first.")
-        return
-
-    pitcher_proj = pd.read_parquet(p_path)
-
-    k_data = np.load(k_path)
-    k_samples = {k: k_data[k] for k in k_data.files}
-
-    bb_path = DASHBOARD_DIR / "pitcher_bb_samples.npz"
-    bb_samples: dict[str, np.ndarray] = {}
-    if bb_path.exists():
-        _bb = np.load(bb_path)
-        bb_samples = {k: _bb[k] for k in _bb.files}
-
-    hr_path = DASHBOARD_DIR / "pitcher_hr_samples.npz"
-    hr_samples: dict[str, np.ndarray] = {}
-    if hr_path.exists():
-        _hr = np.load(hr_path)
-        hr_samples = {k: _hr[k] for k in _hr.files}
-
-    arsenal_path = DASHBOARD_DIR / "pitcher_arsenal.parquet"
-    vuln_path = DASHBOARD_DIR / "hitter_vuln_career.parquet"
-    arsenal_df = pd.read_parquet(arsenal_path) if arsenal_path.exists() else pd.DataFrame()
-    vuln_df = pd.read_parquet(vuln_path) if vuln_path.exists() else pd.DataFrame()
-
-    baselines_pt = {
-        pt: {
-            "whiff_rate": vals.get("whiff_rate", 0.25),
-            "chase_rate": vals.get("chase_rate", 0.30),
-            "barrel_rate": vals.get("barrel_rate", 0.06),
-        }
-        for pt, vals in LEAGUE_AVG_BY_PITCH_TYPE.items()
-    }
-
-    # --- Load game simulator component data ---
-    exit_model = ExitModel()
-    exit_pkl = DASHBOARD_DIR / "exit_model.pkl"
-    if exit_pkl.exists():
-        exit_model.load(exit_pkl)
-        logger.info("Loaded exit model")
-    else:
-        logger.warning("No exit model — using fallback sigmoid")
-
-    # BF priors for BF-anchored exit logic
-    bf_priors_path = DASHBOARD_DIR / "bf_priors.parquet"
-    bf_lookup: dict[int, tuple[float, float]] = {}
-    if bf_priors_path.exists():
-        _bf_df = pd.read_parquet(bf_priors_path)
-        _bf_latest = _bf_df.sort_values("season").groupby("pitcher_id").last().reset_index()
-        bf_lookup = {
-            int(r["pitcher_id"]): (float(r["mu_bf"]), float(r["sigma_bf"]))
-            for _, r in _bf_latest.iterrows()
-        }
-        logger.info("BF priors: %d pitchers", len(bf_lookup))
-
-    pitcher_pc_path = DASHBOARD_DIR / "pitcher_pitch_count_features.parquet"
-    batter_pc_path = DASHBOARD_DIR / "batter_pitch_count_features.parquet"
-    pitcher_pc = pd.read_parquet(pitcher_pc_path) if pitcher_pc_path.exists() else pd.DataFrame()
-    batter_pc = pd.read_parquet(batter_pc_path) if batter_pc_path.exists() else pd.DataFrame()
-
-    tto_path = DASHBOARD_DIR / "tto_profiles.parquet"
-    tto_profiles = pd.read_parquet(tto_path) if tto_path.exists() else pd.DataFrame()
-
-    tend_path = DASHBOARD_DIR / "pitcher_exit_tendencies.parquet"
-    exit_tendencies = pd.read_parquet(tend_path) if tend_path.exists() else pd.DataFrame()
-
-    # Team bullpen rates — used for the post-starter tail of the game sim.
-    # Falls back to the most recent completed season when the current
-    # season has insufficient BF (< 200).
-    bullpen_rates_path = DASHBOARD_DIR / "team_bullpen_rates.parquet"
-    bullpen_rates_lookup: dict[int, tuple[float, float, float]] = {}
-    if bullpen_rates_path.exists():
-        _bp_df = pd.read_parquet(bullpen_rates_path)
-        _prev = _bp_df[_bp_df["season"] == SEASON - 1]
-        for _, r in _prev.iterrows():
-            bullpen_rates_lookup[int(r["team_id"])] = (
-                float(r["k_rate"]), float(r["bb_rate"]), float(r["hr_rate"]),
-            )
-        _cur = _bp_df[_bp_df["season"] == SEASON]
-        for _, r in _cur.iterrows():
-            if float(r.get("total_bf", 0.0)) >= 200:
-                bullpen_rates_lookup[int(r["team_id"])] = (
-                    float(r["k_rate"]), float(r["bb_rate"]), float(r["hr_rate"]),
-                )
-        logger.info("Loaded team bullpen rates for %d teams", len(bullpen_rates_lookup))
-
-    # Two-tier bullpen profiles (CL/SU high-leverage vs MR low-leverage).
-    # Used to deploy different rates in close games vs blowouts.
-    bullpen_profile_path = DASHBOARD_DIR / "team_bullpen_profiles.parquet"
-    bullpen_profile_lookup: dict[int, TeamBullpenProfile] = {}
-    if bullpen_profile_path.exists():
-        _bpr = pd.read_parquet(bullpen_profile_path)
-        for _, r in _bpr.iterrows():
-            bullpen_profile_lookup[int(r["team_id"])] = TeamBullpenProfile(
-                team_id=int(r["team_id"]),
-                high_lev_k_rate=float(r["high_lev_k_rate"]),
-                high_lev_bb_rate=float(r["high_lev_bb_rate"]),
-                high_lev_hr_rate=float(r["high_lev_hr_rate"]),
-                high_lev_bf=int(r.get("high_lev_bf", 0)),
-                low_lev_k_rate=float(r["low_lev_k_rate"]),
-                low_lev_bb_rate=float(r["low_lev_bb_rate"]),
-                low_lev_hr_rate=float(r["low_lev_hr_rate"]),
-                low_lev_bf=int(r.get("low_lev_bf", 0)),
-            )
-        logger.info(
-            "Loaded team bullpen tier profiles for %d teams",
-            len(bullpen_profile_lookup),
-        )
-
-    # Per-batter BIP probability profiles (batter-specific out/1B/2B/3B).
-    import numpy as np
-    _LEAGUE_BIP_PROBS = np.array([0.700, 0.222, 0.065, 0.005])
-    batter_bip_path = DASHBOARD_DIR / "batter_bip_profiles.parquet"
-    batter_bip_lookup: dict[int, np.ndarray] = {}
-    if batter_bip_path.exists():
-        _bbp = pd.read_parquet(batter_bip_path)
-        _bbp = _bbp.sort_values("season").groupby("batter_id").last().reset_index()
-        for _, r in _bbp.iterrows():
-            batter_bip_lookup[int(r["batter_id"])] = np.array([
-                float(r["p_out"]), float(r["p_single"]),
-                float(r["p_double"]), float(r["p_triple"]),
-            ])
-        logger.info("Loaded BIP profiles for %d batters", len(batter_bip_lookup))
-
-    # --- Load depth chart fallback for pre-lineup sims ---
-    dc_path = DASHBOARD_DIR / "probable_starters_by_hand.parquet"
-    depth_chart = pd.read_parquet(dc_path) if dc_path.exists() else pd.DataFrame()
-    if not depth_chart.empty:
-        logger.info("Loaded depth charts: %d entries", len(depth_chart))
-
-    # Build pitch_hand lookup from pitcher projections
-    pitch_hand_lookup: dict[int, str] = {}
-    if not pitcher_proj.empty and "pitch_hand" in pitcher_proj.columns:
-        for _, pr in pitcher_proj[["pitcher_id", "pitch_hand"]].drop_duplicates().iterrows():
-            pitch_hand_lookup[int(pr["pitcher_id"])] = pr["pitch_hand"]
-
-    # --- Load umpire tendencies and weather effects ---
-    ump_path = DASHBOARD_DIR / "umpire_tendencies.parquet"
-    wx_path = DASHBOARD_DIR / "weather_effects.parquet"
-    ump_lookup: dict[str, float] = {}
-    if ump_path.exists():
-        ump_df = pd.read_parquet(ump_path)
-        for _, ur in ump_df.iterrows():
-            ump_lookup[ur["hp_umpire_name"]] = float(ur["k_logit_lift"])
-        logger.info("Loaded %d umpire tendencies", len(ump_lookup))
-
-    wx_lookup: dict[tuple[str, str], dict] = {}
-    if wx_path.exists():
-        wx_df = pd.read_parquet(wx_path)
-        for _, wr in wx_df.iterrows():
-            wx_lookup[(wr["temp_bucket"], wr["wind_category"])] = {
-                "k_multiplier": float(wr["k_multiplier"]),
-                "overall_k_rate": float(wr["overall_k_rate"]),
-            }
-        logger.info("Loaded %d weather effect combos", len(wx_lookup))
-
-    # --- Helper: get pitcher avg exit pitches ---
-    def _pitcher_avg_pitches(pid: int) -> float:
-        if exit_tendencies.empty:
-            return 88.0
-        row = exit_tendencies[
-            (exit_tendencies["pitcher_id"] == pid)
-            & (exit_tendencies["season"] == SEASON - 1)
-        ]
-        if not row.empty:
-            return float(row.iloc[0]["avg_pitches"])
-        return 88.0
-
-    # --- Helper: generate fallback rate samples ---
-    _rng_fallback = np.random.default_rng(99)
-
-    def _fallback_samples(rate: float, n: int = 4000) -> np.ndarray:
-        """Beta(a, b) centered on rate with moderate spread."""
-        r = np.clip(rate, 0.01, 0.99)
-        kappa = 200  # concentration
-        return _rng_fallback.beta(r * kappa, (1 - r) * kappa, size=n).astype(np.float32)
-
-    # --- Simulate each starter ---
-    logger.info("Simulating game props for today's starters...")
-    results = []
-    sim_sample_arrays: dict[str, np.ndarray] = {}
-    for _, game in schedule.iterrows():
-        gpk = game["game_pk"]
-
-        # Per-game umpire lift
-        hp_ump_name = game.get("hp_umpire_name", "")
-        ump_k_lift = ump_lookup.get(hp_ump_name, 0.0) if hp_ump_name else 0.0
-
-        # Per-game weather lift
-        wx_k_lift = 0.0
-        temp_bucket = _parse_temp_bucket(game.get("weather_temp"))
-        wind_cat = _parse_wind_category(game.get("weather_wind"))
-        wx_info = wx_lookup.get((temp_bucket, wind_cat))
-        if wx_info:
-            from scipy.special import logit as _logit
-            k_mult = wx_info["k_multiplier"]
-            overall_k = wx_info["overall_k_rate"]
-            adj_k = np.clip(overall_k * k_mult, 1e-6, 1 - 1e-6)
-            wx_k_lift = float(_logit(adj_k) - _logit(np.clip(overall_k, 1e-6, 1 - 1e-6)))
-
-        for side in ("away", "home"):
-            pid = game.get(f"{side}_pitcher_id")
-            pname = game.get(f"{side}_pitcher_name", "")
-
-            if pd.isna(pid):
-                continue
-            pid = int(pid)
-            pid_str = str(pid)
-
-            if pid_str not in k_samples:
-                logger.debug("No K samples for pitcher %s (%s) — skipping", pname, pid)
-                continue
-
-            k_samp = k_samples[pid_str]
-
-            # BB / HR samples (fallback to projection-based Beta if missing)
-            p_row = pitcher_proj[pitcher_proj["pitcher_id"] == pid]
-            proj_k_rate = float(p_row.iloc[0]["projected_k_rate"]) if not p_row.empty else float(np.mean(k_samp))
-            proj_bb = float(p_row.iloc[0].get("projected_bb_rate", 0.08)) if not p_row.empty else 0.08
-            proj_hr = float(p_row.iloc[0].get("projected_hr_per_bf", 0.03)) if not p_row.empty else 0.03
-            composite = float(p_row.iloc[0].get("composite_score", 0)) if not p_row.empty else 0.0
-
-            bb_samp = bb_samples.get(pid_str) if bb_samples else None
-            if bb_samp is None:
-                bb_samp = _fallback_samples(proj_bb)
-            hr_samp = hr_samples.get(pid_str) if hr_samples else None
-            if hr_samp is None:
-                hr_samp = _fallback_samples(proj_hr)
-
-            # Lineup matchup lifts
-            opp_side = "home" if side == "away" else "away"
-            opp_team_id = game.get(f"{opp_side}_team_id")
-            opp_abbr = game.get(f"{opp_side}_abbr", "")
-            lineup_matchup_lifts: dict[str, np.ndarray] = {}
-            lineup_source = "none"  # "api", "depth_chart", or "none"
-            lineup_batter_ids: list[int] = []
-
-            # --- Try real lineup from API first ---
-            game_lu = pd.DataFrame()
-            if not lineups.empty:
-                game_lu = lineups[
-                    (lineups["game_pk"] == gpk) &
-                    (lineups["team_id"] == opp_team_id)
-                ].sort_values("batting_order")
-                if len(game_lu) >= 9:
-                    lineup_source = "api"
-
-            # --- Fall back to depth chart by pitcher hand ---
-            if lineup_source == "none" and not depth_chart.empty and opp_abbr:
-                p_hand = pitch_hand_lookup.get(pid, "R")
-                dc_lu = depth_chart[
-                    (depth_chart["team_abbr"] == opp_abbr) &
-                    (depth_chart["vs_hand"] == p_hand)
-                ].sort_values("batting_order")
-                if len(dc_lu) >= 9:
-                    # Reshape to match API lineup columns
-                    game_lu = dc_lu.head(9).rename(columns={
-                        "player_id": "batter_id",
-                        "player_name": "batter_name",
-                    })[["batter_id", "batter_name", "batting_order"]]
-                    lineup_source = "depth_chart"
-                    logger.debug("Using depth chart for %s vs %s (%sHP)",
-                                 opp_abbr, pname, p_hand)
-
-            # --- Score matchup lifts if we have any lineup ---
-            if lineup_source != "none" and not arsenal_df.empty and not vuln_df.empty:
-                k_lifts, bb_lifts, hr_lifts = [], [], []
-                for _, brow in game_lu.head(9).iterrows():
-                    bid = int(brow["batter_id"])
-                    lineup_batter_ids.append(bid)
-
-                    k_m = score_matchup(pid, bid, arsenal_df, vuln_df, baselines_pt)
-                    kl = k_m.get("matchup_k_logit_lift", 0.0)
-                    k_lifts.append(0.0 if np.isnan(kl) else kl)
-
-                    bb_m = score_matchup_bb(pid, bid, arsenal_df, vuln_df, baselines_pt)
-                    bl = bb_m.get("matchup_bb_logit_lift", 0.0)
-                    bb_lifts.append(0.0 if np.isnan(bl) else bl)
-
-                    hr_m = score_matchup_hr(pid, bid, arsenal_df, vuln_df, baselines_pt)
-                    hl = hr_m.get("matchup_hr_logit_lift", 0.0)
-                    hr_lifts.append(0.0 if np.isnan(hl) else hl)
-
-                lineup_matchup_lifts = {
-                    "k": np.array(k_lifts),
-                    "bb": np.array(bb_lifts),
-                    "hr": np.array(hr_lifts),
-                }
-
-            # TTO lifts
-            tto_lifts = build_all_tto_lifts(
-                tto_profiles if not tto_profiles.empty else None,
-                pid, SEASON - 1,
-            )
-
-            # Pitch count features
-            pitcher_ppa_adj = 0.0
-            batter_ppa_adjs = np.zeros(9)
-            if not pitcher_pc.empty and not batter_pc.empty and lineup_batter_ids:
-                pitcher_ppa_adj, batter_ppa_adjs = build_pitch_count_features(
-                    pitcher_pc, batter_pc, pid, lineup_batter_ids, SEASON - 1,
-                )
-
-            avg_pitches = _pitcher_avg_pitches(pid)
-
-            # Pitching team's bullpen rates for the post-starter tail.
-            pitching_team_id = game.get(f"{side}_team_id")
-            bp_rates = bullpen_rates_lookup.get(
-                int(pitching_team_id) if pd.notna(pitching_team_id) else -1
-            )
-            bp_kwargs: dict[str, float] = {}
-            if bp_rates is not None:
-                bp_kwargs = {
-                    "bullpen_k_rate": bp_rates[0],
-                    "bullpen_bb_rate": bp_rates[1],
-                    "bullpen_hr_rate": bp_rates[2],
-                }
-
-            # Two-tier bullpen profile + per-batter BIP array for the lineup
-            team_bullpen_profile = bullpen_profile_lookup.get(
-                int(pitching_team_id) if pd.notna(pitching_team_id) else -1,
-            )
-            lineup_bip_probs_arr = np.stack([
-                batter_bip_lookup.get(int(bid), _LEAGUE_BIP_PROBS)
-                for bid in (lineup_batter_ids + [0] * 9)[:9]
-            ], axis=0).astype(np.float64) if lineup_batter_ids else None
-
-            # BF prior for this pitcher
-            _bf_prior = bf_lookup.get(pid)
-
-            # Run PA-by-PA simulation
-            result = simulate_game(
-                pitcher_k_rate_samples=k_samp,
-                pitcher_bb_rate_samples=bb_samp,
-                pitcher_hr_rate_samples=hr_samp,
-                lineup_matchup_lifts=lineup_matchup_lifts,
-                tto_lifts=tto_lifts,
-                pitcher_ppa_adj=pitcher_ppa_adj,
-                batter_ppa_adjs=batter_ppa_adjs,
-                exit_model=exit_model,
-                pitcher_avg_pitches=avg_pitches,
-                game_context=GameContext(
-                    umpire_k_lift=ump_k_lift,
-                    weather_k_lift=wx_k_lift,
-                ),
-                mu_bf=_bf_prior[0] if _bf_prior else None,
-                sigma_bf=_bf_prior[1] if _bf_prior else None,
-                bullpen_profile=team_bullpen_profile,
-                lineup_bip_probs=lineup_bip_probs_arr,
-                **bp_kwargs,
-                n_sims=10_000,
-                random_seed=42 + gpk + (0 if side == "away" else 1),
-            )
-
-            # Fantasy points
-            fantasy = compute_pitcher_fantasy(result)
-            dk = fantasy.dk_summary()
-            espn = fantasy.espn_summary()
-
-            # K prop lines
-            k_over = result.over_probs("k", lines=[4.5, 5.5, 6.5, 7.5])
-            p_over_dict = {}
-            for _, kr in k_over.iterrows():
-                col = f"p_over_{kr['line']:.1f}".replace(".", "_")
-                p_over_dict[col] = kr["p_over"]
-
-            # BB and HR prop lines
-            bb_over = result.over_probs("bb", lines=[1.5, 2.5, 3.5])
-            for _, br in bb_over.iterrows():
-                col = f"p_over_bb_{br['line']:.1f}".replace(".", "_")
-                p_over_dict[col] = br["p_over"]
-
-            hr_over = result.over_probs("hr", lines=[0.5, 1.5])
-            for _, hr_r in hr_over.iterrows():
-                col = f"p_over_hr_{hr_r['line']:.1f}".replace(".", "_")
-                p_over_dict[col] = hr_r["p_over"]
-
-            # H prop lines
-            h_over = result.over_probs("h", lines=[4.5, 5.5, 6.5, 7.5])
-            for _, hr_row in h_over.iterrows():
-                col = f"p_over_h_{hr_row['line']:.1f}".replace(".", "_")
-                p_over_dict[col] = hr_row["p_over"]
-
-            has_lineup = lineup_source != "none"
-            avg_matchup = float(np.mean(lineup_matchup_lifts["k"])) if has_lineup else 0.0
-
-            # Stash raw sample arrays for dashboard (avoids re-sim at render)
-            _sim_key = f"{gpk}_{pid}"
-            sim_sample_arrays[f"{_sim_key}_k"] = result.k_samples.astype(np.float32)
-            sim_sample_arrays[f"{_sim_key}_bb"] = result.bb_samples.astype(np.float32)
-            sim_sample_arrays[f"{_sim_key}_h"] = result.h_samples.astype(np.float32)
-            sim_sample_arrays[f"{_sim_key}_hr"] = result.hr_samples.astype(np.float32)
-            sim_sample_arrays[f"{_sim_key}_outs"] = result.outs_samples.astype(np.float32)
-            sim_sample_arrays[f"{_sim_key}_runs"] = result.runs_samples.astype(np.float32)
-            if result.starter_runs_samples is not None:
-                sim_sample_arrays[f"{_sim_key}_starter_runs"] = (
-                    result.starter_runs_samples.astype(np.float32)
-                )
-            if result.bullpen_runs_samples is not None:
-                sim_sample_arrays[f"{_sim_key}_bullpen_runs"] = (
-                    result.bullpen_runs_samples.astype(np.float32)
-                )
-
-            results.append({
-                "game_pk": gpk,
-                "side": side,
-                "pitcher_id": pid,
-                "pitcher_name": pname,
-                "team_abbr": game.get(f"{side}_abbr", ""),
-                "opp_abbr": game.get(f"{opp_side}_abbr", ""),
-                "projected_k_rate": proj_k_rate,
-                "composite_score": composite,
-                # K
-                "expected_k": float(np.mean(result.k_samples)),
-                "k_std": float(np.std(result.k_samples)),
-                "median_k": float(np.median(result.k_samples)),
-                # BB
-                "expected_bb": float(np.mean(result.bb_samples)),
-                "bb_std": float(np.std(result.bb_samples)),
-                # H
-                "expected_h": float(np.mean(result.h_samples)),
-                "h_std": float(np.std(result.h_samples)),
-                # HR
-                "expected_hr": float(np.mean(result.hr_samples)),
-                "hr_std": float(np.std(result.hr_samples)),
-                # IP / Pitches
-                "expected_ip": float(np.mean(result.ip_samples())),
-                "expected_pitches": float(np.mean(result.pitch_count_samples)),
-                "expected_bf": float(np.mean(result.bf_samples)),
-                # Fantasy
-                "dk_mean": dk["mean"],
-                "dk_median": dk["median"],
-                "dk_q10": dk["q10"],
-                "dk_q90": dk["q90"],
-                "espn_mean": espn["mean"],
-                "espn_median": espn["median"],
-                # Context
-                "has_lineup": has_lineup,
-                "lineup_source": lineup_source,
-                "avg_matchup_lift": avg_matchup,
-                "umpire_k_logit_lift": ump_k_lift,
-                "weather_k_logit_lift": wx_k_lift,
-                "bf_mu": float(np.mean(result.bf_samples)),
-                "bf_sigma": float(np.std(result.bf_samples)),
-                **p_over_dict,
-            })
-
-    if results:
-        sim_df = pd.DataFrame(results)
-        sim_df.to_parquet(DASHBOARD_DIR / "todays_sims.parquet", index=False)
-        logger.info("Saved game simulations for %d pitcher appearances", len(sim_df))
-
-        n_api = (sim_df["lineup_source"] == "api").sum()
-        n_dc = (sim_df["lineup_source"] == "depth_chart").sum()
-        n_none = (sim_df["lineup_source"] == "none").sum()
-        logger.info("  Lineup sources: %d API, %d depth chart, %d none",
-                     n_api, n_dc, n_none)
-
-        # --- Game-level predictions (moneyline / spread / over-under) ---
-        _build_game_predictions(game_date)
-    else:
-        logger.warning("No pitchers could be simulated (missing K samples?)")
-
-    return True
-
 
 def _build_game_predictions(game_date: str) -> None:
     """Copy game-level predictions from confident_picks output.
@@ -1061,7 +331,7 @@ def _run_game_accuracy_report() -> None:
 
         df = pd.read_parquet(log_path)
         if len(df) < 5:
-            logger.info("Only %d games in log. Need ≥5 for report.", len(df))
+            logger.info("Only %d games in log. Need >= 5 for report.", len(df))
             return
         print_accuracy_report(df)
     except Exception as e:
@@ -1167,263 +437,6 @@ def save_weekly_snapshot(game_date: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Batter game simulations
-# ---------------------------------------------------------------------------
-
-def run_batter_sims(game_date: str) -> None:
-    """Run batter-level game sims for today's lineups and save to parquet.
-
-    Requires game_props.parquet (pitcher context) and todays_lineups.parquet
-    to already exist from precompute / run_schedule_refresh().
-    """
-    import numpy as np
-    import pandas as pd
-    from lib.game_sim.batter_simulator import simulate_batter_game
-    from lib.matchup import score_matchup, score_matchup_bb, score_matchup_hr
-    from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
-
-    gp_path = DASHBOARD_DIR / "game_props.parquet"
-    lu_path = DASHBOARD_DIR / "todays_lineups.parquet"
-    if not gp_path.exists() or not lu_path.exists():
-        logger.warning("Missing game_props or lineups parquet, cannot run batter sims")
-        return
-
-    # Build pitcher sims from game_props (single source of truth)
-    gp = pd.read_parquet(gp_path)
-    from lib.fantasy_report import _build_sims_from_game_props
-    pitcher_sims = _build_sims_from_game_props(gp)
-    lineups = pd.read_parquet(lu_path)
-    if lineups.empty or pitcher_sims.empty:
-        logger.info("No lineups or pitcher sims available for batter sims")
-        return
-
-    # Load hitter posterior samples
-    h_k_path = DASHBOARD_DIR / "hitter_k_samples.npz"
-    h_bb_path = DASHBOARD_DIR / "hitter_bb_samples.npz"
-    h_hr_path = DASHBOARD_DIR / "hitter_hr_samples.npz"
-
-    h_k_samples: dict[str, np.ndarray] = {}
-    h_bb_samples: dict[str, np.ndarray] = {}
-    h_hr_samples: dict[str, np.ndarray] = {}
-
-    if h_k_path.exists():
-        _d = np.load(h_k_path)
-        h_k_samples = {k: _d[k] for k in _d.files}
-    if h_bb_path.exists():
-        _d = np.load(h_bb_path)
-        h_bb_samples = {k: _d[k] for k in _d.files}
-    if h_hr_path.exists():
-        _d = np.load(h_hr_path)
-        h_hr_samples = {k: _d[k] for k in _d.files}
-
-    if not h_k_samples:
-        logger.warning("No hitter K samples found, cannot run batter sims")
-        return
-
-    # Hitter projections for fallback rates
-    h_proj_path = DASHBOARD_DIR / "hitter_projections.parquet"
-    h_proj = pd.read_parquet(h_proj_path) if h_proj_path.exists() else pd.DataFrame()
-
-    # Arsenal/vuln for matchup lifts
-    arsenal_path = DASHBOARD_DIR / "pitcher_arsenal.parquet"
-    vuln_path = DASHBOARD_DIR / "hitter_vuln_career.parquet"
-    arsenal_df = pd.read_parquet(arsenal_path) if arsenal_path.exists() else pd.DataFrame()
-    vuln_df = pd.read_parquet(vuln_path) if vuln_path.exists() else pd.DataFrame()
-
-    baselines_pt = {
-        pt: {
-            "whiff_rate": vals.get("whiff_rate", 0.25),
-            "chase_rate": vals.get("chase_rate", 0.30),
-            "barrel_rate": vals.get("barrel_rate", 0.06),
-        }
-        for pt, vals in LEAGUE_AVG_BY_PITCH_TYPE.items()
-    }
-
-    # Bullpen rates
-    bp_path = DASHBOARD_DIR / "team_bullpen_rates.parquet"
-    bp_lookup: dict[str, dict] = {}
-    if bp_path.exists():
-        bp_df = pd.read_parquet(bp_path)
-        for _, r in bp_df.iterrows():
-            bp_lookup[r.get("team_abbr", "")] = {
-                "k_rate": float(r.get("bullpen_k_rate", 0.253)),
-                "bb_rate": float(r.get("bullpen_bb_rate", 0.084)),
-                "hr_rate": float(r.get("bullpen_hr_rate", 0.024)),
-            }
-
-    # Per-batter BIP probabilities (out / 1B / 2B / 3B). Passed into
-    # simulate_batter_game so hit quality routes through each hitter's
-    # own distribution instead of league-average splits.
-    batter_bip_path = DASHBOARD_DIR / "batter_bip_profiles.parquet"
-    batter_bip_lookup: dict[int, np.ndarray] = {}
-    if batter_bip_path.exists():
-        _bbp = pd.read_parquet(batter_bip_path)
-        _bbp = _bbp.sort_values("season").groupby("batter_id").last().reset_index()
-        for _, r in _bbp.iterrows():
-            batter_bip_lookup[int(r["batter_id"])] = np.array([
-                float(r["p_out"]), float(r["p_single"]),
-                float(r["p_double"]), float(r["p_triple"]),
-            ])
-        logger.info("Loaded BIP profiles for %d batters", len(batter_bip_lookup))
-
-    # Fallback sample generator
-    _rng = np.random.default_rng(77)
-
-    def _fallback(rate: float, n: int = 4000) -> np.ndarray:
-        r = np.clip(rate, 0.01, 0.99)
-        return _rng.beta(r * 200, (1 - r) * 200, size=n).astype(np.float32)
-
-    # Build pitcher context lookup from sims
-    pitcher_ctx: dict[int, dict] = {}
-    for _, ps in pitcher_sims.iterrows():
-        pid = int(ps["pitcher_id"])
-        # Derive BF from available columns
-        _exp_bf = float(ps.get("expected_bf", 0))
-        if _exp_bf < 1:
-            _exp_bf = (
-                float(ps.get("expected_outs", 16))
-                + float(ps.get("expected_h", 5))
-                + float(ps.get("expected_bb", 2))
-                + float(ps.get("expected_hr", 0.5))
-            )
-        pitcher_ctx[pid] = {
-            "k_rate": float(ps.get("projected_k_rate", 0.22)),
-            "bb_rate": float(ps.get("expected_bb", 2)) / max(_exp_bf, 1),
-            "hr_rate": float(ps.get("expected_hr", 0.5)) / max(_exp_bf, 1),
-            "bf_mu": float(ps.get("bf_mu", _exp_bf)),
-            "bf_sigma": float(ps.get("bf_sigma", 3)),
-            "team_abbr": ps.get("team_abbr", ""),
-            "opp_abbr": ps.get("opp_abbr", ""),
-            "game_pk": int(ps["game_pk"]),
-            "has_lineup": bool(ps.get("has_lineup", False)),
-        }
-
-    logger.info("Running batter sims for %d lineup batters...", len(lineups))
-    results = []
-    skipped = 0
-
-    for _, brow in lineups.iterrows():
-        bid = int(brow["batter_id"])
-        bid_str = str(bid)
-        gpk = int(brow["game_pk"])
-
-        if bid_str not in h_k_samples:
-            skipped += 1
-            continue
-
-        # Find the opposing pitcher for this batter
-        opp_pid = None
-        for pid, ctx in pitcher_ctx.items():
-            if ctx["game_pk"] == gpk and ctx["opp_abbr"] == brow.get("team_abbr", ""):
-                opp_pid = pid
-                break
-        if opp_pid is None:
-            skipped += 1
-            continue
-
-        pctx = pitcher_ctx[opp_pid]
-        bp_rates = bp_lookup.get(pctx["team_abbr"], {})
-
-        # Matchup lifts
-        k_lift = bb_lift = hr_lift = 0.0
-        if not arsenal_df.empty and not vuln_df.empty:
-            k_m = score_matchup(opp_pid, bid, arsenal_df, vuln_df, baselines_pt)
-            k_lift = k_m.get("matchup_k_logit_lift", 0.0)
-            k_lift = 0.0 if np.isnan(k_lift) else k_lift
-            bb_m = score_matchup_bb(opp_pid, bid, arsenal_df, vuln_df, baselines_pt)
-            bb_lift = bb_m.get("matchup_bb_logit_lift", 0.0)
-            bb_lift = 0.0 if np.isnan(bb_lift) else bb_lift
-            hr_m = score_matchup_hr(opp_pid, bid, arsenal_df, vuln_df, baselines_pt)
-            hr_lift = hr_m.get("matchup_hr_logit_lift", 0.0)
-            hr_lift = 0.0 if np.isnan(hr_lift) else hr_lift
-
-        # Hitter posterior samples
-        bk = h_k_samples[bid_str]
-        bbb = h_bb_samples.get(bid_str)
-        if bbb is None:
-            hp = h_proj[h_proj["batter_id"] == bid] if not h_proj.empty else pd.DataFrame()
-            rate = float(hp.iloc[0].get("projected_bb_rate", 0.08)) if not hp.empty else 0.08
-            bbb = _fallback(rate)
-        bhr = h_hr_samples.get(bid_str)
-        if bhr is None:
-            hp = h_proj[h_proj["batter_id"] == bid] if not h_proj.empty else pd.DataFrame()
-            rate = float(hp.iloc[0].get("projected_hr_per_pa", 0.03)) if not hp.empty else 0.03
-            bhr = _fallback(rate)
-
-        batting_order = int(brow.get("batting_order", 5))
-
-        sim_result = simulate_batter_game(
-            batter_k_rate_samples=bk,
-            batter_bb_rate_samples=bbb,
-            batter_hr_rate_samples=bhr,
-            batting_order=batting_order,
-            starter_k_rate=pctx["k_rate"],
-            starter_bb_rate=pctx["bb_rate"],
-            starter_hr_rate=pctx["hr_rate"],
-            starter_bf_mu=pctx["bf_mu"],
-            starter_bf_sigma=pctx["bf_sigma"],
-            matchup_k_lift=k_lift,
-            matchup_bb_lift=bb_lift,
-            matchup_hr_lift=hr_lift,
-            bullpen_k_rate=bp_rates.get("k_rate", 0.253),
-            bullpen_bb_rate=bp_rates.get("bb_rate", 0.084),
-            bullpen_hr_rate=bp_rates.get("hr_rate", 0.024),
-            batter_bip_probs=batter_bip_lookup.get(int(bid)),
-            n_sims=10_000,
-            random_seed=42 + gpk + bid,
-        )
-
-        summary = sim_result.summary()
-
-        # Prop lines
-        k_props = sim_result.over_probs("k", lines=[0.5, 1.5])
-        h_props = sim_result.over_probs("h", lines=[0.5, 1.5])
-        hr_props = sim_result.over_probs("hr", lines=[0.5])
-
-        prop_dict = {}
-        for _, kr in k_props.iterrows():
-            col = f"p_k_over_{kr['line']:.1f}".replace(".", "_")
-            prop_dict[col] = kr["p_over"]
-        for _, hr in h_props.iterrows():
-            col = f"p_h_over_{hr['line']:.1f}".replace(".", "_")
-            prop_dict[col] = hr["p_over"]
-        for _, hr in hr_props.iterrows():
-            col = f"p_hr_over_{hr['line']:.1f}".replace(".", "_")
-            prop_dict[col] = hr["p_over"]
-
-        results.append({
-            "game_pk": gpk,
-            "batter_id": bid,
-            "batter_name": brow.get("batter_name", ""),
-            "team_abbr": brow.get("team_abbr", ""),
-            "opp_abbr": pctx["opp_abbr"] if pctx["opp_abbr"] != brow.get("team_abbr") else pctx["team_abbr"],
-            "batting_order": batting_order,
-            "opp_starter_id": opp_pid,
-            "lineup_source": brow.get("lineup_source", "api"),
-            "matchup_k_lift": k_lift,
-            "matchup_bb_lift": bb_lift,
-            "matchup_hr_lift": hr_lift,
-            "expected_k": summary["k"]["mean"],
-            "std_k": summary["k"]["std"],
-            "expected_bb": summary["bb"]["mean"],
-            "expected_h": summary["h"]["mean"],
-            "expected_hr": summary["hr"]["mean"],
-            "expected_tb": summary["tb"]["mean"],
-            "expected_pa": summary["pa"]["mean"],
-            "has_lineup": pctx["has_lineup"],
-            **prop_dict,
-        })
-
-    if results:
-        df = pd.DataFrame(results)
-        df.to_parquet(DASHBOARD_DIR / "todays_batter_sims.parquet", index=False)
-        logger.info("Saved batter sims: %d batters (%d skipped, no samples)",
-                     len(df), skipped)
-    else:
-        logger.warning("No batter sims produced (%d skipped)", skipped)
-
-
-# ---------------------------------------------------------------------------
 # Prediction archiving
 # ---------------------------------------------------------------------------
 
@@ -1433,7 +446,6 @@ def archive_yesterdays_predictions(game_date: str) -> None:
     Called at the start of main() before anything overwrites yesterday's files.
     """
     import pandas as pd
-    from datetime import timedelta
 
     yesterday = (date.fromisoformat(game_date) - timedelta(days=1)).isoformat()
 
@@ -1589,7 +601,6 @@ def archive_yesterdays_game_predictions(game_date: str) -> None:
     """
     import numpy as np
     import pandas as pd
-    from datetime import timedelta
 
     yesterday = (date.fromisoformat(game_date) - timedelta(days=1)).isoformat()
 
@@ -1621,8 +632,6 @@ def archive_yesterdays_game_predictions(game_date: str) -> None:
                 return
 
     # Query game scores from DB
-    # Aggregate from fact_player_game_mlb (confirmed table) since
-    # fact_game_mlb may not exist in all environments.
     try:
         from lib.db import read_sql
 
@@ -1684,6 +693,35 @@ def archive_yesterdays_game_predictions(game_date: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Metadata helpers
+# ---------------------------------------------------------------------------
+
+def _save_metadata(game_date: str, extra: dict | None = None) -> None:
+    """Write update_metadata.json with timestamps and counts."""
+    import pandas as pd
+
+    h_path = DASHBOARD_DIR / "hitter_projections.parquet"
+    p_path = DASHBOARD_DIR / "pitcher_projections.parquet"
+    k_path = DASHBOARD_DIR / "pitcher_k_samples.npz"
+
+    metadata = {
+        "last_updated": datetime.now().isoformat(),
+        "game_date": game_date,
+        "season": SEASON,
+        "hitters_updated": len(pd.read_parquet(h_path)) if h_path.exists() else 0,
+        "pitchers_updated": len(pd.read_parquet(p_path)) if p_path.exists() else 0,
+        "k_samples_count": len(dict(__import__("numpy").load(k_path))) if k_path.exists() else 0,
+    }
+    if extra:
+        metadata.update(extra)
+
+    meta_path = DASHBOARD_DIR / "update_metadata.json"
+    with open(meta_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+    logger.info("Saved update metadata to %s", meta_path)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1698,9 +736,11 @@ def main() -> None:
     parser.add_argument("--snapshot", action="store_true",
                         help="Force saving a weekly projection snapshot.")
     parser.add_argument("--schedule-only", action="store_true",
-                        help="Refresh schedule/lineups/sims only (no projection updates).")
-    parser.add_argument("--batter-sims-only", action="store_true",
-                        help="Re-run batter game sims only (skip projections and schedule fetch).")
+                        help="Roster moves + odds only (10-min mode). "
+                             "Sims are handled by confident_picks.")
+    parser.add_argument("--post-sims", action="store_true",
+                        help="Post-sim bookkeeping: game predictions reshape, "
+                             "odds collection, metadata update.")
     args = parser.parse_args()
 
     game_date = args.date or date.today().isoformat()
@@ -1708,24 +748,13 @@ def main() -> None:
     logger.info("Dashboard update for %s (season %d)", game_date, SEASON)
     logger.info("=" * 60)
 
-    # Schedule-only mode: lightweight refresh, then exit
+    # --schedule-only: lightweight 10-min mode (roster moves + odds)
+    # Sims are now handled by confident_picks in daily_update.bat Step 3.
     if args.schedule_only:
-        logger.info("Mode: schedule-only (30-min refresh)")
-
-        # Check for major roster moves -> precompute if needed
+        logger.info("Mode: schedule-only (roster moves + odds)")
         check_roster_moves(game_date)
-
-        changed = run_schedule_refresh(game_date)
-
-        if changed:
-            run_batter_sims(game_date)
-        else:
-            logger.info("Skipping batter sims (no changes)")
-
-        # Collect game odds snapshot
         collect_game_odds_snapshot(game_date)
 
-        # Update metadata timestamp
         meta_path = DASHBOARD_DIR / "update_metadata.json"
         if meta_path.exists():
             with open(meta_path) as f:
@@ -1738,29 +767,30 @@ def main() -> None:
             json.dump(metadata, f, indent=2)
 
         logger.info("=" * 60)
-        logger.info("Done! (schedule-only, changes=%s)", changed)
+        logger.info("Done! (schedule-only)")
         return
 
-    # Batter-sims-only mode: re-run batter sims without touching projections or schedule
-    if args.batter_sims_only:
-        logger.info("Mode: batter-sims-only (re-run batter game sims)")
-        run_batter_sims(game_date)
+    # --post-sims: runs after confident_picks to do dashboard bookkeeping
+    if args.post_sims:
+        logger.info("Mode: post-sims (game predictions + odds + metadata)")
+        _build_game_predictions(game_date)
+        collect_game_odds_snapshot(game_date)
+        _save_metadata(game_date, {"last_sims_refresh": datetime.now().isoformat()})
 
-        # Update metadata timestamp
-        meta_path = DASHBOARD_DIR / "update_metadata.json"
-        if meta_path.exists():
-            with open(meta_path) as f:
-                metadata = json.load(f)
-        else:
-            metadata = {}
-        metadata["last_batter_sims_refresh"] = datetime.now().isoformat()
-        metadata["game_date"] = game_date
-        with open(meta_path, "w") as f:
-            json.dump(metadata, f, indent=2)
+        # Generate artifact manifest
+        from services.manifest import generate_manifest
+        manifest = generate_manifest(DASHBOARD_DIR)
+        manifest_path = DASHBOARD_DIR / "manifest.json"
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f, indent=2)
+        logger.info("Saved manifest with %d artifacts to %s",
+                    len(manifest.get("artifacts", [])), manifest_path)
 
         logger.info("=" * 60)
-        logger.info("Done! (batter-sims-only)")
+        logger.info("Done! (post-sims)")
         return
+
+    # --- Full update mode ---
 
     # Step 0: Archive yesterday's predictions before anything overwrites them
     logger.info("Step 0: Archiving yesterday's predictions...")
@@ -1778,14 +808,6 @@ def main() -> None:
     else:
         logger.info("Step 1: Skipped (--skip-engine)")
 
-    # Step 1b: Run batter sims (uses pitcher sims from Step 1)
-    logger.info("Step 1b: Running batter game sims...")
-    run_batter_sims(game_date)
-
-    # Step 1c: Collect game odds snapshot
-    logger.info("Step 1c: Collecting game odds...")
-    collect_game_odds_snapshot(game_date)
-
     # Step 2: Export roster from DB to parquet
     logger.info("Step 2: Exporting roster...")
     export_roster()
@@ -1796,23 +818,7 @@ def main() -> None:
         save_weekly_snapshot(game_date)
 
     # Step 4: Save update metadata
-    import pandas as pd
-    h_path = DASHBOARD_DIR / "hitter_projections.parquet"
-    p_path = DASHBOARD_DIR / "pitcher_projections.parquet"
-    k_path = DASHBOARD_DIR / "pitcher_k_samples.npz"
-
-    metadata = {
-        "last_updated": datetime.now().isoformat(),
-        "game_date": game_date,
-        "season": SEASON,
-        "hitters_updated": len(pd.read_parquet(h_path)) if h_path.exists() else 0,
-        "pitchers_updated": len(pd.read_parquet(p_path)) if p_path.exists() else 0,
-        "k_samples_count": len(dict(__import__("numpy").load(k_path))) if k_path.exists() else 0,
-    }
-    meta_path = DASHBOARD_DIR / "update_metadata.json"
-    with open(meta_path, "w") as f:
-        json.dump(metadata, f, indent=2)
-    logger.info("Saved update metadata to %s", meta_path)
+    _save_metadata(game_date)
 
     # Step 5: Run game prediction accuracy report (if enough data)
     logger.info("Step 5: Game prediction accuracy check...")

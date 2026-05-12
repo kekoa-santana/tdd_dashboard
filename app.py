@@ -47,6 +47,7 @@ from views.methodology import page_methodology  # noqa: E402
 from views.projected_performers import page_projected_performers  # noqa: E402
 from views.daily_preview import page_daily_preview  # noqa: E402
 from views.game import page_game  # noqa: E402
+from views.game_prep import page_game_prep  # noqa: E402
 from views.home import page_home  # noqa: E402
 
 # Apply dark matplotlib theme at import time
@@ -68,6 +69,55 @@ st.set_page_config(
 _css_path = PROJECT_ROOT / "assets" / "styles.css"
 with open(_css_path) as _f:
     st.markdown(f"<style>{_f.read()}</style>", unsafe_allow_html=True)
+
+# Remove Streamlit Community Cloud branding bar via JS
+# (st.markdown strips <script> tags; components.html allows JS execution)
+import streamlit.components.v1 as _components
+_components.html("""
+<script>
+(function removeBranding() {
+    const parent = window.parent.document;
+    // Inject CSS into the parent frame to catch Cloud-injected elements
+    if (!parent.getElementById('tdd-hide-branding')) {
+        const style = parent.createElement('style');
+        style.id = 'tdd-hide-branding';
+        style.textContent = `
+            footer, [data-testid="stBottom"],
+            div[class*="viewerBadge"], a[class*="viewerBadge"],
+            div[class*="profileContainer"], div[class*="StatusWidget"],
+            [data-testid="stToolbar"], [data-testid="stDecoration"],
+            div[class*="BottomBar"], div[class*="bottomBar"],
+            div[class*="cloudToolbar"], div[class*="CloudToolbar"],
+            [data-testid="stMainBottom"],
+            div[class*="stBottom"], div[class*="toolbar"] {
+                display: none !important;
+                visibility: hidden !important;
+                height: 0 !important;
+                overflow: hidden !important;
+                position: absolute !important;
+                pointer-events: none !important;
+            }
+        `;
+        parent.head.appendChild(style);
+    }
+    // Also walk the DOM for text-based matching
+    function hide() {
+        parent.querySelectorAll('a, span, div').forEach(el => {
+            const txt = el.textContent || '';
+            if (txt.includes('Hosted with Streamlit') ||
+                txt.includes('Created by') && el.closest('[class*="bottom"], [class*="Bottom"], footer')) {
+                let t = el;
+                for (let i = 0; i < 8 && t.parentElement && t.parentElement !== parent.body; i++)
+                    t = t.parentElement;
+                t.style.cssText = 'display:none!important;height:0!important';
+            }
+        });
+    }
+    hide();
+    new MutationObserver(hide).observe(parent.body, {childList:true, subtree:true});
+})();
+</script>
+""", height=0)
 
 # ---------------------------------------------------------------------------
 # Color palettes — switch via sidebar dropdown
@@ -230,13 +280,15 @@ PAGES = {
     "Props Lab": page_projected_performers,
     "Methodology": page_methodology,
     "Game Analysis": page_game,
+    "Game Prep": page_game_prep,
 }
 
 PAGE_URL_MAP = {name.lower().replace(" ", "_"): name for name in PAGES}
 
 # Nav structure: standalone items + dropdown groups
 _NAV = [
-    ("Games", ["Schedule", "Game Analysis", "Daily Preview", "Props Lab"]),
+    ("Home", None),
+    ("Games", ["Schedule", "Game Analysis", "Game Prep", "Daily Preview", "Props Lab"]),
     ("Players", [
         "Player Profile", "Player Rankings", "Stats",
         "The Diamond Daily", "Projections", "Breakout Candidates",
