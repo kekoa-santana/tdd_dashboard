@@ -349,6 +349,128 @@ def _render_bullpen_matrix_html(
 
 
 # ---------------------------------------------------------------------------
+# Pinch-hit opportunities
+# ---------------------------------------------------------------------------
+
+def _find_pinch_hit_opportunities(
+    starters: list[dict],
+    bench: list[dict],
+    min_xwoba_gain: float = 0.025,
+) -> list[dict]:
+    """Find bench bats that significantly outperform a starter in this matchup.
+
+    Returns list of opportunities sorted by xwOBA gain, each with:
+        starter, bench_player, xwoba_gain, reason
+    """
+    if not bench:
+        return []
+
+    opps: list[dict] = []
+    for b in bench:
+        b_xw = b["matchup_xwoba"]
+        b_pos = b.get("position", "")
+        b_name = b["batter_name"]
+        b_id = b["batter_id"]
+
+        for s in starters:
+            s_xw = s["matchup_xwoba"]
+            gain = b_xw - s_xw
+            if gain < min_xwoba_gain:
+                continue
+
+            # Build reason
+            reason_parts: list[str] = []
+            s_hand = s.get("batter_label", "")
+            b_hand = ""
+            # Infer bench player hand from vuln data if available
+            for bb in bench:
+                if bb["batter_id"] == b_id:
+                    # We don't have hand stored on bench - use position as proxy
+                    break
+
+            reason_parts.append(f"+{gain*1000:.0f} pts xwOBA")
+
+            opps.append({
+                "starter_name": s["batter_name"],
+                "starter_id": s["batter_id"],
+                "starter_order": s["current_order"],
+                "starter_xwoba": s_xw,
+                "starter_pos": s.get("position", ""),
+                "bench_name": b_name,
+                "bench_id": b_id,
+                "bench_xwoba": b_xw,
+                "bench_pos": b_pos,
+                "xwoba_gain": gain,
+            })
+
+    # Sort by gain descending, deduplicate bench players (keep best opportunity)
+    opps.sort(key=lambda x: x["xwoba_gain"], reverse=True)
+    seen_bench: set[int] = set()
+    deduped: list[dict] = []
+    for o in opps:
+        if o["bench_id"] not in seen_bench:
+            deduped.append(o)
+            seen_bench.add(o["bench_id"])
+    return deduped
+
+
+def _render_pinch_hit_html(opps: list[dict], pitcher_name: str) -> str:
+    """Render pinch-hit opportunities card."""
+    if not opps:
+        return ""
+
+    rows = ""
+    for o in opps:
+        gain_pts = o["xwoba_gain"] * 1000
+        s_xw = o["starter_xwoba"]
+        b_xw = o["bench_xwoba"]
+        s_color = SAGE if s_xw > 0.325 else (EMBER if s_xw < 0.305 else SLATE)
+        b_color = SAGE if b_xw > 0.325 else (EMBER if b_xw < 0.305 else SLATE)
+
+        rows += (
+            '<div style="display:flex;align-items:center;gap:6px;padding:5px 0;'
+            'border-bottom:1px solid var(--tdd-dark-border-faint);font-size:0.72rem">'
+            # Bench player (gains)
+            f'{headshot_html(o["bench_id"], size=24)}'
+            f'<div style="flex:1;min-width:0">'
+            f'<span style="color:var(--tdd-cream);font-weight:600">{esc(o["bench_name"])}</span>'
+            f' <span style="color:var(--tdd-slate);font-size:0.55rem">{esc(o["bench_pos"])}</span>'
+            f'<span style="color:{b_color};font-family:var(--tdd-font-mono);'
+            f'font-size:0.7rem;margin-left:0.4rem">.{int(b_xw*1000):03d}</span>'
+            '</div>'
+            # Arrow
+            '<div style="color:var(--tdd-slate);font-size:0.6rem;padding:0 4px">'
+            'for'
+            '</div>'
+            # Starter (replaced)
+            f'{headshot_html(o["starter_id"], size=24)}'
+            f'<div style="flex:1;min-width:0">'
+            f'<span style="color:var(--tdd-cream);opacity:0.7">{esc(o["starter_name"])}</span>'
+            f' <span style="color:var(--tdd-slate);font-size:0.55rem">#{o["starter_order"]}</span>'
+            f'<span style="color:{s_color};font-family:var(--tdd-font-mono);'
+            f'font-size:0.7rem;margin-left:0.4rem">.{int(s_xw*1000):03d}</span>'
+            '</div>'
+            # Gain badge
+            f'<span style="color:var(--tdd-sage);font-family:var(--tdd-font-mono);'
+            f'font-weight:700;font-size:0.72rem;min-width:3rem;text-align:right">'
+            f'+{gain_pts:.0f} pts</span>'
+            '</div>'
+        )
+
+    return (
+        '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);'
+        'border-radius:6px;padding:0.8rem 1rem;margin-bottom:1rem">'
+        '<div style="color:var(--tdd-gold);font-size:0.6rem;font-weight:700;'
+        'letter-spacing:2px;text-transform:uppercase;margin-bottom:4px">'
+        'Pinch-Hit Opportunities</div>'
+        f'<div style="color:var(--tdd-slate);font-size:0.55rem;margin-bottom:6px">'
+        f'Bench bats with better matchup xwOBA vs {esc(pitcher_name)} than the starter they replace.</div>'
+        f'{rows}'
+        '</div>'
+    )
+
+
+# ---------------------------------------------------------------------------
 # Putaway pitch helpers
 # ---------------------------------------------------------------------------
 
@@ -799,6 +921,14 @@ def page_game_prep() -> None:
                 )
                 if opt_html:
                     st.markdown(opt_html, unsafe_allow_html=True)
+
+            # --- Pinch-Hit Opportunities ---
+            if bench_data and scoreable:
+                ph_opps = _find_pinch_hit_opportunities(scoreable, bench_data)
+                if ph_opps:
+                    ph_html = _render_pinch_hit_html(ph_opps, pitcher_name)
+                    if ph_html:
+                        st.markdown(ph_html, unsafe_allow_html=True)
 
             # --- Attack plan cards (starters only) ---
             for b in starters:
