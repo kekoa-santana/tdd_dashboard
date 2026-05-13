@@ -1195,12 +1195,12 @@ def _render_pitcher_overview(
             f'<span style="color:var(--tdd-cream);font-weight:600">{form["avg_ip"]} IP</span>'
             f'<span style="color:var(--tdd-cream);font-weight:600">{form["k_per_9"]} K/9</span>'
             f'<span style="color:var(--tdd-cream);font-weight:600">{form["bb_per_9"]} BB/9</span>'
-            f'<span style="color:{era_color};font-weight:600">{form["era"]:.2f} ERA</span>'
+            f'<span style="color:{era_color};font-weight:600">{form["era"]:.2f} ERA (2026)</span>'
             f'<span style="color:var(--tdd-slate)">{int(form["avg_pitches"])} pitch avg</span>'
             f'</div>'
         )
 
-    # Walk strategy callout
+    # Walk tendency callout
     walk_html = ""
     if walk_strat:
         walk_html = (
