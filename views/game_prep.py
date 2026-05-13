@@ -190,32 +190,56 @@ def _render_lineup_optimization_html(
     bench: list[dict],
     pitcher_name: str,
     opp_abbr: str,
+    is_official: bool = False,
 ) -> str:
-    """Render the recommended batting order card with bench options."""
+    """Render the batting order card.
+
+    When is_official=True, shows the manager's filed order with optimization
+    flags. When False, shows our recommended order.
+    """
     if len(batters) < 2:
         return ""
 
-    optimal, _current_score, _optimal_score = _optimize_lineup(batters)
+    if is_official:
+        # Use the manager's filed order (already set in current_order)
+        optimal = sorted(batters, key=lambda b: b["current_order"])
+    else:
+        optimal, _current_score, _optimal_score = _optimize_lineup(batters)
 
     n = min(len(batters), 9)
 
-    # Column header
-    # Each stat cell uses flex:1 so columns share space evenly and breathe.
-    # The name column has a fixed width to prevent it from hogging whitespace.
+    # Column header with data source grouping
     _hdr = "color:var(--tdd-slate);font-size:0.8rem;letter-spacing:0.5px"
-    _sc = "flex:1;text-align:center;padding:0 0.3rem"  # stat column base
+    _sc = "flex:1;text-align:center;padding:0 0.3rem"
+    _proj_bg = "background:rgba(200,169,110,0.06)"  # gold tint for Bayesian
+    _sim_bg = "background:rgba(107,163,142,0.06)"   # sage tint for sim
     rows = (
+        # Group labels row
+        '<div style="display:flex;align-items:center;padding:2px 0;margin-bottom:0">'
+        '<span style="min-width:2rem"></span>'
+        '<span style="padding:0 0.5rem;min-width:36px"></span>'
+        f'<span style="width:14rem;min-width:10rem"></span>'
+        f'<span style="{_proj_bg};flex:3;text-align:center;color:var(--tdd-gold);font-size:0.55rem;'
+        f'letter-spacing:1px;padding:2px 0;border-radius:3px 3px 0 0">BAYESIAN PROJECTIONS</span>'
+        f'<span style="{_sim_bg};flex:3;text-align:center;color:var(--tdd-sage);font-size:0.55rem;'
+        f'letter-spacing:1px;padding:2px 0;border-radius:3px 3px 0 0;margin-left:2px">GAME SIMULATION</span>'
+        f'<span style="flex:1;text-align:center"></span>'
+        f'<span style="flex:1.6"></span>'
+        f'<span style="flex:1;text-align:center;color:var(--tdd-slate);font-size:0.55rem;'
+        f'letter-spacing:1px;padding:2px 0">xwOBA</span>'
+        '</div>'
+        # Column headers row
         '<div style="display:flex;align-items:center;padding:4px 0;margin-bottom:3px;'
         'border-bottom:1px solid var(--tdd-dark-border)">'
         '<span style="min-width:2rem"></span>'
         '<span style="padding:0 0.5rem;min-width:36px"></span>'
         f'<span style="{_hdr};width:14rem;min-width:10rem"></span>'
-        f'<span style="{_hdr};{_sc}">K%</span>'
-        f'<span style="{_hdr};{_sc}">BB%</span>'
-        f'<span style="{_hdr};{_sc}">wOBA</span>'
-        f'<span style="{_hdr};{_sc}">Sim H</span>'
-        f'<span style="{_hdr};{_sc}">Sim K</span>'
-        f'<span style="{_hdr};{_sc}">Sim TB</span>'
+        f'<span style="{_hdr};{_sc};{_proj_bg}">K%</span>'
+        f'<span style="{_hdr};{_sc};{_proj_bg}">BB%</span>'
+        f'<span style="{_hdr};{_sc};{_proj_bg}">wOBA</span>'
+        f'<span style="{_hdr};{_sc};{_sim_bg}">H</span>'
+        f'<span style="{_hdr};{_sc};{_sim_bg}">K</span>'
+        f'<span style="{_hdr};{_sc};{_sim_bg}">TB</span>'
         f'<span style="{_hdr};{_sc}">Edge</span>'
         f'<span style="{_hdr};flex:1.6;text-align:left;padding:0 0.3rem">Approach</span>'
         f'<span style="{_hdr};{_sc}">Matchup</span>'
@@ -242,6 +266,26 @@ def _render_lineup_optimization_html(
             platoon_html = '<span style="color:var(--tdd-sage);font-size:0.65rem;border:1px solid var(--tdd-sage);border-radius:2px;padding:0 4px;margin-left:0.3rem">+</span>'
         elif plan and plan.get("platoon") == "unfavorable":
             platoon_html = '<span style="color:var(--tdd-ember);font-size:0.65rem;border:1px solid var(--tdd-ember);border-radius:2px;padding:0 4px;margin-left:0.3rem">&minus;</span>'
+
+        # Optimization flag (official lineups only)
+        opt_flag_html = ""
+        if is_official:
+            opt_rank = b.get("optimal_rank", i + 1)
+            slot = i + 1
+            if opt_rank <= 9 and slot <= 9 and abs(opt_rank - slot) >= 3:
+                # Significant misplacement
+                if opt_rank < slot:
+                    opt_flag_html = (
+                        f'<span style="color:var(--tdd-sage);font-size:0.55rem;'
+                        f'border:1px solid var(--tdd-sage);border-radius:2px;padding:0 4px;'
+                        f'margin-left:0.3rem" title="Our model ranks #{opt_rank}">#{opt_rank}</span>'
+                    )
+                else:
+                    opt_flag_html = (
+                        f'<span style="color:var(--tdd-ember);font-size:0.55rem;'
+                        f'border:1px solid var(--tdd-ember);border-radius:2px;padding:0 4px;'
+                        f'margin-left:0.3rem" title="Our model ranks #{opt_rank}">#{opt_rank}</span>'
+                    )
 
         # Edge label
         edge = b.get("edge")
@@ -333,7 +377,7 @@ def _render_lineup_optimization_html(
             f'font-family:var(--tdd-font-heading);font-weight:700;font-size:1.15rem">{i+1}</span>'
             f'<span style="padding:0 0.5rem">{headshot_html(b["batter_id"], size=36)}</span>'
             f'<span style="color:var(--tdd-cream);width:14rem;min-width:10rem;font-family:var(--tdd-font-heading);'
-            f'font-weight:700;font-size:1.0rem">{esc(b["batter_name"])}{meta_html}{platoon_html}</span>'
+            f'font-weight:700;font-size:1.0rem">{esc(b["batter_name"])}{meta_html}{platoon_html}{opt_flag_html}</span>'
             f'<span style="{_cell}">{k_html}</span>'
             f'<span style="{_cell}">{bb_html}</span>'
             f'<span style="{_cell}">{woba_html}</span>'
@@ -375,15 +419,29 @@ def _render_lineup_optimization_html(
             '</div>'
         )
 
+    if is_official:
+        title = "Posted Lineup"
+        subtitle = (
+            f'{esc(opp_abbr)} vs {esc(pitcher_name)} (official). '
+            f'Bayesian season projections feed the game simulator. '
+            f'Matchup xwOBA = batted ball quality vs this pitcher (lg avg .315).'
+        )
+    else:
+        title = "Recommended Batting Order"
+        subtitle = (
+            f'{esc(opp_abbr)} vs {esc(pitcher_name)} -- ranked by matchup xwOBA. '
+            f'Bayesian season projections feed the game simulator. '
+            f'Matchup xwOBA = batted ball quality vs this pitcher (lg avg .315).'
+        )
+
     return (
         '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);'
         'border-radius:6px;padding:1rem 1.2rem;margin-bottom:1rem">'
         '<div style="color:var(--tdd-gold);font-size:0.85rem;font-weight:700;'
-        'letter-spacing:2px;text-transform:uppercase;margin-bottom:4px">'
-        'Recommended Batting Order</div>'
+        f'letter-spacing:2px;text-transform:uppercase;margin-bottom:4px">'
+        f'{title}</div>'
         f'<div style="color:var(--tdd-slate);font-size:0.8rem;margin-bottom:0.6rem">'
-        f'{esc(opp_abbr)} vs {esc(pitcher_name)} · '
-        f'K%/BB%/wOBA = Bayesian projections · Sim = matchup-adjusted game sim · Matchup = pitch-type quality (avg .315)</div>'
+        f'{subtitle}</div>'
         f'{rows}'
         f'{bench_html}'
         '</div>'
@@ -1550,7 +1608,7 @@ def page_game_prep() -> None:
                     if sim_stats:
                         b["sim_stats"] = sim_stats
 
-            # --- Rank all position players by matchup xwOBA ---
+            # --- Build position lookup ---
             roster_df = load_roster()
             pos_lookup: dict[int, str] = {}
             if not roster_df.empty:
@@ -1560,15 +1618,52 @@ def page_game_prep() -> None:
             for b in batter_data:
                 b["position"] = pos_lookup.get(b["batter_id"], "")
 
-            # Rank all batters — include callups without edge data at league avg
-            all_ranked = sorted(
-                batter_data,
-                key=lambda x: x["matchup_xwoba"], reverse=True,
-            )
-            starters = all_ranked[:9]
-            bench_pool = all_ranked[9:]
-            for i, b in enumerate(starters):
-                b["current_order"] = i + 1
+            # --- Detect official vs roster-based lineup ---
+            lu_sources = opp_lu["lineup_source"].unique() if "lineup_source" in opp_lu.columns else []
+            has_official = "api" in lu_sources
+
+            if has_official:
+                # Official lineup posted -- show manager's order with our overlay
+                # Starters = batters with batting_order 1-9 from official lineup
+                official_ids = set(
+                    opp_lu[
+                        (opp_lu["lineup_source"] == "api")
+                        & (opp_lu["batting_order"].between(1, 9))
+                    ]["batter_id"].astype(int)
+                )
+                starters = [b for b in batter_data if b["batter_id"] in official_ids]
+                # Preserve the manager's filed order
+                official_order = {
+                    int(r["batter_id"]): int(r["batting_order"])
+                    for _, r in opp_lu[opp_lu["lineup_source"] == "api"].iterrows()
+                    if r["batting_order"] <= 9
+                }
+                for b in starters:
+                    b["current_order"] = official_order.get(b["batter_id"], 99)
+                starters.sort(key=lambda b: b["current_order"])
+
+                bench_pool = [b for b in batter_data if b["batter_id"] not in official_ids]
+
+                # Compute our optimal rank for each batter (for overlay)
+                all_ranked = sorted(
+                    batter_data,
+                    key=lambda x: x["matchup_xwoba"], reverse=True,
+                )
+                for rank, b in enumerate(all_ranked, 1):
+                    b["optimal_rank"] = rank
+            else:
+                # No official lineup -- rank all by matchup xwOBA
+                all_ranked = sorted(
+                    batter_data,
+                    key=lambda x: x["matchup_xwoba"], reverse=True,
+                )
+                starters = all_ranked[:9]
+                bench_pool = all_ranked[9:]
+                for i, b in enumerate(starters):
+                    b["current_order"] = i + 1
+                    b["optimal_rank"] = i + 1
+                for i, b in enumerate(bench_pool, 10):
+                    b["optimal_rank"] = i
 
             bench_data: list[dict] = []
             for b in bench_pool:
@@ -1577,20 +1672,22 @@ def page_game_prep() -> None:
                     "batter_name": b["batter_name"],
                     "matchup_xwoba": b["matchup_xwoba"],
                     "position": pos_lookup.get(b["batter_id"], ""),
+                    "optimal_rank": b.get("optimal_rank", 99),
                 })
             bench_data.sort(key=lambda x: x["matchup_xwoba"], reverse=True)
 
-            # --- Recommended Lineup card ---
-            scoreable = starters  # include all batters (callups get league avg)
+            # --- Lineup card ---
+            scoreable = starters
             if len(scoreable) >= 4:
                 opt_html = _render_lineup_optimization_html(
                     scoreable, bench_data, pitcher_name, opp_abbr,
+                    is_official=has_official,
                 )
                 if opt_html:
                     st.markdown(opt_html, unsafe_allow_html=True)
 
-            # --- Pinch-Hit Opportunities (placeholder for official lineups) ---
-            if False and bench_data and scoreable:  # disabled until official lineups
+            # --- Pinch-Hit Opportunities (only with official lineups) ---
+            if has_official and bench_data and scoreable:
                 ph_opps = _find_pinch_hit_opportunities(scoreable, bench_data)
                 if ph_opps:
                     ph_html = _render_pinch_hit_html(ph_opps, pitcher_name)
