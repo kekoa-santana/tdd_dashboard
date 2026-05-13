@@ -1711,8 +1711,15 @@ def assess_walk_strategy(
     pitcher_id: int,
     proj_df: pd.DataFrame,
     adv_df: pd.DataFrame,
+    form: dict | None = None,
+    platoon_bb: dict[str, float] | None = None,
 ) -> dict | None:
-    """Assess whether patience/walk strategy is recommended against a pitcher.
+    """Assess walk tendency against a pitcher.
+
+    Uses a two-tier threshold with platoon-aware observations:
+      - Tier 1 (strong): season BB% >= 12% OR recent BB/9 >= 4.0
+      - Tier 2 (moderate): season BB% >= 9.5% OR recent BB/9 >= 3.5
+    Platoon splits override when one hand is significantly more walk-prone.
 
     Parameters
     ----------
@@ -1722,6 +1729,10 @@ def assess_walk_strategy(
         Pitcher projections with ``projected_bb_rate`` column.
     adv_df : pd.DataFrame
         Pitcher advanced stats with ``zone_pct``, ``bb_pct`` columns.
+    form : dict | None
+        Recent form from ``get_pitcher_recent_form()`` — used for ``bb_per_9``.
+    platoon_bb : dict | None
+        BB rates by batter hand, e.g. ``{"L": 0.213, "R": 0.108}``.
 
     Returns
     -------
@@ -1731,15 +1742,8 @@ def assess_walk_strategy(
     if proj_df.empty and adv_df.empty:
         return None
 
-    bb_rate_proj = None
     bb_rate_obs = None
     zone_pct = None
-
-    # Projected BB rate (Bayesian, regressed toward mean)
-    if not proj_df.empty and "projected_bb_rate" in proj_df.columns:
-        row = proj_df[proj_df["pitcher_id"] == pitcher_id]
-        if not row.empty:
-            bb_rate_proj = float(row["projected_bb_rate"].iloc[0])
 
     # Observed / current-season BB rate + zone%
     if not adv_df.empty:
@@ -1754,33 +1758,129 @@ def assess_walk_strategy(
                 if pd.notna(val):
                     bb_rate_obs = float(val)
 
-    # Use the higher of projected vs observed — coaching cares about recent tendency
-    bb_rate = max(filter(None, [bb_rate_proj, bb_rate_obs]), default=None)
-    if bb_rate is None:
+    # Recent form BB/9 (last 5 starts)
+    recent_bb9 = form.get("bb_per_9") if form else None
+
+    # --- Platoon-aware assessment ---
+    if platoon_bb:
+        lhb_bb = platoon_bb.get("L", 0)
+        rhb_bb = platoon_bb.get("R", 0)
+
+        # Strong platoon split: one hand >= 12%, other < 9.5%
+        lhb_high = lhb_bb >= 0.12
+        rhb_high = rhb_bb >= 0.12
+        lhb_moderate = lhb_bb >= 0.095
+        rhb_moderate = rhb_bb >= 0.095
+
+        lhb_pa = platoon_bb.get("L_pa")
+        rhb_pa = platoon_bb.get("R_pa")
+        lhb_n = f" ({lhb_pa} PA)" if lhb_pa else ""
+        rhb_n = f" ({rhb_pa} PA)" if rhb_pa else ""
+
+        parts = []
+        if lhb_high or lhb_moderate:
+            verb = "Patient approach" if lhb_high else "Extended ABs rewarded"
+            parts.append(
+                f"LHB: {verb} -- walks {lhb_bb*100:.0f}% of lefties{lhb_n}"
+            )
+        if rhb_high or rhb_moderate:
+            verb = "Patient approach" if rhb_high else "Extended ABs rewarded"
+            parts.append(
+                f"RHB: {verb} -- walks {rhb_bb*100:.0f}% of righties{rhb_n}"
+            )
+
+        # Add contrast when one side is low
+        if (lhb_high or lhb_moderate) and not rhb_moderate:
+            parts.append(f"RHB: swing away -- only walks {rhb_bb*100:.0f}% of righties{rhb_n}")
+        elif (rhb_high or rhb_moderate) and not lhb_moderate:
+            parts.append(f"LHB: swing away -- only walks {lhb_bb*100:.0f}% of lefties{lhb_n}")
+
+        if parts:
+            return {
+                "bb_rate": bb_rate_obs,
+                "zone_pct": zone_pct,
+                "platoon_bb": platoon_bb,
+                "note": " | ".join(parts),
+            }
+
+    # --- Fallback: overall assessment (no platoon data) ---
+    bb_rate = bb_rate_obs
+
+    # Also check recent form
+    recent_high = recent_bb9 is not None and recent_bb9 >= 4.0
+    recent_moderate = recent_bb9 is not None and recent_bb9 >= 3.5
+
+    season_high = bb_rate is not None and bb_rate >= 0.12
+    season_moderate = bb_rate is not None and bb_rate >= 0.095
+
+    if not (season_high or season_moderate or recent_high or recent_moderate):
         return None
 
-    # Thresholds
-    high_bb = bb_rate >= 0.095  # top quartile walk rate
-    low_zone = zone_pct is not None and zone_pct < 0.42  # below league avg ~0.44
+    # Build note
+    if season_high or recent_high:
+        prefix = "Patient approach"
+    else:
+        prefix = "Extended ABs rewarded"
 
-    if not high_bb and not low_zone:
-        return None
+    note_parts = []
+    if bb_rate is not None and (season_high or season_moderate):
+        note_parts.append(f"walks {bb_rate*100:.1f}% of batters")
+    if recent_high or recent_moderate:
+        note_parts.append(f"{recent_bb9:.1f} BB/9 in last 5 starts")
+    if zone_pct is not None and zone_pct < 0.42:
+        note_parts.append(f"low zone rate ({zone_pct*100:.0f}%)")
 
-    pct_str = f"{bb_rate * 100:.1f}%"
-    parts: list[str] = []
-    if high_bb:
-        parts.append(f"Walks {pct_str} of batters faced")
-    if low_zone:
-        zone_str = f"{zone_pct * 100:.0f}%"
-        parts.append(f"low zone rate ({zone_str})")
-
-    note = "Patient approach — " + ", ".join(parts) + ". Discipline rewarded."
+    note = f"{prefix} — {', '.join(note_parts)}."
 
     return {
         "bb_rate": bb_rate,
         "zone_pct": zone_pct,
         "note": note,
     }
+
+
+# ---------------------------------------------------------------------------
+# Pitcher BB by Batter Hand
+# ---------------------------------------------------------------------------
+
+
+def get_pitcher_platoon_bb(
+    pitcher_id: int,
+    platoon_bb_df: pd.DataFrame | None = None,
+) -> dict[str, float] | None:
+    """Look up pitcher's BB rate split by batter hand.
+
+    Reads from precomputed ``pitcher_platoon_bb.parquet``.
+
+    Returns
+    -------
+    dict | None
+        e.g. ``{"L": 0.213, "R": 0.108}`` or None if insufficient data.
+    """
+    if platoon_bb_df is None or platoon_bb_df.empty:
+        return None
+
+    row = platoon_bb_df[platoon_bb_df["pitcher_id"] == pitcher_id]
+    if row.empty:
+        return None
+
+    result: dict[str, float] = {}
+    lhb = row["bb_rate_vs_lhb"].iloc[0]
+    rhb = row["bb_rate_vs_rhb"].iloc[0]
+    if pd.notna(lhb):
+        result["L"] = float(lhb)
+    if pd.notna(rhb):
+        result["R"] = float(rhb)
+
+    # Include PA counts for sample size context
+    lhb_pa = row["bf_vs_lhb"].iloc[0] if "bf_vs_lhb" in row.columns else None
+    rhb_pa = row["bf_vs_rhb"].iloc[0] if "bf_vs_rhb" in row.columns else None
+    if pd.notna(lhb_pa):
+        result["L_pa"] = int(lhb_pa)
+    if pd.notna(rhb_pa):
+        result["R_pa"] = int(rhb_pa)
+
+    return result if result else None
 
 
 # ---------------------------------------------------------------------------
