@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -1429,6 +1430,18 @@ def page_game_prep() -> None:
     game_props_df = load_game_props()
     platoon_bb_df = load_pitcher_platoon_bb()
 
+    # Observed 2026 wOBA fallback for players without vulnerability data
+    _obs_woba_fallback: dict[int, float] = {}
+    try:
+        _trad = pd.read_parquet(
+            str(Path(__file__).resolve().parents[1] / "data" / "dashboard" / "hitter_traditional.parquet")
+        )
+        if not _trad.empty and "woba" in _trad.columns and "pa" in _trad.columns:
+            for _, _r in _trad[_trad["pa"] >= 10].iterrows():
+                _obs_woba_fallback[int(_r["batter_id"])] = float(_r["woba"])
+    except Exception:
+        pass
+
     # Build tab labels: "{team} Hitters vs {opposing pitcher}"
     home_abbr = game.get("home_abbr", "?")
     away_abbr = game.get("away_abbr", "?")
@@ -1601,6 +1614,21 @@ def page_game_prep() -> None:
                             p_ars_plan, comp_vuln, comp_str,
                             pitcher_hand=p_hand, batter_hand=b_hand,
                         )
+
+                # Fallback: use observed 2026 wOBA as matchup xwOBA
+                if edge is None and bid in _obs_woba_fallback:
+                    obs_woba = _obs_woba_fallback[bid]
+                    adv_label = (
+                        "hitter" if obs_woba > 0.325
+                        else ("pitcher" if obs_woba < 0.305 else "even")
+                    )
+                    edge = {
+                        "matchup_xwoba": obs_woba,
+                        "league_xwoba": 0.315,
+                        "edge": obs_woba - 0.315,
+                        "advantage": adv_label,
+                        "platoon_edge": None,
+                    }
 
                 # Look up Bayesian projections for this batter
                 b_proj: dict = {}
