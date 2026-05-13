@@ -142,6 +142,15 @@ def load_pitcher_advanced_stats() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_DATA_TTL)
+def load_pitcher_platoon_bb() -> pd.DataFrame:
+    """Pitcher BB rate split by batter hand (LHB/RHB)."""
+    path = DASHBOARD_DIR / "pitcher_platoon_bb.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
 def load_hitter_vulnerability(career: bool = False) -> pd.DataFrame:
     if career:
         path = DASHBOARD_DIR / "hitter_vuln_career.parquet"

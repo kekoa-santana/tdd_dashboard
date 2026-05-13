@@ -487,6 +487,22 @@ def plot_pitcher_location_compact(
     from config import PITCH_DISPLAY
 
     df = location_df.copy()
+
+    # Compute per-pitch-type usage splits by batter hand (before any filtering)
+    _usage_by_stand: dict[str, dict[str, float]] = {}
+    if "batter_stand" in df.columns:
+        stand_totals = df.groupby("batter_stand")["pitches"].sum()
+        for pt_code in df["pitch_type"].unique():
+            pt_data = df[df["pitch_type"] == pt_code]
+            _usage_by_stand[pt_code] = {}
+            for stand in ("L", "R"):
+                st_total = stand_totals.get(stand, 0)
+                if st_total > 0:
+                    pt_stand_n = pt_data[pt_data["batter_stand"] == stand]["pitches"].sum()
+                    _usage_by_stand[pt_code][stand] = pt_stand_n / st_total
+                else:
+                    _usage_by_stand[pt_code][stand] = 0.0
+
     if batter_stand:
         df = df[df["batter_stand"] == batter_stand]
 
@@ -503,10 +519,17 @@ def plot_pitcher_location_compact(
         pitches=("pitches", "sum"),
     ).reset_index()
 
-    # Determine pitch types to show
+    # Determine pitch types — sorted by overall usage (descending)
+    pt_totals = agg.groupby("pitch_type")["pitches"].sum().sort_values(ascending=False)
     if pitch_types is None:
-        pt_totals = agg.groupby("pitch_type")["pitches"].sum().sort_values(ascending=False)
         pitch_types = pt_totals.head(4).index.tolist()
+    else:
+        # Re-sort provided pitch types by usage
+        pitch_types = sorted(
+            pitch_types,
+            key=lambda pt: pt_totals.get(pt, 0),
+            reverse=True,
+        )
 
     n_pt = len(pitch_types)
     if n_pt == 0:
@@ -526,6 +549,9 @@ def plot_pitcher_location_compact(
     cmap = mcolors.LinearSegmentedColormap.from_list(
         "gold_heat", [_CARD_BG, "#4a3d25", GOLD, "#f5e6c8"], N=256,
     )
+
+    # Grand total for overall usage %
+    grand_total = pt_totals.sum()
 
     for idx, pt in enumerate(pitch_types):
         ax = axes[idx]
@@ -562,13 +588,205 @@ def plot_pitcher_location_compact(
         ax.tick_params(length=0)
         if idx == 0:
             ax.set_ylabel("High → Low", color=SLATE, fontsize=8, labelpad=4)
-            ax.set_xlabel("Inside → Outside", color=SLATE, fontsize=8, labelpad=4)
+            if batter_stand == "L":
+                ax.set_xlabel("Outside → Inside", color=SLATE, fontsize=8, labelpad=4)
+            else:
+                ax.set_xlabel("Inside → Outside", color=SLATE, fontsize=8, labelpad=4)
 
+        # Title: pitch name + usage subtitle
         label = PITCH_DISPLAY.get(pt, pt)
-        ax.set_title(label, color=CREAM, fontsize=12, fontweight="bold")
+        stand_usage = _usage_by_stand.get(pt, {})
+        l_pct = stand_usage.get("L", 0) * 100
+        r_pct = stand_usage.get("R", 0) * 100
+        if l_pct > 0 or r_pct > 0:
+            usage_line = f"LHB {l_pct:.0f}%  ·  RHB {r_pct:.0f}%"
+        else:
+            overall_pct = (pt_totals.get(pt, 0) / grand_total * 100) if grand_total > 0 else 0
+            usage_line = f"{overall_pct:.0f}% usage"
+        ax.set_title(f"{label}\n{usage_line}", color=CREAM, fontsize=12,
+                     fontweight="bold", pad=6)
+        # Color the usage subtitle line (second line of title) in SLATE
+        title_obj = ax.title
+        title_obj.set_fontsize(12)
+        # Use a two-line title with smaller second line via text instead
+        ax.set_title("", pad=0)
+        ax.text(0.5, 1.08, label, transform=ax.transAxes, ha="center",
+                va="bottom", color=CREAM, fontsize=12, fontweight="bold")
+        ax.text(0.5, 1.02, usage_line, transform=ax.transAxes, ha="center",
+                va="bottom", color=SLATE, fontsize=8)
 
     if pitcher_name:
         fig.suptitle(pitcher_name, color=GOLD, fontsize=14, fontweight="bold", y=1.02)
 
     fig.tight_layout()
+    return fig
+
+
+def plot_pitcher_location_split(
+    location_df: pd.DataFrame,
+    pitch_types: list[str] | None = None,
+    pitcher_name: str = "",
+    figsize: tuple[float, float] = (14, 6.5),
+) -> plt.Figure:
+    """Split pitch location heatmap: top row vs RHB, bottom row vs LHB.
+
+    Same pitch type order in both rows (sorted by overall usage) so the
+    reader can visually compare each pitch's location across batter hands.
+
+    Parameters
+    ----------
+    location_df : pd.DataFrame
+        Filtered to one pitcher. Columns: pitch_type, batter_stand,
+        grid_row, grid_col, pitches.
+    pitch_types : list[str] | None
+        Which pitch types to show. If None, uses top 4 by overall volume.
+    pitcher_name : str
+        Optional suptitle text.
+    figsize : tuple[float, float]
+        Figure size in inches.
+
+    Returns
+    -------
+    plt.Figure
+    """
+    from config import PITCH_DISPLAY
+
+    df = location_df.copy()
+
+    if df.empty:
+        fig, ax = plt.subplots(figsize=figsize)
+        fig.patch.set_alpha(0)
+        ax.set_facecolor("none")
+        ax.text(0.5, 0.5, "No location data", color=SLATE,
+                ha="center", va="center", transform=ax.transAxes, fontsize=8)
+        return fig
+
+    # Aggregate across both hands for overall ordering
+    agg_all = df.groupby(["pitch_type", "grid_row", "grid_col"]).agg(
+        pitches=("pitches", "sum"),
+    ).reset_index()
+    pt_totals = agg_all.groupby("pitch_type")["pitches"].sum().sort_values(ascending=False)
+
+    if pitch_types is None:
+        pitch_types = pt_totals.head(4).index.tolist()
+    else:
+        pitch_types = sorted(
+            pitch_types,
+            key=lambda pt: pt_totals.get(pt, 0),
+            reverse=True,
+        )
+
+    n_pt = len(pitch_types)
+    if n_pt == 0:
+        fig, ax = plt.subplots(figsize=figsize)
+        fig.patch.set_alpha(0)
+        ax.set_facecolor("none")
+        return fig
+
+    # Per-stand aggregations
+    stand_aggs: dict[str, pd.DataFrame] = {}
+    stand_totals: dict[str, pd.Series] = {}
+    for stand in ("R", "L"):
+        s_df = df[df["batter_stand"] == stand]
+        if s_df.empty:
+            stand_aggs[stand] = pd.DataFrame()
+            stand_totals[stand] = pd.Series(dtype=float)
+        else:
+            s_agg = s_df.groupby(["pitch_type", "grid_row", "grid_col"]).agg(
+                pitches=("pitches", "sum"),
+            ).reset_index()
+            stand_aggs[stand] = s_agg
+            stand_totals[stand] = s_agg.groupby("pitch_type")["pitches"].sum()
+
+    # Grand total per stand (for usage %)
+    grand_by_stand: dict[str, float] = {}
+    for stand in ("R", "L"):
+        gt = stand_totals[stand].sum() if not stand_totals[stand].empty else 0
+        grand_by_stand[stand] = float(gt)
+
+    fig, axes = plt.subplots(2, n_pt, figsize=figsize)
+    fig.patch.set_alpha(0)
+
+    if n_pt == 1:
+        axes = axes.reshape(2, 1)
+
+    _CARD_BG = "#1A1917"
+    cmap = mcolors.LinearSegmentedColormap.from_list(
+        "gold_heat", [_CARD_BG, "#4a3d25", GOLD, "#f5e6c8"], N=256,
+    )
+
+    stands = ["R", "L"]
+    row_labels = ["vs RHB", "vs LHB"]
+
+    for row_idx, (stand, row_label) in enumerate(zip(stands, row_labels)):
+        s_agg = stand_aggs[stand]
+        s_grand = grand_by_stand[stand]
+
+        for col_idx, pt in enumerate(pitch_types):
+            ax = axes[row_idx, col_idx]
+            ax.set_facecolor(_CARD_BG)
+
+            pt_df = s_agg[s_agg["pitch_type"] == pt] if not s_agg.empty else pd.DataFrame()
+            total = pt_df["pitches"].sum() if not pt_df.empty else 0
+
+            if total == 0:
+                ax.text(0.5, 0.5, "No data", color=SLATE,
+                        ha="center", va="center", transform=ax.transAxes, fontsize=7)
+                _draw_zone_frame(ax)
+                ax.set_xticklabels([])
+                ax.set_yticklabels([])
+                ax.tick_params(length=0)
+            else:
+                pt_df = pt_df.copy()
+                pt_df["pct"] = pt_df["pitches"] / total
+                grid = _build_grid(pt_df, "pct")
+
+                ax.pcolormesh(
+                    _X_EDGES, _Z_EDGES, grid,
+                    cmap=cmap, vmin=0, vmax=max(0.12, np.nanmax(grid)),
+                    shading="flat", zorder=2,
+                )
+                _draw_zone_frame(ax)
+                ax.set_xticklabels([])
+                ax.set_yticklabels([])
+                ax.tick_params(length=0)
+
+            # Context labels on first column of each row
+            if col_idx == 0:
+                ax.set_ylabel("High \u2192 Low", color=SLATE, fontsize=8, labelpad=4)
+                # Inside/Outside flips by batter hand (plate_x orientation)
+                if stand == "R":
+                    ax.set_xlabel("Inside \u2192 Outside", color=SLATE, fontsize=8, labelpad=4)
+                else:
+                    ax.set_xlabel("Outside \u2192 Inside", color=SLATE, fontsize=8, labelpad=4)
+
+            # Column titles only on top row
+            if row_idx == 0:
+                label = PITCH_DISPLAY.get(pt, pt)
+                # Hand-specific usage %
+                pt_stand_n = float(stand_totals[stand].get(pt, 0)) if not stand_totals[stand].empty else 0
+                usage_pct = (pt_stand_n / s_grand * 100) if s_grand > 0 else 0
+                usage_line = f"RHB {usage_pct:.0f}%"
+                ax.text(0.5, 1.12, label, transform=ax.transAxes, ha="center",
+                        va="bottom", color=CREAM, fontsize=12, fontweight="bold")
+                ax.text(0.5, 1.05, usage_line, transform=ax.transAxes, ha="center",
+                        va="bottom", color=SLATE, fontsize=8)
+            else:
+                # Bottom row: just the hand-specific usage
+                pt_stand_n = float(stand_totals[stand].get(pt, 0)) if not stand_totals[stand].empty else 0
+                usage_pct = (pt_stand_n / s_grand * 100) if s_grand > 0 else 0
+                usage_line = f"LHB {usage_pct:.0f}%"
+                ax.text(0.5, 1.05, usage_line, transform=ax.transAxes, ha="center",
+                        va="bottom", color=SLATE, fontsize=8)
+
+    # Row labels on the left margin
+    fig.text(0.01, 0.73, "vs RHB", color=GOLD, fontsize=10, fontweight="bold",
+             va="center", rotation=90)
+    fig.text(0.01, 0.30, "vs LHB", color=GOLD, fontsize=10, fontweight="bold",
+             va="center", rotation=90)
+
+    if pitcher_name:
+        fig.suptitle(pitcher_name, color=GOLD, fontsize=14, fontweight="bold", y=1.02)
+
+    fig.tight_layout(rect=[0.03, 0, 1, 1])
     return fig
