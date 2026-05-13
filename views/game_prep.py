@@ -21,16 +21,19 @@ from services.data_loader import (
     load_pitcher_game_logs,
     load_pitcher_advanced_stats,
     load_pitcher_location_grid,
+    load_game_props,
+    load_pitcher_platoon_bb,
 )
 from components.scouting import (
     build_attack_plan, compute_matchup_xwoba_edge, PITCH_DISPLAY,
     build_comp_proxy_data, build_pitcher_comp_arsenal,
     assess_walk_strategy,
     get_pitcher_recent_form,
+    get_pitcher_platoon_bb,
 )
 from components.headshot import headshot_html
 from components.team_logo import team_logo_html
-from lib.zone_charts import plot_pitcher_location_compact
+from lib.zone_charts import plot_pitcher_location_compact, plot_pitcher_location_split
 from utils.chart_embed import fig_to_base64
 from utils.html import esc, esc_attr
 from utils.helpers import format_game_time
@@ -69,18 +72,20 @@ _WOBA_SCALE = 1.15
 def _optimize_lineup(
     batters: list[dict],
 ) -> tuple[list[dict], float, float]:
-    """Find the optimal batting order given per-batter matchup xwOBA.
+    """Find the optimal batting order using MLB-style slot assignment.
 
-    Uses a heuristic that mirrors real MLB lineup construction:
-      - Slot 1-2: highest OBP-type batters (xwOBA)
-      - Slot 3-4: best power + xwOBA combo
-      - Slot 5-9: descending xwOBA
+    Assigns batters to lineup slots based on role-appropriate profiles:
+      - Slot 1 (Leadoff): OBP-oriented — high BB%, low K%, good wOBA
+      - Slot 2 (Best hitter): highest projected wOBA + matchup quality
+      - Slots 3-4 (Power): best HR rate + production combo
+      - Slots 5-9: remaining batters sorted by matchup xwOBA descending
 
     Parameters
     ----------
-    batters : list of dicts with keys:
+    batters : list of dicts with keys including:
         batter_id, batter_name, team_abbr, matchup_xwoba, current_order,
-        headshot_id, batter_label
+        headshot_id, batter_label, projections (optional dict with
+        projected_k_rate, projected_bb_rate, projected_woba, projected_hr_rate)
 
     Returns
     -------
@@ -101,18 +106,83 @@ def _optimize_lineup(
         b["matchup_xwoba"] * pa_w[i] for i, b in enumerate(current_sorted)
     )
 
-    # Optimal: sort by matchup_xwoba descending, assign to slots with most PA
-    # This maximizes the weighted sum (greedy optimal for linear objective)
-    by_xwoba = sorted(batters[:n], key=lambda b: b["matchup_xwoba"], reverse=True)
-    # Pair best hitters with highest-PA slots
-    for i, b in enumerate(by_xwoba):
+    pool = list(batters[:n])
+
+    # -- Extract projection metrics with league-average fallbacks -----------
+    lg_k = 0.220
+    lg_bb = 0.085
+    lg_woba = 0.315
+    lg_hr = 0.030
+
+    def _proj(b: dict, key: str, fallback: float) -> float:
+        proj = b.get("projections") or {}
+        val = proj.get(key)
+        return val if val is not None else fallback
+
+    k_rates = np.array([_proj(b, "projected_k_rate", lg_k) for b in pool])
+    bb_rates = np.array([_proj(b, "projected_bb_rate", lg_bb) for b in pool])
+    wobas = np.array([_proj(b, "projected_woba", lg_woba) for b in pool])
+    hr_rates = np.array([_proj(b, "projected_hr_rate", lg_hr) for b in pool])
+    matchups = np.array([b["matchup_xwoba"] for b in pool])
+
+    # -- Z-score each metric (guard against zero-variance) ------------------
+    def _zscore(arr: np.ndarray) -> np.ndarray:
+        s = arr.std()
+        if s < 1e-9:
+            return np.zeros_like(arr)
+        return (arr - arr.mean()) / s
+
+    k_z = _zscore(k_rates)
+    bb_z = _zscore(bb_rates)
+    woba_z = _zscore(wobas)
+    hr_z = _zscore(hr_rates)
+    match_z = _zscore(matchups)
+
+    # -- Slot 1 (Leadoff): OBP + contact - power (table-setter, not slugger) -
+    leadoff_scores = (
+        0.35 * bb_z + 0.25 * woba_z + 0.25 * (-k_z) + 0.10 * match_z
+        - 0.30 * hr_z  # penalize power hitters — they belong in 3-4 hole
+    )
+    slot1_idx = int(np.argmax(leadoff_scores))
+
+    optimal: list[dict] = []
+    optimal.append(pool[slot1_idx])
+    remaining_mask = np.ones(n, dtype=bool)
+    remaining_mask[slot1_idx] = False
+
+    # -- Slot 2 (Best hitter): wOBA-dominant + matchup + contact ------------
+    slot2_scores = 0.5 * woba_z + 0.3 * match_z + 0.2 * (1 - k_z)
+    slot2_scores[~remaining_mask] = -np.inf
+    slot2_idx = int(np.argmax(slot2_scores))
+    optimal.append(pool[slot2_idx])
+    remaining_mask[slot2_idx] = False
+
+    # -- Slots 3-4 (Power): HR rate + production + matchup ------------------
+    power_scores = 0.4 * hr_z + 0.3 * woba_z + 0.3 * match_z
+    for _ in range(min(2, int(remaining_mask.sum()))):
+        power_scores[~remaining_mask] = -np.inf
+        idx = int(np.argmax(power_scores))
+        optimal.append(pool[idx])
+        remaining_mask[idx] = False
+
+    # -- Slots 5-9: remaining batters by matchup xwOBA descending -----------
+    rest = [
+        (matchups[i], pool[i])
+        for i in range(n)
+        if remaining_mask[i]
+    ]
+    rest.sort(key=lambda x: x[0], reverse=True)
+    optimal.extend(b for _, b in rest)
+
+    # Assign slot numbers
+    for i, b in enumerate(optimal):
         b["optimal_slot"] = i + 1
 
     optimal_score = sum(
-        b["matchup_xwoba"] * pa_w[i] for i, b in enumerate(by_xwoba)
+        b["matchup_xwoba"] * pa_w[i] for i, b in enumerate(optimal)
     )
 
-    return by_xwoba, current_score, optimal_score
+    return optimal, current_score, optimal_score
 
 
 def _render_lineup_optimization_html(
@@ -130,18 +200,25 @@ def _render_lineup_optimization_html(
     n = min(len(batters), 9)
 
     # Column header
+    # Each stat cell uses flex:1 so columns share space evenly and breathe.
+    # The name column has a fixed width to prevent it from hogging whitespace.
+    _hdr = "color:var(--tdd-slate);font-size:0.8rem;letter-spacing:0.5px"
+    _sc = "flex:1;text-align:center;padding:0 0.3rem"  # stat column base
     rows = (
-        '<div style="display:flex;align-items:center;padding:3px 0;margin-bottom:2px;'
+        '<div style="display:flex;align-items:center;padding:4px 0;margin-bottom:3px;'
         'border-bottom:1px solid var(--tdd-dark-border)">'
-        '<span style="width:1.6rem"></span>'
-        '<span style="padding:0 0.5rem;width:28px"></span>'
-        '<span style="color:var(--tdd-slate);flex:1;font-size:0.7rem;letter-spacing:0.5px"></span>'
-        '<span style="color:var(--tdd-slate);font-size:0.7rem;width:3.5rem;text-align:center">K%</span>'
-        '<span style="color:var(--tdd-slate);font-size:0.7rem;width:3.5rem;text-align:center">BB%</span>'
-        '<span style="color:var(--tdd-slate);font-size:0.7rem;width:3.5rem;text-align:center">wOBA</span>'
-        '<span style="color:var(--tdd-slate);font-size:0.7rem;width:4.5rem;text-align:center">Edge</span>'
-        '<span style="color:var(--tdd-slate);font-size:0.7rem;width:10rem;text-align:left">Approach</span>'
-        '<span style="color:var(--tdd-slate);font-size:0.7rem;width:4.5rem;text-align:right">Matchup</span>'
+        '<span style="min-width:2rem"></span>'
+        '<span style="padding:0 0.5rem;min-width:36px"></span>'
+        f'<span style="{_hdr};width:14rem;min-width:10rem"></span>'
+        f'<span style="{_hdr};{_sc}">K%</span>'
+        f'<span style="{_hdr};{_sc}">BB%</span>'
+        f'<span style="{_hdr};{_sc}">wOBA</span>'
+        f'<span style="{_hdr};{_sc}">Sim H</span>'
+        f'<span style="{_hdr};{_sc}">Sim K</span>'
+        f'<span style="{_hdr};{_sc}">Sim TB</span>'
+        f'<span style="{_hdr};{_sc}">Edge</span>'
+        f'<span style="{_hdr};flex:1.6;text-align:left;padding:0 0.3rem">Approach</span>'
+        f'<span style="{_hdr};{_sc}">Matchup</span>'
         '</div>'
     )
 
@@ -156,24 +233,24 @@ def _render_lineup_optimization_html(
             meta_parts.append(pos)
         if label:
             meta_parts.append(label)
-        meta_html = f' <span style="color:var(--tdd-slate);font-size:0.7rem">{esc(", ".join(meta_parts))}</span>' if meta_parts else ""
+        meta_html = f' <span style="color:var(--tdd-slate);font-size:0.78rem">{esc(", ".join(meta_parts))}</span>' if meta_parts else ""
 
         # Platoon badge
         platoon_html = ""
         plan = b.get("plan")
         if plan and plan.get("platoon") == "favorable":
-            platoon_html = '<span style="color:var(--tdd-sage);font-size:0.6rem;border:1px solid var(--tdd-sage);border-radius:2px;padding:0 3px;margin-left:0.3rem">+</span>'
+            platoon_html = '<span style="color:var(--tdd-sage);font-size:0.65rem;border:1px solid var(--tdd-sage);border-radius:2px;padding:0 4px;margin-left:0.3rem">+</span>'
         elif plan and plan.get("platoon") == "unfavorable":
-            platoon_html = '<span style="color:var(--tdd-ember);font-size:0.6rem;border:1px solid var(--tdd-ember);border-radius:2px;padding:0 3px;margin-left:0.3rem">&minus;</span>'
+            platoon_html = '<span style="color:var(--tdd-ember);font-size:0.65rem;border:1px solid var(--tdd-ember);border-radius:2px;padding:0 4px;margin-left:0.3rem">&minus;</span>'
 
         # Edge label
         edge = b.get("edge")
         if edge and edge.get("advantage") == "hitter":
-            edge_html = f'<span style="color:var(--tdd-sage);font-size:0.72rem">Hitter</span>'
+            edge_html = f'<span style="color:var(--tdd-sage);font-size:0.82rem;font-weight:600">Hitter</span>'
         elif edge and edge.get("advantage") == "pitcher":
-            edge_html = f'<span style="color:var(--tdd-ember);font-size:0.72rem">Pitcher</span>'
+            edge_html = f'<span style="color:var(--tdd-ember);font-size:0.82rem;font-weight:600">Pitcher</span>'
         else:
-            edge_html = f'<span style="color:var(--tdd-slate);font-size:0.72rem">Even</span>'
+            edge_html = f'<span style="color:var(--tdd-slate);font-size:0.82rem">Even</span>'
 
         # Hunt/avoid summary
         approach_html = ""
@@ -188,37 +265,83 @@ def _render_lineup_optimization_html(
             if avoid_picks:
                 parts.append(f'<span style="color:var(--tdd-ember)">Avoid {", ".join(avoid_picks[:1])}</span>')
             if parts:
-                approach_html = f'<span style="font-size:0.72rem">{" · ".join(parts)}</span>'
+                approach_html = f'<span style="font-size:0.82rem">{" · ".join(parts)}</span>'
 
         # Bayesian projections
         bproj = b.get("projections", {})
         k_pct = bproj.get("projected_k_rate")
         bb_pct = bproj.get("projected_bb_rate")
         woba = bproj.get("projected_woba")
+        k_lo = bproj.get("projected_k_rate_2_5")
+        k_hi = bproj.get("projected_k_rate_97_5")
+        bb_lo = bproj.get("projected_bb_rate_2_5")
+        bb_hi = bproj.get("projected_bb_rate_97_5")
+        woba_lo = bproj.get("projected_woba_2_5")
+        woba_hi = bproj.get("projected_woba_97_5")
 
         k_color = SAGE if k_pct and k_pct < 0.20 else (EMBER if k_pct and k_pct > 0.28 else SLATE)
         bb_color = SAGE if bb_pct and bb_pct > 0.10 else (EMBER if bb_pct and bb_pct < 0.06 else SLATE)
         woba_color = SAGE if woba and woba > 0.340 else (EMBER if woba and woba < 0.300 else SLATE)
 
-        k_html = f'<span style="color:{k_color};font-family:var(--tdd-font-mono);font-size:0.8rem">{k_pct*100:.0f}</span>' if k_pct else '<span style="color:var(--tdd-slate);font-size:0.75rem">--</span>'
-        bb_html = f'<span style="color:{bb_color};font-family:var(--tdd-font-mono);font-size:0.8rem">{bb_pct*100:.0f}</span>' if bb_pct else '<span style="color:var(--tdd-slate);font-size:0.75rem">--</span>'
-        woba_html = f'<span style="color:{woba_color};font-family:var(--tdd-font-mono);font-size:0.8rem">.{int(woba*1000):03d}</span>' if woba else '<span style="color:var(--tdd-slate);font-size:0.75rem">--</span>'
+        _ci_style = "font-size:0.62rem;opacity:0.55;font-family:var(--tdd-font-mono)"
+
+        if k_pct:
+            k_ci = f'<br><span style="{_ci_style};color:{k_color}">[{k_lo*100:.0f}-{k_hi*100:.0f}]</span>' if k_lo and k_hi else ""
+            k_html = f'<span style="color:{k_color};font-family:var(--tdd-font-mono);font-size:0.92rem;font-weight:600">{k_pct*100:.0f}</span>{k_ci}'
+        else:
+            k_html = '<span style="color:var(--tdd-slate);font-size:0.85rem">--</span>'
+
+        if bb_pct:
+            bb_ci = f'<br><span style="{_ci_style};color:{bb_color}">[{bb_lo*100:.0f}-{bb_hi*100:.0f}]</span>' if bb_lo and bb_hi else ""
+            bb_html = f'<span style="color:{bb_color};font-family:var(--tdd-font-mono);font-size:0.92rem;font-weight:600">{bb_pct*100:.0f}</span>{bb_ci}'
+        else:
+            bb_html = '<span style="color:var(--tdd-slate);font-size:0.85rem">--</span>'
+
+        if woba:
+            woba_ci = f'<br><span style="{_ci_style};color:{woba_color}">[.{int(woba_lo*1000):03d}-.{int(woba_hi*1000):03d}]</span>' if woba_lo and woba_hi else ""
+            woba_html = f'<span style="color:{woba_color};font-family:var(--tdd-font-mono);font-size:0.92rem;font-weight:600">.{int(woba*1000):03d}</span>{woba_ci}'
+        else:
+            woba_html = '<span style="color:var(--tdd-slate);font-size:0.85rem">--</span>'
+
+        # Game sim stat cells (matchup-adjusted Monte Carlo projections)
+        sim = b.get("sim_stats", {})
+        _sim_dash = '<span style="color:var(--tdd-slate);font-size:0.85rem">--</span>'
+        _cell = "flex:1;text-align:center;padding:0 0.3rem;line-height:1.2"
+        sim_cells = ""
+        for _skey, _good_thresh, _bad_thresh, _good_is_high in [
+            ("H", 1.0, 0.8, True),
+            ("K", 0.8, 1.0, False),
+            ("TB", 1.5, 1.0, True),
+        ]:
+            _sv = sim.get(_skey)
+            if _sv and _sv.get("expected") is not None:
+                _exp = _sv["expected"]
+                _p1 = _sv.get("p_1plus")
+                if _good_is_high:
+                    _sc = SAGE if _exp >= _good_thresh else (EMBER if _exp < _bad_thresh else SLATE)
+                else:
+                    _sc = SAGE if _exp < _good_thresh else (EMBER if _exp >= _bad_thresh else SLATE)
+                _p1_str = f'<br><span style="font-size:0.62rem;opacity:0.6;color:{_sc}">{_p1*100:.0f}% 1+</span>' if _p1 is not None else ""
+                sim_cells += f'<span style="{_cell}"><span style="color:{_sc};font-family:var(--tdd-font-mono);font-size:0.92rem;font-weight:600">{_exp:.1f}</span>{_p1_str}</span>'
+            else:
+                sim_cells += f'<span style="{_cell}">{_sim_dash}</span>'
 
         rows += (
-            '<div style="display:flex;align-items:center;padding:5px 0;'
-            'border-bottom:1px solid var(--tdd-dark-border-faint);font-size:0.9rem">'
-            f'<span style="color:var(--tdd-gold);width:1.6rem;text-align:right;'
-            f'font-family:var(--tdd-font-heading);font-weight:700;font-size:1rem">{i+1}</span>'
-            f'<span style="padding:0 0.5rem">{headshot_html(b["batter_id"], size=28)}</span>'
-            f'<span style="color:var(--tdd-cream);flex:1;font-family:var(--tdd-font-heading);'
-            f'font-weight:600">{esc(b["batter_name"])}{meta_html}{platoon_html}</span>'
-            f'<span style="width:3.5rem;text-align:center">{k_html}</span>'
-            f'<span style="width:3.5rem;text-align:center">{bb_html}</span>'
-            f'<span style="width:3.5rem;text-align:center">{woba_html}</span>'
-            f'<span style="width:4.5rem;text-align:center">{edge_html}</span>'
-            f'<span style="width:10rem;text-align:left">{approach_html}</span>'
-            f'<span style="color:{color};font-family:var(--tdd-font-mono);'
-            f'font-weight:700;font-size:0.95rem;width:4.5rem;text-align:right">.{int(xw*1000):03d}</span>'
+            '<div style="display:flex;align-items:center;padding:7px 0;'
+            'border-bottom:1px solid var(--tdd-dark-border-faint)">'
+            f'<span style="color:var(--tdd-gold);min-width:2rem;text-align:right;'
+            f'font-family:var(--tdd-font-heading);font-weight:700;font-size:1.15rem">{i+1}</span>'
+            f'<span style="padding:0 0.5rem">{headshot_html(b["batter_id"], size=36)}</span>'
+            f'<span style="color:var(--tdd-cream);width:14rem;min-width:10rem;font-family:var(--tdd-font-heading);'
+            f'font-weight:700;font-size:1.0rem">{esc(b["batter_name"])}{meta_html}{platoon_html}</span>'
+            f'<span style="{_cell}">{k_html}</span>'
+            f'<span style="{_cell}">{bb_html}</span>'
+            f'<span style="{_cell}">{woba_html}</span>'
+            f'{sim_cells}'
+            f'<span style="{_cell}">{edge_html}</span>'
+            f'<span style="flex:1.6;text-align:left;padding:0 0.3rem">{approach_html}</span>'
+            f'<span style="{_cell};color:{color};font-family:var(--tdd-font-mono);'
+            f'font-weight:700;font-size:1.1rem">.{int(xw*1000):03d}</span>'
             '</div>'
         )
 
@@ -254,13 +377,13 @@ def _render_lineup_optimization_html(
 
     return (
         '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);'
-        'border-radius:6px;padding:0.8rem 1rem;margin-bottom:1rem">'
-        '<div style="color:var(--tdd-gold);font-size:0.75rem;font-weight:700;'
+        'border-radius:6px;padding:1rem 1.2rem;margin-bottom:1rem">'
+        '<div style="color:var(--tdd-gold);font-size:0.85rem;font-weight:700;'
         'letter-spacing:2px;text-transform:uppercase;margin-bottom:4px">'
         'Recommended Batting Order</div>'
-        f'<div style="color:var(--tdd-slate);font-size:0.75rem;margin-bottom:0.5rem">'
+        f'<div style="color:var(--tdd-slate);font-size:0.8rem;margin-bottom:0.6rem">'
         f'{esc(opp_abbr)} vs {esc(pitcher_name)} · '
-        f'K%/BB%/wOBA = Bayesian projections · Matchup = pitch-type matchup quality (avg .315)</div>'
+        f'K%/BB%/wOBA = Bayesian projections · Sim = matchup-adjusted game sim · Matchup = pitch-type quality (avg .315)</div>'
         f'{rows}'
         f'{bench_html}'
         '</div>'
@@ -718,6 +841,8 @@ def _render_batter_attack_card(
     putaway_html: str = "",
     comp_info: dict | None = None,
     zone_chart_b64: str | None = None,
+    projections: dict | None = None,
+    sim_stats: dict | None = None,
 ) -> str:
     """Render a full attack plan card for one batter.
 
@@ -805,6 +930,71 @@ def _render_batter_attack_card(
             f'</div>'
         )
 
+    # Bayesian projection stats row for the attack card header
+    proj_row_html = ""
+    if projections:
+        _proj_parts: list[str] = []
+        _pk = projections.get("projected_k_rate")
+        _pk_lo = projections.get("projected_k_rate_2_5")
+        _pk_hi = projections.get("projected_k_rate_97_5")
+        _pbb = projections.get("projected_bb_rate")
+        _pbb_lo = projections.get("projected_bb_rate_2_5")
+        _pbb_hi = projections.get("projected_bb_rate_97_5")
+        _pw = projections.get("projected_woba")
+        _pw_lo = projections.get("projected_woba_2_5")
+        _pw_hi = projections.get("projected_woba_97_5")
+
+        if _pk:
+            _kc = SAGE if _pk < 0.20 else (EMBER if _pk > 0.28 else SLATE)
+            _kci = f' <span style="opacity:0.5">[{_pk_lo*100:.0f}-{_pk_hi*100:.0f}]</span>' if _pk_lo and _pk_hi else ""
+            _proj_parts.append(f'<span style="color:{_kc}">K% {_pk*100:.0f}{_kci}</span>')
+        if _pbb:
+            _bbc = SAGE if _pbb > 0.10 else (EMBER if _pbb < 0.06 else SLATE)
+            _bbci = f' <span style="opacity:0.5">[{_pbb_lo*100:.0f}-{_pbb_hi*100:.0f}]</span>' if _pbb_lo and _pbb_hi else ""
+            _proj_parts.append(f'<span style="color:{_bbc}">BB% {_pbb*100:.0f}{_bbci}</span>')
+        if _pw:
+            _wc = SAGE if _pw > 0.340 else (EMBER if _pw < 0.300 else SLATE)
+            _wci = f' <span style="opacity:0.5">[.{int(_pw_lo*1000):03d}-.{int(_pw_hi*1000):03d}]</span>' if _pw_lo and _pw_hi else ""
+            _proj_parts.append(f'<span style="color:{_wc}">wOBA .{int(_pw*1000):03d}{_wci}</span>')
+
+        if _proj_parts:
+            proj_row_html = (
+                f'<div style="margin-top:4px;font-size:0.72rem;'
+                f'font-family:var(--tdd-font-mono)">'
+                f'{" &middot; ".join(_proj_parts)}'
+                f'</div>'
+            )
+
+    # Game sim row (matchup-adjusted Monte Carlo projections)
+    sim_row_html = ""
+    if sim_stats:
+        _sim_parts: list[str] = []
+        for _sk, _sl, _good, _bad, _high_good in [
+            ("H", "H", 1.0, 0.8, True),
+            ("K", "K", 0.8, 1.0, False),
+            ("BB", "BB", 0.5, 0.3, True),
+            ("TB", "TB", 1.5, 1.0, True),
+        ]:
+            _sv = sim_stats.get(_sk)
+            if _sv and _sv.get("expected") is not None:
+                _exp = _sv["expected"]
+                _p1 = _sv.get("p_1plus")
+                if _high_good:
+                    _sc = SAGE if _exp >= _good else (EMBER if _exp < _bad else SLATE)
+                else:
+                    _sc = SAGE if _exp < _good else (EMBER if _exp >= _bad else SLATE)
+                _p1_str = f' ({_p1*100:.0f}% 1+)' if _p1 is not None else ""
+                _sim_parts.append(f'<span style="color:{_sc}">{_exp:.1f} {_sl}{_p1_str}</span>')
+        if _sim_parts:
+            sim_row_html = (
+                f'<div style="margin-top:3px;font-size:0.72rem;'
+                f'font-family:var(--tdd-font-mono)">'
+                f'<span style="color:{GOLD};font-size:0.6rem;font-weight:700;'
+                f'letter-spacing:0.5px;margin-right:0.4rem">GAME SIM</span>'
+                f'{" &middot; ".join(_sim_parts)}'
+                f'</div>'
+            )
+
     # Pitch plan rows with usage threshold separator
     _bl = plan.get("batter_label", "") or ""
     pitch_rows = ""
@@ -867,6 +1057,8 @@ def _render_batter_attack_card(
         f'<div style="color:var(--tdd-slate);font-size:0.78rem;margin-top:2px">'
         f'{esc(plan["summary"])}</div>'
         f'{comp_subtitle_html}'
+        f'{proj_row_html}'
+        f'{sim_row_html}'
         '</div>'
         f'<div style="text-align:right">'
         f'<div style="color:{edge_color};font-family:var(--tdd-font-mono);'
@@ -1057,6 +1249,15 @@ def page_game_prep() -> None:
         lineups = pd.DataFrame()
         lineups = backfill_missing_lineups(schedule, lineups)
 
+    # Filter out IL / non-active players from lineups
+    if not lineups.empty:
+        _roster_check = load_roster()
+        if not _roster_check.empty:
+            active_ids = set(
+                _roster_check[_roster_check["roster_status"] == "active"]["player_id"].astype(int)
+            )
+            lineups = lineups[lineups["batter_id"].astype(int).isin(active_ids)]
+
     # If lineups are still empty (future games), build from roster
     if lineups.empty:
         roster_all = load_roster()
@@ -1117,6 +1318,10 @@ def page_game_prep() -> None:
     hitter_proj_df = load_projections("hitter")
     adv_df = load_pitcher_advanced_stats()
 
+    # Game sim results (matchup-adjusted Monte Carlo projections)
+    game_props_df = load_game_props()
+    platoon_bb_df = load_pitcher_platoon_bb()
+
     # Build tab labels: "{team} Hitters vs {opposing pitcher}"
     home_abbr = game.get("home_abbr", "?")
     away_abbr = game.get("away_abbr", "?")
@@ -1168,7 +1373,10 @@ def page_game_prep() -> None:
 
         # --- Pitcher Overview (v2) ---
         form = get_pitcher_recent_form(pid, game_logs_df, n_starts=5)
-        walk_strat = assess_walk_strategy(pid, proj_df, adv_df)
+        platoon_bb = get_pitcher_platoon_bb(pid, platoon_bb_df)
+        walk_strat = assess_walk_strategy(
+            pid, proj_df, adv_df, form=form, platoon_bb=platoon_bb,
+        )
 
         # Zone heatmap for pitcher overview
         zone_overview_b64 = None
@@ -1176,8 +1384,8 @@ def page_game_prep() -> None:
             p_loc = location_df[location_df["pitcher_id"] == pid]
             if not p_loc.empty:
                 try:
-                    fig = plot_pitcher_location_compact(
-                        p_loc, pitcher_name=pitcher_name, batter_stand=None,
+                    fig = plot_pitcher_location_split(
+                        p_loc, pitcher_name=pitcher_name,
                     )
                     zone_overview_b64 = fig_to_base64(fig, dpi=120)
                 except Exception:
@@ -1292,7 +1500,12 @@ def page_game_prep() -> None:
                 if not hitter_proj_df.empty:
                     hp_row = hitter_proj_df[hitter_proj_df["batter_id"] == bid]
                     if not hp_row.empty:
-                        for col in ("projected_k_rate", "projected_bb_rate", "projected_woba"):
+                        for col in (
+                            "projected_k_rate", "projected_bb_rate", "projected_woba",
+                            "projected_k_rate_2_5", "projected_k_rate_97_5",
+                            "projected_bb_rate_2_5", "projected_bb_rate_97_5",
+                            "projected_woba_2_5", "projected_woba_97_5",
+                        ):
                             val = hp_row[col].iloc[0] if col in hp_row.columns else None
                             if pd.notna(val):
                                 b_proj[col] = float(val)
@@ -1311,6 +1524,32 @@ def page_game_prep() -> None:
                     "projections": b_proj,
                 })
 
+            # --- Enrich with game sim distributions ---
+            if not game_props_df.empty:
+                game_bp = game_props_df[
+                    (game_props_df["game_pk"] == gpk)
+                    & (game_props_df["player_type"] == "batter")
+                ]
+                for b in batter_data:
+                    bid = b["batter_id"]
+                    bp = game_bp[game_bp["player_id"] == bid]
+                    if bp.empty:
+                        continue
+                    sim_stats: dict[str, dict] = {}
+                    for _, row in bp.iterrows():
+                        stat = row["stat"]
+                        if stat in ("H", "K", "BB", "TB"):
+                            p1 = row.get("p_over_0.5")
+                            sim_stats[stat] = {
+                                "expected": round(row["expected"], 2),
+                                "std": round(row["std"], 2),
+                                "p_1plus": round(p1, 3) if pd.notna(p1) else None,
+                                "p_2plus": round(row.get("p_over_1.5", 0), 3) if pd.notna(row.get("p_over_1.5")) else None,
+                                "p_0": round(1.0 - p1, 3) if pd.notna(p1) else None,
+                            }
+                    if sim_stats:
+                        b["sim_stats"] = sim_stats
+
             # --- Rank all position players by matchup xwOBA ---
             roster_df = load_roster()
             pos_lookup: dict[int, str] = {}
@@ -1321,13 +1560,13 @@ def page_game_prep() -> None:
             for b in batter_data:
                 b["position"] = pos_lookup.get(b["batter_id"], "")
 
-            # Always rank by matchup xwOBA: top 9 = recommended starters
-            all_scoreable = sorted(
-                [b for b in batter_data if b["edge"] is not None],
+            # Rank all batters — include callups without edge data at league avg
+            all_ranked = sorted(
+                batter_data,
                 key=lambda x: x["matchup_xwoba"], reverse=True,
             )
-            starters = all_scoreable[:9]
-            bench_pool = all_scoreable[9:]
+            starters = all_ranked[:9]
+            bench_pool = all_ranked[9:]
             for i, b in enumerate(starters):
                 b["current_order"] = i + 1
 
@@ -1342,7 +1581,7 @@ def page_game_prep() -> None:
             bench_data.sort(key=lambda x: x["matchup_xwoba"], reverse=True)
 
             # --- Recommended Lineup card ---
-            scoreable = [b for b in starters if b["edge"] is not None]
+            scoreable = starters  # include all batters (callups get league avg)
             if len(scoreable) >= 4:
                 opt_html = _render_lineup_optimization_html(
                     scoreable, bench_data, pitcher_name, opp_abbr,
@@ -1412,6 +1651,8 @@ def page_game_prep() -> None:
                         putaway_html=pa_html,
                         comp_info=b.get("comp_info"),
                         zone_chart_b64=zone_b64,
+                        projections=b.get("projections"),
+                        sim_stats=b.get("sim_stats"),
                     )
                     st.markdown(card_html, unsafe_allow_html=True)
 
