@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from config import GOLD, EMBER, SAGE, SLATE, CREAM
+from config import GOLD, EMBER, SAGE, SLATE, CREAM, PITCH_TYPE_COLORS, PITCH_DISPLAY as PITCH_DISPLAY_MAP
 from services.data_loader import (
     load_todays_games, load_todays_lineups,
     load_pitcher_arsenal, load_pitcher_arsenal_by_stand,
@@ -51,6 +51,78 @@ _APPROACH_STYLE = {
     "defensive":  {"color": EMBER, "bg": "rgba(212,86,42,0.08)",  "label": "SELECTIVE",  "icon": "&#9660;"},
     "avoid":      {"color": EMBER, "bg": "rgba(212,86,42,0.12)",  "label": "AVOID",      "icon": "&#10005;"},
 }
+
+
+# ---------------------------------------------------------------------------
+# Arsenal mix bar + trend badge helpers
+# ---------------------------------------------------------------------------
+
+def _render_arsenal_bar(arsenal_df: pd.DataFrame, pitcher_id: int) -> str:
+    """Render a horizontal stacked bar showing pitch type usage percentages."""
+    p_ars = arsenal_df[arsenal_df["pitcher_id"] == pitcher_id]
+    if p_ars.empty:
+        return ""
+
+    # Sort by usage descending
+    usage_col = "usage_pct" if "usage_pct" in p_ars.columns else "usage"
+    p_ars = p_ars.sort_values(usage_col, ascending=False)
+
+    segments = ""
+    key_items = ""
+    for _, row in p_ars.iterrows():
+        pt = row["pitch_type"]
+        usage = row.get(usage_col, 0)
+        if usage < 0.01:
+            continue
+        color = PITCH_TYPE_COLORS.get(pt, SLATE)
+        pt_label = PITCH_DISPLAY_MAP.get(pt, pt)
+        velo = row.get("avg_velo") if "avg_velo" in row.index else row.get("velo")
+        velo_str = f" {velo:.0f}" if pd.notna(velo) and velo > 0 else ""
+        width_pct = usage * 100
+
+        # Segment in the bar
+        show_label = pt if usage >= 0.10 else ""
+        segments += (
+            f'<div class="seg" style="width:{width_pct:.1f}%;background:{color}">'
+            f'{show_label}</div>'
+        )
+
+        # Key item below
+        key_items += (
+            f'<span class="item">'
+            f'<span class="dot" style="background:{color}"></span>'
+            f'{esc(pt_label)} '
+            f'<span class="v">{usage*100:.0f}%</span>'
+            f'<span style="opacity:0.7">{velo_str}</span>'
+            f'</span>'
+        )
+
+    if not segments:
+        return ""
+
+    return (
+        '<div style="margin-top:0.5rem">'
+        '<div style="color:var(--tdd-slate);font-size:0.55rem;letter-spacing:1px;'
+        'text-transform:uppercase;margin-bottom:4px">Arsenal</div>'
+        f'<div class="gp-arsenal">{segments}</div>'
+        f'<div class="gp-arsenal-key">{key_items}</div>'
+        '</div>'
+    )
+
+
+def _get_trend_badge(form: dict | None) -> str:
+    """Return a trend badge (Hot/Cold/Steady) based on recent form."""
+    if not form:
+        return ""
+    era = form.get("era", 4.00)
+    k9 = form.get("k_per_9", 8.0)
+    # Hot: low ERA + decent K rate; Cold: high ERA; Steady: middle
+    if era < 3.00 and k9 >= 8.0:
+        return '<span class="gp-trend-tag up">&#9650; Hot</span>'
+    elif era > 5.00:
+        return '<span class="gp-trend-tag down">&#9660; Cold</span>'
+    else:
+        return '<span class="gp-trend-tag flat">&#9644; Steady</span>'
 
 
 # ---------------------------------------------------------------------------
@@ -193,113 +265,86 @@ def _render_lineup_optimization_html(
     opp_abbr: str,
     is_official: bool = False,
 ) -> str:
-    """Render the batting order card.
-
-    When is_official=True, shows the manager's filed order with optimization
-    flags. When False, shows our recommended order.
-    """
+    """Render the batting order card using CSS classes for responsive layout."""
     if len(batters) < 2:
         return ""
 
     if is_official:
-        # Use the manager's filed order (already set in current_order)
         optimal = sorted(batters, key=lambda b: b["current_order"])
     else:
         optimal, _current_score, _optimal_score = _optimize_lineup(batters)
 
     n = min(len(batters), 9)
 
-    # Column header with data source grouping
-    _hdr = "color:var(--tdd-slate);font-size:0.8rem;letter-spacing:0.5px"
-    _sc = "flex:1;text-align:center;padding:0 0.3rem"
-    _proj_bg = "background:rgba(200,169,110,0.06)"  # gold tint for Bayesian
-    _sim_bg = "background:rgba(107,163,142,0.06)"   # sage tint for sim
+    # Column group headers + column headers (hidden on mobile via CSS)
     rows = (
-        # Group labels row
-        '<div style="display:flex;align-items:center;padding:2px 0;margin-bottom:0">'
+        '<div class="gp-lu-groups">'
         '<span style="min-width:2rem"></span>'
         '<span style="padding:0 0.5rem;min-width:36px"></span>'
-        f'<span style="width:14rem;min-width:10rem"></span>'
-        f'<span style="{_proj_bg};flex:3;text-align:center;color:var(--tdd-gold);font-size:0.55rem;'
-        f'letter-spacing:1px;padding:2px 0;border-radius:3px 3px 0 0">BAYESIAN PROJECTIONS</span>'
-        f'<span style="{_sim_bg};flex:3;text-align:center;color:var(--tdd-sage);font-size:0.55rem;'
-        f'letter-spacing:1px;padding:2px 0;border-radius:3px 3px 0 0;margin-left:2px">GAME SIMULATION</span>'
-        f'<span style="flex:1;text-align:center"></span>'
-        f'<span style="flex:1.6"></span>'
-        f'<span style="flex:1;text-align:center;color:var(--tdd-slate);font-size:0.55rem;'
-        f'letter-spacing:1px;padding:2px 0">xwOBA</span>'
+        '<span style="width:14rem;min-width:10rem"></span>'
+        '<span class="grp-proj">BAYESIAN PROJECTIONS</span>'
+        '<span class="grp-sim">GAME SIMULATION</span>'
+        '<span style="flex:1"></span>'
+        '<span style="flex:1.6"></span>'
+        '<span class="grp-xw">xwOBA</span>'
         '</div>'
-        # Column headers row
-        '<div style="display:flex;align-items:center;padding:4px 0;margin-bottom:3px;'
-        'border-bottom:1px solid var(--tdd-dark-border)">'
+        '<div class="gp-lu-hdr" style="border-bottom:1px solid var(--tdd-dark-border);padding:4px 0;margin-bottom:3px">'
         '<span style="min-width:2rem"></span>'
         '<span style="padding:0 0.5rem;min-width:36px"></span>'
-        f'<span style="{_hdr};width:14rem;min-width:10rem"></span>'
-        f'<span style="{_hdr};{_sc};{_proj_bg}">K%</span>'
-        f'<span style="{_hdr};{_sc};{_proj_bg}">BB%</span>'
-        f'<span style="{_hdr};{_sc};{_proj_bg}">wOBA</span>'
-        f'<span style="{_hdr};{_sc};{_sim_bg}">H</span>'
-        f'<span style="{_hdr};{_sc};{_sim_bg}">K</span>'
-        f'<span style="{_hdr};{_sc};{_sim_bg}">TB</span>'
-        f'<span style="{_hdr};{_sc}">Edge</span>'
-        f'<span style="{_hdr};flex:1.6;text-align:left;padding:0 0.3rem">Approach</span>'
-        f'<span style="{_hdr};{_sc}">Matchup</span>'
+        '<span style="width:14rem;min-width:10rem"></span>'
+        '<span class="sc proj-bg">K%</span>'
+        '<span class="sc proj-bg">BB%</span>'
+        '<span class="sc proj-bg">wOBA</span>'
+        '<span class="sc sim-bg">H</span>'
+        '<span class="sc sim-bg">K</span>'
+        '<span class="sc sim-bg">TB</span>'
+        '<span class="sc">Edge</span>'
+        '<span style="flex:1.6;text-align:left;padding:0 0.3rem">Approach</span>'
+        '<span class="sc">Matchup</span>'
         '</div>'
     )
 
-    # Build recommended order rows
-    for i, b in enumerate(optimal[:n]):
+    def _render_lu_row(b: dict, idx: int, is_bench: bool = False) -> str:
         xw = b["matchup_xwoba"]
         color = SAGE if xw > 0.325 else (EMBER if xw < 0.305 else SLATE)
-        label = b.get("batter_label", "")
         pos = b.get("position", "")
-        meta_parts = []
-        if pos:
-            meta_parts.append(pos)
-        if label:
-            meta_parts.append(label)
+        label = b.get("batter_label", "")
+        meta_parts = [p for p in [pos, label] if p]
         meta_html = f' <span style="color:var(--tdd-slate);font-size:0.78rem">{esc(", ".join(meta_parts))}</span>' if meta_parts else ""
 
         # Platoon badge
         platoon_html = ""
         plan = b.get("plan")
         if plan and plan.get("platoon") == "favorable":
-            platoon_html = '<span style="color:var(--tdd-sage);font-size:0.65rem;border:1px solid var(--tdd-sage);border-radius:2px;padding:0 4px;margin-left:0.3rem">+</span>'
+            platoon_html = '<span class="platoon-badge fav" style="font-size:0.65rem;border:1px solid;border-radius:2px;padding:0 4px;margin-left:0.3rem">+</span>'
         elif plan and plan.get("platoon") == "unfavorable":
-            platoon_html = '<span style="color:var(--tdd-ember);font-size:0.65rem;border:1px solid var(--tdd-ember);border-radius:2px;padding:0 4px;margin-left:0.3rem">&minus;</span>'
+            platoon_html = '<span class="platoon-badge unfav" style="font-size:0.65rem;border:1px solid;border-radius:2px;padding:0 4px;margin-left:0.3rem">&minus;</span>'
 
-        # Optimization flag (official lineups only)
+        # Optimization flag
         opt_flag_html = ""
-        if is_official:
-            opt_rank = b.get("optimal_rank", i + 1)
-            slot = i + 1
+        if is_official and not is_bench:
+            opt_rank = b.get("optimal_rank", idx + 1)
+            slot = idx + 1
             if opt_rank <= 9 and slot <= 9 and abs(opt_rank - slot) >= 3:
-                # Significant misplacement
-                if opt_rank < slot:
-                    opt_flag_html = (
-                        f'<span style="color:var(--tdd-sage);font-size:0.55rem;'
-                        f'border:1px solid var(--tdd-sage);border-radius:2px;padding:0 4px;'
-                        f'margin-left:0.3rem" title="Our model ranks #{opt_rank}">#{opt_rank}</span>'
-                    )
-                else:
-                    opt_flag_html = (
-                        f'<span style="color:var(--tdd-ember);font-size:0.55rem;'
-                        f'border:1px solid var(--tdd-ember);border-radius:2px;padding:0 4px;'
-                        f'margin-left:0.3rem" title="Our model ranks #{opt_rank}">#{opt_rank}</span>'
-                    )
+                oflag_color = SAGE if opt_rank < slot else EMBER
+                opt_flag_html = (
+                    f'<span style="color:{oflag_color};font-size:0.55rem;'
+                    f'border:1px solid {oflag_color};border-radius:2px;padding:0 4px;'
+                    f'margin-left:0.3rem" title="Our model ranks #{opt_rank}">#{opt_rank}</span>'
+                )
 
         # Edge label
         edge = b.get("edge")
         if edge and edge.get("advantage") == "hitter":
-            edge_html = f'<span style="color:var(--tdd-sage);font-size:0.82rem;font-weight:600">Hitter</span>'
+            edge_html = f'<span style="color:{SAGE}">Hitter</span>'
         elif edge and edge.get("advantage") == "pitcher":
-            edge_html = f'<span style="color:var(--tdd-ember);font-size:0.82rem;font-weight:600">Pitcher</span>'
+            edge_html = f'<span style="color:{EMBER}">Pitcher</span>'
         else:
-            edge_html = f'<span style="color:var(--tdd-slate);font-size:0.82rem">Even</span>'
+            edge_html = f'<span style="color:{SLATE}">Even</span>'
 
-        # Hunt/avoid summary
+        # Approach summary (desktop only)
         approach_html = ""
-        if plan:
+        if plan and not is_bench:
             hunt_picks = [p["pitch_name"] for p in plan.get("pitch_plans", [])
                           if p.get("approach") == "hunt" and p.get("tier") == "primary"]
             avoid_picks = [p["pitch_name"] for p in plan.get("pitch_plans", [])
@@ -310,182 +355,100 @@ def _render_lineup_optimization_html(
             if avoid_picks:
                 parts.append(f'<span style="color:var(--tdd-ember)">Avoid {", ".join(avoid_picks[:1])}</span>')
             if parts:
-                approach_html = f'<span style="font-size:0.82rem">{" · ".join(parts)}</span>'
+                approach_html = " &middot; ".join(parts)
 
         # Bayesian projections
         bproj = b.get("projections", {})
+        _ci_s = "font-size:0.62rem;opacity:0.55"
+
+        def _proj_cell(val, lo, hi, fmt_fn, color_fn):
+            if not val:
+                return '<span class="sc">--</span>'
+            c = color_fn(val)
+            v_str = fmt_fn(val)
+            ci = ""
+            if lo and hi:
+                ci = f'<br><span class="ci" style="color:{c}">[{fmt_fn(lo)}-{fmt_fn(hi)}]</span>'
+            return f'<span class="sc"><span style="color:{c};font-weight:600;font-size:0.92rem">{v_str}</span>{ci}</span>'
+
         k_pct = bproj.get("projected_k_rate")
         bb_pct = bproj.get("projected_bb_rate")
         woba = bproj.get("projected_woba")
-        k_lo = bproj.get("projected_k_rate_2_5")
-        k_hi = bproj.get("projected_k_rate_97_5")
-        bb_lo = bproj.get("projected_bb_rate_2_5")
-        bb_hi = bproj.get("projected_bb_rate_97_5")
-        woba_lo = bproj.get("projected_woba_2_5")
-        woba_hi = bproj.get("projected_woba_97_5")
 
-        k_color = SAGE if k_pct and k_pct < 0.20 else (EMBER if k_pct and k_pct > 0.28 else SLATE)
-        bb_color = SAGE if bb_pct and bb_pct > 0.10 else (EMBER if bb_pct and bb_pct < 0.06 else SLATE)
-        woba_color = SAGE if woba and woba > 0.340 else (EMBER if woba and woba < 0.300 else SLATE)
+        k_cell = _proj_cell(
+            k_pct, bproj.get("projected_k_rate_2_5"), bproj.get("projected_k_rate_97_5"),
+            lambda v: f"{v*100:.0f}",
+            lambda v: SAGE if v < 0.20 else (EMBER if v > 0.28 else SLATE),
+        )
+        bb_cell = _proj_cell(
+            bb_pct, bproj.get("projected_bb_rate_2_5"), bproj.get("projected_bb_rate_97_5"),
+            lambda v: f"{v*100:.0f}",
+            lambda v: SAGE if v > 0.10 else (EMBER if v < 0.06 else SLATE),
+        )
+        woba_cell = _proj_cell(
+            woba, bproj.get("projected_woba_2_5"), bproj.get("projected_woba_97_5"),
+            lambda v: f".{int(v*1000):03d}",
+            lambda v: SAGE if v > 0.340 else (EMBER if v < 0.300 else SLATE),
+        )
 
-        _ci_style = "font-size:0.62rem;opacity:0.55;font-family:var(--tdd-font-mono)"
-
-        if k_pct:
-            k_ci = f'<br><span style="{_ci_style};color:{k_color}">[{k_lo*100:.0f}-{k_hi*100:.0f}]</span>' if k_lo and k_hi else ""
-            k_html = f'<span style="color:{k_color};font-family:var(--tdd-font-mono);font-size:0.92rem;font-weight:600">{k_pct*100:.0f}</span>{k_ci}'
-        else:
-            k_html = '<span style="color:var(--tdd-slate);font-size:0.85rem">--</span>'
-
-        if bb_pct:
-            bb_ci = f'<br><span style="{_ci_style};color:{bb_color}">[{bb_lo*100:.0f}-{bb_hi*100:.0f}]</span>' if bb_lo and bb_hi else ""
-            bb_html = f'<span style="color:{bb_color};font-family:var(--tdd-font-mono);font-size:0.92rem;font-weight:600">{bb_pct*100:.0f}</span>{bb_ci}'
-        else:
-            bb_html = '<span style="color:var(--tdd-slate);font-size:0.85rem">--</span>'
-
-        if woba:
-            woba_ci = f'<br><span style="{_ci_style};color:{woba_color}">[.{int(woba_lo*1000):03d}-.{int(woba_hi*1000):03d}]</span>' if woba_lo and woba_hi else ""
-            woba_html = f'<span style="color:{woba_color};font-family:var(--tdd-font-mono);font-size:0.92rem;font-weight:600">.{int(woba*1000):03d}</span>{woba_ci}'
-        else:
-            woba_html = '<span style="color:var(--tdd-slate);font-size:0.85rem">--</span>'
-
-        # Game sim stat cells (matchup-adjusted Monte Carlo projections)
+        # Game sim cells
         sim = b.get("sim_stats", {})
-        _sim_dash = '<span style="color:var(--tdd-slate);font-size:0.85rem">--</span>'
-        _cell = "flex:1;text-align:center;padding:0 0.3rem;line-height:1.2"
         sim_cells = ""
-        for _skey, _good_thresh, _bad_thresh, _good_is_high in [
-            ("H", 1.0, 0.8, True),
-            ("K", 0.8, 1.0, False),
-            ("TB", 1.5, 1.0, True),
-        ]:
-            _sv = sim.get(_skey)
-            if _sv and _sv.get("expected") is not None:
-                _exp = _sv["expected"]
-                _p1 = _sv.get("p_1plus")
-                if _good_is_high:
-                    _sc = SAGE if _exp >= _good_thresh else (EMBER if _exp < _bad_thresh else SLATE)
-                else:
-                    _sc = SAGE if _exp < _good_thresh else (EMBER if _exp >= _bad_thresh else SLATE)
-                _p1_str = f'<br><span style="font-size:0.62rem;opacity:0.6;color:{_sc}">{_p1*100:.0f}% 1+</span>' if _p1 is not None else ""
-                sim_cells += f'<span style="{_cell}"><span style="color:{_sc};font-family:var(--tdd-font-mono);font-size:0.92rem;font-weight:600">{_exp:.1f}</span>{_p1_str}</span>'
+        for skey, good_t, bad_t, high_good in [("H", 1.0, 0.8, True), ("K", 0.8, 1.0, False), ("TB", 1.5, 1.0, True)]:
+            sv = sim.get(skey)
+            if sv and sv.get("expected") is not None:
+                exp = sv["expected"]
+                p1 = sv.get("p_1plus")
+                sc = (SAGE if exp >= good_t else (EMBER if exp < bad_t else SLATE)) if high_good else (SAGE if exp < good_t else (EMBER if exp >= bad_t else SLATE))
+                p1_str = f'<br><span class="p1" style="color:{sc}">{p1*100:.0f}% 1+</span>' if p1 is not None else ""
+                sim_cells += f'<span class="sc"><span style="color:{sc};font-weight:600;font-size:0.92rem">{exp:.1f}</span>{p1_str}</span>'
             else:
-                sim_cells += f'<span style="{_cell}">{_sim_dash}</span>'
+                sim_cells += '<span class="sc">--</span>'
 
-        rows += (
-            '<div style="display:flex;align-items:center;padding:7px 0;'
-            'border-bottom:1px solid var(--tdd-dark-border-faint)">'
-            f'<span style="color:var(--tdd-gold);min-width:2rem;text-align:right;'
-            f'font-family:var(--tdd-font-heading);font-weight:700;font-size:1.15rem">{i+1}</span>'
-            f'<span style="padding:0 0.5rem">{headshot_html(b["batter_id"], size=36)}</span>'
-            f'<span style="color:var(--tdd-cream);width:14rem;min-width:10rem;font-family:var(--tdd-font-heading);'
-            f'font-weight:700;font-size:1.0rem">{esc(b["batter_name"])}{meta_html}{platoon_html}{opt_flag_html}</span>'
-            f'<span style="{_cell}">{k_html}</span>'
-            f'<span style="{_cell}">{bb_html}</span>'
-            f'<span style="{_cell}">{woba_html}</span>'
+        order_str = str(idx + 1) if not is_bench else ""
+        row_cls = "gp-lu-row bench" if is_bench else "gp-lu-row"
+        hs_size = 30 if is_bench else 36
+
+        return (
+            f'<div class="{row_cls}">'
+            f'<span class="order">{order_str}</span>'
+            f'<span class="hs">{headshot_html(b["batter_id"], size=hs_size)}</span>'
+            f'<span class="who">{esc(b["batter_name"])}{meta_html}{platoon_html}{opt_flag_html}</span>'
+            f'{k_cell}{bb_cell}{woba_cell}'
             f'{sim_cells}'
-            f'<span style="{_cell}">{edge_html}</span>'
-            f'<span style="flex:1.6;text-align:left;padding:0 0.3rem">{approach_html}</span>'
-            f'<span style="{_cell};color:{color};font-family:var(--tdd-font-mono);'
-            f'font-weight:700;font-size:1.1rem">.{int(xw*1000):03d}</span>'
+            f'<span class="edge-col">{edge_html}</span>'
+            f'<span class="approach-col">{approach_html}</span>'
+            f'<span class="xw-col" style="color:{color}">.{int(xw*1000):03d}</span>'
             '</div>'
         )
 
-    # Bench players
+    for i, b in enumerate(optimal[:n]):
+        rows += _render_lu_row(b, i)
+
+    # Bench
     bench_html = ""
     if bench:
-        _cell = "flex:1;text-align:center;padding:0 0.3rem;line-height:1.2"
         bench_rows = ""
         for b in bench:
-            xw = b["matchup_xwoba"]
-            color = SAGE if xw > 0.325 else (EMBER if xw < 0.305 else SLATE)
-            pos = b.get("position", "")
-            label = b.get("batter_label", "")
-            meta_parts = []
-            if pos:
-                meta_parts.append(pos)
-            if label:
-                meta_parts.append(label)
-            meta_html = f' <span style="color:var(--tdd-slate);font-size:0.7rem">{esc(", ".join(meta_parts))}</span>' if meta_parts else ""
-
-            # Bayesian projections
-            bproj = b.get("projections", {})
-            k_pct = bproj.get("projected_k_rate")
-            bb_pct = bproj.get("projected_bb_rate")
-            woba = bproj.get("projected_woba")
-            k_html = f'<span style="color:var(--tdd-slate);font-family:var(--tdd-font-mono);font-size:0.82rem">{k_pct*100:.0f}</span>' if k_pct else '--'
-            bb_html = f'<span style="color:var(--tdd-slate);font-family:var(--tdd-font-mono);font-size:0.82rem">{bb_pct*100:.0f}</span>' if bb_pct else '--'
-            woba_html = f'<span style="color:var(--tdd-slate);font-family:var(--tdd-font-mono);font-size:0.82rem">.{int(woba*1000):03d}</span>' if woba else '--'
-
-            # Sim stats
-            sim = b.get("sim_stats", {})
-            _dash = '<span style="color:var(--tdd-slate);font-size:0.8rem">--</span>'
-            sim_cells = ""
-            for sk in ("H", "K", "TB"):
-                sv = sim.get(sk)
-                if sv and sv.get("expected") is not None:
-                    sim_cells += f'<span style="{_cell};font-family:var(--tdd-font-mono);font-size:0.82rem;color:var(--tdd-slate)">{sv["expected"]:.1f}</span>'
-                else:
-                    sim_cells += f'<span style="{_cell}">{_dash}</span>'
-
-            # Edge
-            edge = b.get("edge")
-            if edge and edge.get("advantage") == "hitter":
-                edge_html = '<span style="color:var(--tdd-sage);font-size:0.75rem">Hitter</span>'
-            elif edge and edge.get("advantage") == "pitcher":
-                edge_html = '<span style="color:var(--tdd-ember);font-size:0.75rem">Pitcher</span>'
-            else:
-                edge_html = '<span style="color:var(--tdd-slate);font-size:0.75rem">Even</span>'
-
-            bench_rows += (
-                '<div style="display:flex;align-items:center;padding:5px 0;'
-                'border-bottom:1px solid var(--tdd-dark-border-faint);opacity:0.7">'
-                f'<span style="min-width:2rem"></span>'
-                f'<span style="padding:0 0.5rem">{headshot_html(b["batter_id"], size=30)}</span>'
-                f'<span style="color:var(--tdd-cream);width:14rem;min-width:10rem;font-family:var(--tdd-font-heading);'
-                f'font-weight:600;font-size:0.88rem">{esc(b["batter_name"])}{meta_html}</span>'
-                f'<span style="{_cell}">{k_html}</span>'
-                f'<span style="{_cell}">{bb_html}</span>'
-                f'<span style="{_cell}">{woba_html}</span>'
-                f'{sim_cells}'
-                f'<span style="{_cell}">{edge_html}</span>'
-                f'<span style="flex:1.6"></span>'
-                f'<span style="{_cell};color:{color};font-family:var(--tdd-font-mono);'
-                f'font-weight:700;font-size:0.95rem">.{int(xw*1000):03d}</span>'
-                '</div>'
-            )
-
+            bench_rows += _render_lu_row(b, 0, is_bench=True)
         bench_html = (
-            '<div style="border-top:1px dashed var(--tdd-slate);margin-top:6px;'
-            'padding-top:4px">'
-            '<div style="color:var(--tdd-slate);font-size:0.55rem;letter-spacing:1px;'
-            'margin-bottom:3px">BENCH</div>'
-            f'{bench_rows}'
+            '<div class="gp-bench-divider">'
+            '<span>Bench</span><span class="line"></span>'
             '</div>'
+            f'{bench_rows}'
         )
 
-    if is_official:
-        title = "Posted Lineup"
-        subtitle = (
-            f'{esc(opp_abbr)} vs {esc(pitcher_name)} (official). '
-            f'Bayesian season projections feed the game simulator. '
-            f'Matchup xwOBA = batted ball quality vs this pitcher (lg avg .315).'
-        )
-    else:
-        title = "Recommended Batting Order"
-        subtitle = (
-            f'{esc(opp_abbr)} vs {esc(pitcher_name)} -- ranked by matchup xwOBA. '
-            f'Bayesian season projections feed the game simulator. '
-            f'Matchup xwOBA = batted ball quality vs this pitcher (lg avg .315).'
-        )
+    title = "Posted Lineup" if is_official else "Recommended Batting Order"
+    subtitle = (
+        f'{esc(opp_abbr)} vs {esc(pitcher_name)} '
+        f'{"(official)" if is_official else "-- ranked by matchup xwOBA"}. '
+        f'Matchup xwOBA = batted ball quality vs this pitcher (lg avg .315).'
+    )
 
     return (
-        '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);'
-        'border-radius:6px;padding:1rem 1.2rem;margin-bottom:1rem">'
-        '<div style="color:var(--tdd-gold);font-size:0.85rem;font-weight:700;'
-        f'letter-spacing:2px;text-transform:uppercase;margin-bottom:4px">'
-        f'{title}</div>'
-        f'<div style="color:var(--tdd-slate);font-size:0.8rem;margin-bottom:0.6rem">'
-        f'{subtitle}</div>'
+        '<div class="gp-card">'
+        f'<div class="gp-card-eyebrow">{title}</div>'
+        f'<div class="gp-card-sub">{subtitle}</div>'
         f'{rows}'
         f'{bench_html}'
         '</div>'
@@ -564,61 +527,61 @@ def _compute_bullpen_matrix(
 _APPEAR_THRESHOLD = 0.30  # ~49 projected games = likely to appear
 
 
-def _render_bullpen_row(rp: dict, batters: list[dict], opacity: float = 1.0) -> str:
+def _render_bullpen_row(rp: dict, batters: list[dict], is_depth: bool = False) -> str:
     """Render one reliever row in the bullpen matrix."""
     LG = 0.315
     hand = rp.get("pitch_hand", "")
-    hand_str = f' {"L" if hand == "L" else "R"}HP' if hand else ""
+    hand_str = f'{"L" if hand == "L" else "R"}HP' if hand else ""
     role = rp.get("role", "")
-    role_html = f' <span style="color:var(--tdd-gold);font-size:0.5rem;font-weight:700">{esc(role)}</span>' if role else ""
     appear = rp.get("appear_pct", 0)
-    appear_html = f' <span style="color:var(--tdd-slate);font-size:0.45rem">{appear*100:.0f}%</span>' if appear > 0 else ""
+    depth_cls = " depth" if is_depth else ""
 
     cells = (
-        f'<td style="text-align:left;padding:3px 6px;font-size:0.65rem;'
-        f'color:var(--tdd-cream);white-space:nowrap;opacity:{opacity}">'
-        f'{esc(rp["pitcher_name"])}'
-        f'<span style="color:var(--tdd-slate);font-size:0.5rem">{hand_str}</span>'
-        f'{role_html}{appear_html}</td>'
+        f'<td class="rp-col">'
+        f'<span class="nm">{esc(rp["pitcher_name"])}</span>'
+        f'<span class="rp-meta">'
+        f'<span>{hand_str}</span>'
     )
+    if role:
+        cells += f'<span class="role">{esc(role)}</span>'
+    if appear > 0:
+        cells += f'<span>{appear*100:.0f}%</span>'
+    cells += '</span></td>'
 
     for b in batters:
         bid = b["batter_id"]
         xw = rp["matchups"].get(bid)
         if xw is None:
-            cells += f'<td style="text-align:center;padding:3px 2px;font-size:0.6rem;color:var(--tdd-slate);opacity:{opacity}">--</td>'
+            cells += '<td>--</td>'
         else:
             if xw <= LG - 0.030:
-                bg = "rgba(107,163,142,0.25)"
-                fg = SAGE
+                cell_cls = "cell-good-deep"
             elif xw <= LG - 0.010:
-                bg = "rgba(107,163,142,0.12)"
-                fg = SAGE
+                cell_cls = "cell-good-light"
             elif xw >= LG + 0.030:
-                bg = "rgba(212,86,42,0.25)"
-                fg = EMBER
+                cell_cls = "cell-bad-deep"
             elif xw >= LG + 0.010:
-                bg = "rgba(212,86,42,0.12)"
-                fg = EMBER
+                cell_cls = "cell-bad-light"
             else:
-                bg = "transparent"
-                fg = SLATE
+                cell_cls = ""
 
             cells += (
-                f'<td style="text-align:center;padding:3px 2px;font-size:0.6rem;'
-                f'font-family:var(--tdd-font-mono);color:{fg};background:{bg};opacity:{opacity}">'
+                f'<td class="{cell_cls}" style="font-family:var(--tdd-font-body)">'
                 f'.{int(xw*1000):03d}</td>'
             )
 
     avg = rp["avg_xwoba"]
-    avg_color = SAGE if avg < LG - 0.010 else (EMBER if avg > LG + 0.010 else SLATE)
+    avg_cls = ""
+    if avg < LG - 0.010:
+        avg_cls = "cell-good-light"
+    elif avg > LG + 0.010:
+        avg_cls = "cell-bad-light"
     cells += (
-        f'<td style="text-align:center;padding:3px 4px;font-size:0.62rem;'
-        f'font-family:var(--tdd-font-mono);font-weight:700;color:{avg_color};opacity:{opacity}">'
+        f'<td class="avg {avg_cls}" style="font-family:var(--tdd-font-body)">'
         f'.{int(avg*1000):03d}</td>'
     )
 
-    return f'<tr style="border-bottom:1px solid var(--tdd-dark-border-faint)">{cells}</tr>'
+    return f'<tr class="gp-bp-row{depth_cls}">{cells}</tr>'
 
 
 def _render_bullpen_matrix_html(
@@ -629,19 +592,15 @@ def _render_bullpen_matrix_html(
     if not matrix or not batters:
         return ""
 
-    # Header row
-    header = '<th style="text-align:left;padding:3px 6px;font-size:0.6rem;color:var(--tdd-gold)">Reliever</th>'
-    for b in batters:
+    # Header row with sticky first column
+    header = '<th class="rp-col">Reliever</th>'
+    for i, b in enumerate(batters):
         parts = b["batter_name"].split()
         short = parts[-1] if len(parts) > 1 else parts[0]
-        if len(short) > 8:
-            short = short[:7] + "."
-        header += (
-            f'<th style="text-align:center;padding:3px 2px;font-size:0.52rem;'
-            f'color:var(--tdd-slate);min-width:32px;max-width:42px;'
-            f'overflow:hidden;white-space:nowrap">{esc(short)}</th>'
-        )
-    header += '<th style="text-align:center;padding:3px 4px;font-size:0.55rem;color:var(--tdd-gold)">AVG</th>'
+        if len(short) > 6:
+            short = short[:6] + "."
+        header += f'<th title="{esc_attr(b["batter_name"])}">{i+1}.{esc(short)}</th>'
+    header += '<th style="color:var(--tdd-gold)">AVG</th>'
 
     # Split probable vs unlikely
     probable = [rp for rp in matrix if rp.get("appear_pct", 0) >= _APPEAR_THRESHOLD]
@@ -649,35 +608,37 @@ def _render_bullpen_matrix_html(
 
     rows = ""
     for rp in probable:
-        rows += _render_bullpen_row(rp, batters, opacity=1.0)
+        rows += _render_bullpen_row(rp, batters)
 
     if unlikely:
         n_cols = len(batters) + 2
         rows += (
-            f'<tr><td colspan="{n_cols}" style="padding:4px 6px;border-top:1px dashed var(--tdd-slate);'
-            f'border-bottom:none">'
-            f'<span style="color:var(--tdd-slate);font-size:0.5rem;letter-spacing:1px;opacity:0.5">'
-            f'LESS LIKELY</span></td></tr>'
+            f'<tr class="gp-bp-divider"><td colspan="{n_cols}">Less likely</td></tr>'
         )
         for rp in unlikely:
-            rows += _render_bullpen_row(rp, batters, opacity=0.6)
+            rows += _render_bullpen_row(rp, batters, is_depth=True)
 
     probable_label = f"{len(probable)} probable" if probable else ""
     unlikely_label = f", {len(unlikely)} depth" if unlikely else ""
 
     return (
-        '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);'
-        'border-radius:6px;padding:0.8rem;margin-bottom:1rem;overflow-x:auto">'
-        '<div style="color:var(--tdd-gold);font-size:0.6rem;font-weight:700;'
-        'letter-spacing:2px;text-transform:uppercase;margin-bottom:6px">'
-        'Bullpen Matchup Matrix</div>'
-        '<div style="color:var(--tdd-slate);font-size:0.55rem;margin-bottom:6px">'
+        '<div class="gp-card" style="padding:0.8rem">'
+        '<div class="gp-card-eyebrow">Bullpen Matchup Matrix</div>'
+        f'<div class="gp-card-sub">'
         f'Matchup xwOBA per reliever vs each batter ({probable_label}{unlikely_label}). '
-        'Green = pitcher advantage, red = hitter advantage.</div>'
-        '<table style="width:100%;border-collapse:collapse">'
-        f'<thead><tr style="border-bottom:1px solid var(--tdd-dark-border)">{header}</tr></thead>'
+        f'Green = pitcher advantage, red = hitter advantage.</div>'
+        '<div class="gp-bp-wrap">'
+        '<table class="gp-bp-table">'
+        f'<thead><tr>{header}</tr></thead>'
         f'<tbody>{rows}</tbody>'
         '</table>'
+        '</div>'
+        '<div class="gp-bp-legend">'
+        '<span><span class="sw" style="background:rgba(107,163,142,0.25)"></span>Strong pitcher edge</span>'
+        '<span><span class="sw" style="background:rgba(107,163,142,0.12)"></span>Slight</span>'
+        '<span><span class="sw" style="background:rgba(212,86,42,0.12)"></span>Slight hitter</span>'
+        '<span><span class="sw" style="background:rgba(212,86,42,0.25)"></span>Strong hitter</span>'
+        '</div>'
         '</div>'
     )
 
@@ -762,42 +723,30 @@ def _render_pinch_hit_html(opps: list[dict], pitcher_name: str) -> str:
         b_color = SAGE if b_xw > 0.325 else (EMBER if b_xw < 0.305 else SLATE)
 
         rows += (
-            '<div style="display:flex;align-items:center;gap:6px;padding:5px 0;'
-            'border-bottom:1px solid var(--tdd-dark-border-faint);font-size:0.72rem">'
-            # Bench player (gains)
+            '<div class="gp-pinch-row">'
             f'{headshot_html(o["bench_id"], size=24)}'
-            f'<div style="flex:1;min-width:0">'
+            f'<div class="who">'
             f'<span style="color:var(--tdd-cream);font-weight:600">{esc(o["bench_name"])}</span>'
             f' <span style="color:var(--tdd-slate);font-size:0.55rem">{esc(o["bench_pos"])}</span>'
-            f'<span style="color:{b_color};font-family:var(--tdd-font-mono);'
+            f'<span style="color:{b_color};font-family:var(--tdd-font-body);'
             f'font-size:0.7rem;margin-left:0.4rem">.{int(b_xw*1000):03d}</span>'
             '</div>'
-            # Arrow
-            '<div style="color:var(--tdd-slate);font-size:0.6rem;padding:0 4px">'
-            'for'
-            '</div>'
-            # Starter (replaced)
+            '<div style="color:var(--tdd-slate);font-size:0.6rem;padding:0 4px">for</div>'
             f'{headshot_html(o["starter_id"], size=24)}'
-            f'<div style="flex:1;min-width:0">'
+            f'<div class="who">'
             f'<span style="color:var(--tdd-cream);opacity:0.7">{esc(o["starter_name"])}</span>'
             f' <span style="color:var(--tdd-slate);font-size:0.55rem">#{o["starter_order"]}</span>'
-            f'<span style="color:{s_color};font-family:var(--tdd-font-mono);'
+            f'<span style="color:{s_color};font-family:var(--tdd-font-body);'
             f'font-size:0.7rem;margin-left:0.4rem">.{int(s_xw*1000):03d}</span>'
             '</div>'
-            # Gain badge
-            f'<span style="color:var(--tdd-sage);font-family:var(--tdd-font-mono);'
-            f'font-weight:700;font-size:0.72rem;min-width:3rem;text-align:right">'
-            f'+{gain_pts:.0f} pts</span>'
+            f'<span class="gain">+{gain_pts:.0f} pts</span>'
             '</div>'
         )
 
     return (
-        '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);'
-        'border-radius:6px;padding:0.8rem 1rem;margin-bottom:1rem">'
-        '<div style="color:var(--tdd-gold);font-size:0.6rem;font-weight:700;'
-        'letter-spacing:2px;text-transform:uppercase;margin-bottom:4px">'
-        'Pinch-Hit Opportunities</div>'
-        f'<div style="color:var(--tdd-slate);font-size:0.55rem;margin-bottom:6px">'
+        '<div class="gp-card">'
+        '<div class="gp-card-eyebrow">Pinch-Hit Opportunities</div>'
+        f'<div class="gp-card-sub">'
         f'Bench bats with better matchup xwOBA vs {esc(pitcher_name)} than the starter they replace.</div>'
         f'{rows}'
         '</div>'
@@ -863,18 +812,15 @@ def _build_putaway_html(
     hand_label = "LHB" if stand == "L" else "RHB"
 
     return (
-        '<div style="margin-top:6px;padding:6px 8px;'
-        'border:1px solid var(--tdd-dark-border);border-radius:4px;'
-        'background:rgba(200,169,110,0.06)">'
-        '<div style="display:flex;justify-content:space-between;align-items:center">'
-        f'<span style="color:var(--tdd-gold);font-size:0.58rem;font-weight:700;'
-        f'letter-spacing:1px">2-STRIKE PUTAWAY vs {hand_label}</span>'
+        '<div class="gp-putaway">'
+        '<div class="head">'
+        f'<span class="lbl">2-STRIKE PUTAWAY vs {hand_label}</span>'
         '</div>'
-        f'<div style="color:var(--tdd-cream);font-size:0.7rem;margin-top:2px">'
+        f'<div class="body">'
         f'{usage_pct*100:.0f}% {pt_name.lower()}{whiff_str}'
         f'{secondary}'
         f'</div>'
-        f'<div style="color:var(--tdd-slate);font-size:0.6rem;margin-top:1px">'
+        f'<div class="loc">'
         f'{best_loc_pct*100:.0f}% located {loc_label}'
         f'</div>'
         '</div>'
@@ -903,31 +849,23 @@ def _render_pitch_plan_row(plan: dict, batter_label: str = "") -> str:
     bar_pct = min(xw / 0.500 * 100, 100)
 
     return (
-        f'<div class="gp-pitch-row" style="border-left:3px solid {style["color"]};'
-        f'background:{style["bg"]};padding:0.5rem 0.7rem;margin-bottom:4px;border-radius:0 4px 4px 0">'
-        # Top line: pitch name + approach badge + xwOBA
-        '<div style="display:flex;justify-content:space-between;align-items:center">'
-        '<div style="display:flex;align-items:center;gap:0.5rem">'
-        f'<span style="color:var(--tdd-cream);font-family:var(--tdd-font-heading);'
-        f'font-weight:700;font-size:0.95rem">{esc(plan["pitch_name"])}</span>'
-        f'<span style="color:var(--tdd-slate);font-size:0.78rem">{usage_label}</span>'
-        f'<span style="color:var(--tdd-slate);font-size:0.78rem">{velo_str} mph</span>'
+        f'<div class="gp-pitch" style="border-left:3px solid {style["color"]};'
+        f'background:{style["bg"]}">'
+        '<div class="gp-pitch-top">'
+        '<div class="left">'
+        f'<span class="pt-name">{esc(plan["pitch_name"])}</span>'
+        f'<span class="usage">{usage_label}</span>'
+        f'<span class="velo">{velo_str} mph</span>'
         '</div>'
-        '<div style="display:flex;align-items:center;gap:0.5rem">'
-        f'<span style="color:{style["color"]};font-size:0.72rem;font-weight:700;'
-        f'letter-spacing:1px">{style["label"]}</span>'
-        f'<span style="color:{style["color"]};font-family:var(--tdd-font-mono);'
-        f'font-weight:700;font-size:0.95rem">.{int(xw*1000):03d}</span>'
+        '<div class="right">'
+        f'<span class="app-label" style="color:{style["color"]}">{style["label"]}</span>'
+        f'<span class="xw" style="color:{style["color"]}">.{int(xw*1000):03d}</span>'
         '</div>'
         '</div>'
-        # Recommendation text
-        f'<div style="color:var(--tdd-cream);font-size:0.85rem;margin-top:3px;'
-        f'opacity:0.85">{esc(plan["recommendation"])}</div>'
-        # Stats row
-        '<div style="display:flex;gap:1rem;margin-top:4px">'
-        f'<span style="color:var(--tdd-slate);font-size:0.72rem">Whiff {whiff*100:.0f}%</span>'
-        f'<span style="color:var(--tdd-slate);font-size:0.72rem">xwOBA con '
-        f'.{int(plan["matchup_xwoba_contact"]*1000):03d}</span>'
+        f'<div class="note">{esc(plan["recommendation"])}</div>'
+        '<div class="micro">'
+        f'<span>Whiff {whiff*100:.0f}%</span>'
+        f'<span>xwOBA con .{int(plan["matchup_xwoba_contact"]*1000):03d}</span>'
         '</div>'
         '</div>'
     )
@@ -1105,34 +1043,24 @@ def _render_batter_attack_card(
         if not shown_separator and p.get("tier") in ("secondary", "rare"):
             shown_separator = True
             pitch_rows += (
-                '<div style="border-top:1px dashed var(--tdd-slate);margin:6px 0;'
-                'opacity:0.3"></div>'
-                '<div style="color:var(--tdd-slate);font-size:0.55rem;'
-                'letter-spacing:1px;margin-bottom:4px;opacity:0.5">'
-                'SECONDARY</div>'
+                '<div class="gp-pitch-sep"></div>'
+                '<div class="gp-pitch-sep-label">SECONDARY</div>'
             )
         pitch_rows += _render_pitch_plan_row(p, batter_label=_bl)
 
-    # Card border: gold accent for comp-based cards
-    border_style = (
-        'border:1px solid var(--tdd-gold);border-left:3px solid var(--tdd-gold)'
-        if comp_info
-        else 'border:1px solid var(--tdd-dark-border)'
-    )
+    # Card class: gold accent for comp-based cards
+    card_cls = "gp-attack comp-border" if comp_info else "gp-attack"
 
     # Body content: pitch plans + putaway
     body_content = f'{pitch_rows}{putaway_html}'
 
     if zone_chart_b64:
-        # Two-column layout: plans on left, zone chart on right
         body_html = (
-            '<div style="display:flex;gap:0.8rem;margin-top:0.2rem">'
-            f'<div style="flex:2;min-width:0">{body_content}</div>'
-            f'<div style="flex:0 0 280px;padding-top:0.3rem">'
-            f'<div style="color:var(--tdd-slate);font-size:0.65rem;text-align:center;'
-            f'margin-bottom:2px">Hunt pitch location</div>'
-            f'<img src="{zone_chart_b64}" style="width:100%;border-radius:4px;'
-            f'" />'
+            '<div class="gp-attack-body-split">'
+            f'<div class="plans">{body_content}</div>'
+            f'<div class="gp-zone-area">'
+            f'<div class="caption">Hunt pitch location</div>'
+            f'<img src="{zone_chart_b64}" />'
             f'</div>'
             '</div>'
         )
@@ -1140,35 +1068,28 @@ def _render_batter_attack_card(
         body_html = body_content
 
     return (
-        f'<div style="background:var(--tdd-dark-card);{border_style};'
-        f'border-radius:6px;padding:1rem;margin-bottom:0.8rem">'
-        # Header: order + headshot + name + edge badge
-        '<div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.6rem">'
-        f'<span style="color:var(--tdd-gold);font-family:var(--tdd-font-heading);'
-        f'font-weight:700;font-size:1.4rem;min-width:1.6rem">{batting_order}</span>'
+        f'<div class="{card_cls}">'
+        '<div class="gp-attack-head">'
+        f'<span class="order">{batting_order}</span>'
         f'{headshot_html(batter_id, size=48)}'
-        '<div style="flex:1">'
-        f'<div style="display:flex;align-items:center;flex-wrap:wrap">'
-        f'<span style="color:var(--tdd-cream);font-family:var(--tdd-font-heading);'
-        f'font-weight:700;font-size:1.15rem">{esc(batter_name)}</span>'
-        f'<span style="color:var(--tdd-slate);font-size:0.8rem;margin-left:0.4rem">{esc(team_abbr)}</span>'
+        '<div class="who">'
+        f'<div class="nm">'
+        f'<span class="name">{esc(batter_name)}</span>'
+        f'<span class="team">{esc(team_abbr)}</span>'
         f'{hand_html}'
         f'{platoon_html}'
         f'{milb_badge_html}'
         '</div>'
-        f'<div style="color:var(--tdd-slate);font-size:0.78rem;margin-top:2px">'
-        f'{esc(plan["summary"])}</div>'
+        f'<div class="summary">{esc(plan["summary"])}</div>'
         f'{comp_subtitle_html}'
         f'{proj_row_html}'
         f'{sim_row_html}'
         '</div>'
-        f'<div style="text-align:right">'
-        f'<div style="color:{edge_color};font-family:var(--tdd-font-mono);'
-        f'font-weight:700;font-size:1.2rem">.{int(xw*1000):03d}</div>'
-        f'<div style="color:{edge_color};font-size:0.65rem;letter-spacing:0.5px">{edge_label}</div>'
+        f'<div class="edge-stack">'
+        f'<div class="xw" style="color:{edge_color}">.{int(xw*1000):03d}</div>'
+        f'<div class="lab" style="color:{edge_color}">{edge_label}</div>'
         '</div>'
         '</div>'
-        # Body (with or without zone chart)
         f'{body_html}'
         '</div>'
     )
@@ -1180,33 +1101,36 @@ def _render_pitcher_overview(
     form: dict | None,
     walk_strat: dict | None,
     zone_b64: str | None,
+    arsenal_html: str = "",
 ) -> str:
     """Render the opposing starter overview card with form + zone chart."""
     hand_label = f"{'LHP' if pitch_hand == 'L' else 'RHP'}" if pitch_hand else ""
+    trend_html = _get_trend_badge(form)
 
-    # Form badge
+    # Form stat grid (inspired by mobile design)
     form_html = ""
     if form:
         era_color = SAGE if form["era"] < 3.50 else (EMBER if form["era"] > 4.50 else SLATE)
         form_html = (
-            f'<div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:0.5rem;'
-            f'font-size:0.9rem;font-family:var(--tdd-font-mono)">'
-            f'<span style="color:var(--tdd-slate)">Last {form["n_starts"]} starts:</span>'
-            f'<span style="color:var(--tdd-cream);font-weight:600">{form["avg_ip"]} IP</span>'
-            f'<span style="color:var(--tdd-cream);font-weight:600">{form["k_per_9"]} K/9</span>'
-            f'<span style="color:var(--tdd-cream);font-weight:600">{form["bb_per_9"]} BB/9</span>'
-            f'<span style="color:{era_color};font-weight:600">{form["era"]:.2f} ERA (2026)</span>'
-            f'<span style="color:var(--tdd-slate)">{int(form["avg_pitches"])} pitch avg</span>'
-            f'</div>'
+            '<div class="gp-pov-form">'
+            f'<div class="stat"><div class="v" style="color:{era_color}">{form["era"]:.2f}</div>'
+            f'<div class="k">ERA L{form["n_starts"]}</div></div>'
+            f'<div class="stat"><div class="v">{form["k_per_9"]}</div>'
+            f'<div class="k">K/9</div></div>'
+            f'<div class="stat"><div class="v">{form["bb_per_9"]}</div>'
+            f'<div class="k">BB/9</div></div>'
+            f'<div class="stat"><div class="v">{form["avg_ip"]}</div>'
+            f'<div class="k">IP/Start</div></div>'
+            f'<div class="stat"><div class="v">{int(form["avg_pitches"])}</div>'
+            f'<div class="k">Pitch Avg</div></div>'
+            '</div>'
         )
 
     # Walk tendency callout
     walk_html = ""
     if walk_strat:
         walk_html = (
-            f'<div style="background:rgba(200,169,110,0.06);border:1px solid rgba(200,169,110,0.25);'
-            f'border-radius:4px;padding:0.4rem 0.6rem;margin-top:0.5rem;'
-            f'font-size:0.85rem;color:var(--tdd-gold)">'
+            f'<div class="gp-pov-warn">'
             f'&#9888; {esc(walk_strat["note"])}'
             f'</div>'
         )
@@ -1217,27 +1141,25 @@ def _render_pitcher_overview(
         zone_html = (
             f'<div style="margin-top:0.8rem">'
             f'<div style="color:var(--tdd-slate);font-size:0.78rem;margin-bottom:0.3rem">'
-            f'Pitch location density — where he throws each pitch type (darker = more frequent)</div>'
-            f'<img src="{zone_b64}" style="width:100%;border-radius:4px;'
-            f'" />'
+            f'Pitch location density -- where he throws each pitch type (darker = more frequent)</div>'
+            f'<img src="{zone_b64}" style="width:100%;border-radius:4px" />'
             f'</div>'
         )
 
     return (
-        f'<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);'
-        f'border-radius:6px;padding:1rem;margin-bottom:1rem">'
-        f'<div style="display:flex;align-items:center;gap:0.6rem">'
-        f'<div style="flex:1">'
-        f'<div style="color:var(--tdd-gold);font-family:var(--tdd-font-heading);'
-        f'font-weight:700;font-size:0.75rem;letter-spacing:2px;text-transform:uppercase;'
-        f'margin-bottom:0.3rem">OPPOSING STARTER</div>'
-        f'<span style="color:var(--tdd-cream);font-family:var(--tdd-font-heading);'
-        f'font-weight:700;font-size:1.5rem">{esc(pitcher_name)}</span>'
-        f'<span style="color:var(--tdd-slate);font-size:0.9rem;margin-left:0.5rem">'
-        f'{hand_label}</span>'
+        f'<div class="gp-card">'
+        f'<div class="gp-card-eyebrow">Opposing Starter</div>'
+        f'<div class="gp-pov-head">'
+        f'<div style="flex:1;min-width:0">'
+        f'<span class="gp-pov-name">{esc(pitcher_name)}</span>'
+        f'<div class="gp-pov-hand">'
+        f'<span>{hand_label}</span>'
+        f'{trend_html}'
+        f'</div>'
         f'</div>'
         f'</div>'
         f'{form_html}'
+        f'{arsenal_html}'
         f'{walk_html}'
         f'{zone_html}'
         f'</div>'
@@ -1520,9 +1442,11 @@ def page_game_prep() -> None:
                 unsafe_allow_html=True,
             )
 
-            # Pitcher overview with form + zone chart
+            # Pitcher overview with form + zone chart + arsenal bar
+            arsenal_bar_html = _render_arsenal_bar(arsenal_df, pid)
             overview_html = _render_pitcher_overview(
                 pitcher_name, p_hand, form, walk_strat, zone_overview_b64,
+                arsenal_html=arsenal_bar_html,
             )
             st.markdown(overview_html, unsafe_allow_html=True)
 
@@ -1541,14 +1465,10 @@ def page_game_prep() -> None:
                             f'<span style="opacity:0.5">[{r["p10"]*100:.0f}-{r["p90"]*100:.0f}]</span>'
                         )
                 st.markdown(
-                    '<div style="background:rgba(200,169,110,0.08);border:1px solid var(--tdd-gold);'
-                    'border-radius:4px;padding:0.5rem 0.7rem;margin-bottom:0.8rem;font-size:0.65rem">'
-                    '<span style="color:var(--tdd-gold);font-weight:700;letter-spacing:0.5px">'
-                    'MiLB COMP ARSENAL</span>'
-                    f'<span style="color:var(--tdd-slate);margin-left:0.5rem">'
-                    f'Based on: {", ".join(comp_parts)}</span>'
-                    + (f'<div style="color:var(--tdd-cream);margin-top:3px">'
-                       f'{" &nbsp; ".join(rate_parts)}</div>' if rate_parts else '')
+                    '<div class="gp-milb-banner">'
+                    '<span class="label">MiLB COMP ARSENAL</span>'
+                    f'<span class="comps">Based on: {", ".join(comp_parts)}</span>'
+                    + (f'<div class="rates">{" &nbsp; ".join(rate_parts)}</div>' if rate_parts else '')
                     + '</div>',
                     unsafe_allow_html=True,
                 )
@@ -1776,23 +1696,20 @@ def page_game_prep() -> None:
                     if ph_html:
                         st.markdown(ph_html, unsafe_allow_html=True)
 
-            # --- Attack plan cards (starters only) ---
+            # --- Attack plan cards (starters only, carousel on mobile) ---
+            all_attack_cards: list[str] = []
             for i, b in enumerate(starters):
                 bid = b["batter_id"]
                 order = b["current_order"]
                 if b["plan"] is None:
-                    st.markdown(
-                        f'<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);'
-                        f'border-radius:6px;padding:0.8rem 1rem;margin-bottom:0.8rem;'
-                        f'display:flex;align-items:center;gap:0.6rem">'
-                        f'<span style="color:var(--tdd-gold);font-family:var(--tdd-font-heading);'
-                        f'font-weight:700;font-size:1.1rem;min-width:1.4rem">{order}</span>'
+                    all_attack_cards.append(
+                        f'<div class="gp-attack" style="display:flex;align-items:center;gap:0.6rem;padding:0.8rem 1rem">'
+                        f'<span class="gp-attack-head order" style="font-size:1.1rem;min-width:1.4rem">{order}</span>'
                         f'{headshot_html(bid, size=40)}'
                         f'<span style="color:var(--tdd-cream);font-family:var(--tdd-font-heading);'
                         f'font-weight:700;font-size:0.95rem">{esc(b["batter_name"])}</span>'
                         f'<span style="color:var(--tdd-slate);font-size:0.7rem">No matchup data</span>'
-                        f'</div>',
-                        unsafe_allow_html=True,
+                        f'</div>'
                     )
                 else:
                     # Zone chart for top 6 batters
@@ -1800,7 +1717,6 @@ def page_game_prep() -> None:
                     if i < 6 and not location_df.empty and b.get("batter_hand"):
                         p_loc = location_df[location_df["pitcher_id"] == pid]
                         if not p_loc.empty:
-                            # Pick best primary hunt/aggressive pitch for zone chart
                             hunt_pt = None
                             for pp in b["plan"].get("pitch_plans", []):
                                 if pp.get("tier") == "primary" and pp.get("approach") in ("hunt", "aggressive"):
@@ -1824,16 +1740,92 @@ def page_game_prep() -> None:
                     pa_html = _build_putaway_html(
                         pid, b.get("batter_hand"), putaway_df,
                     )
-                    card_html = _render_batter_attack_card(
-                        bid, b["batter_name"], b["team_abbr"],
-                        order, b["plan"], b["edge"],
-                        putaway_html=pa_html,
-                        comp_info=b.get("comp_info"),
-                        zone_chart_b64=zone_b64,
-                        projections=b.get("projections"),
-                        sim_stats=b.get("sim_stats"),
+                    all_attack_cards.append(
+                        _render_batter_attack_card(
+                            bid, b["batter_name"], b["team_abbr"],
+                            order, b["plan"], b["edge"],
+                            putaway_html=pa_html,
+                            comp_info=b.get("comp_info"),
+                            zone_chart_b64=zone_b64,
+                            projections=b.get("projections"),
+                            sim_stats=b.get("sim_stats"),
+                        )
                     )
-                    st.markdown(card_html, unsafe_allow_html=True)
+
+            if all_attack_cards:
+                n_cards = len(all_attack_cards)
+                carousel_id = f"gp-car-{side}"
+                # Dots (mobile only)
+                dots = "".join(
+                    f'<span class="gp-dot{" active" if i == 0 else ""}"></span>'
+                    for i in range(n_cards)
+                )
+                nav_html = (
+                    '<div class="gp-carousel-nav">'
+                    f'<span class="gp-carousel-counter">1 / {n_cards}</span>'
+                    f'<button class="gp-carousel-btn prev" data-car="{carousel_id}" aria-label="Previous">&#8249;</button>'
+                    f'<button class="gp-carousel-btn next" data-car="{carousel_id}" aria-label="Next">&#8250;</button>'
+                    '</div>'
+                )
+                carousel_html = (
+                    '<div class="gp-carousel-wrap">'
+                    f'{nav_html}'
+                    f'<div id="{carousel_id}" class="gp-carousel">'
+                    + "".join(all_attack_cards)
+                    + '</div>'
+                    f'<div class="gp-carousel-dots">{dots}</div>'
+                    '</div>'
+                )
+                st.markdown(carousel_html, unsafe_allow_html=True)
+
+                # Inject JS controller via st.components.v1.html (invisible iframe)
+                import streamlit.components.v1 as stc
+                stc.html(
+                    '<script>'
+                    'function gpInit() {'
+                    '  var doc = window.parent.document;'
+                    f'  var c = doc.getElementById("{carousel_id}");'
+                    '  if (!c) return;'
+                    '  var wrap = c.closest(".gp-carousel-wrap");'
+                    '  if (!wrap) return;'
+                    '  var cards = c.querySelectorAll(".gp-attack");'
+                    '  var dots = wrap.querySelectorAll(".gp-dot");'
+                    '  var counter = wrap.querySelector(".gp-carousel-counter");'
+                    '  var n = cards.length;'
+                    '  if (!n) return;'
+                    # Update dots + counter on scroll
+                    '  function update() {'
+                    '    var w = cards[0].getBoundingClientRect().width + 8;'
+                    '    var idx = Math.round(c.scrollLeft / w);'
+                    '    idx = Math.max(0, Math.min(idx, n - 1));'
+                    '    dots.forEach(function(d, i) { d.classList.toggle("active", i === idx); });'
+                    '    if (counter) counter.textContent = (idx + 1) + " / " + n;'
+                    '  }'
+                    '  c.addEventListener("scroll", update, {passive: true});'
+                    # Prev/next buttons
+                    '  var prevBtn = wrap.querySelector(".gp-carousel-btn.prev");'
+                    '  var nextBtn = wrap.querySelector(".gp-carousel-btn.next");'
+                    '  if (prevBtn) prevBtn.addEventListener("click", function() {'
+                    '    var w = cards[0].getBoundingClientRect().width + 8;'
+                    '    c.scrollBy({left: -w, behavior: "smooth"});'
+                    '  });'
+                    '  if (nextBtn) nextBtn.addEventListener("click", function() {'
+                    '    var w = cards[0].getBoundingClientRect().width + 8;'
+                    '    c.scrollBy({left: w, behavior: "smooth"});'
+                    '  });'
+                    # Dot click navigation
+                    '  dots.forEach(function(d, i) {'
+                    '    d.style.cursor = "pointer";'
+                    '    d.addEventListener("click", function() {'
+                    '      var w = cards[0].getBoundingClientRect().width + 8;'
+                    '      c.scrollTo({left: i * w, behavior: "smooth"});'
+                    '    });'
+                    '  });'
+                    '}'
+                    'gpInit();'
+                    '</script>',
+                    height=0,
+                )
 
             # --- Bullpen Matchup Matrix ---
             from services.data_loader import load_reliever_rankings
