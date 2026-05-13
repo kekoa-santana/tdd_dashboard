@@ -392,27 +392,70 @@ def _render_lineup_optimization_html(
     # Bench players
     bench_html = ""
     if bench:
+        _cell = "flex:1;text-align:center;padding:0 0.3rem;line-height:1.2"
         bench_rows = ""
         for b in bench:
             xw = b["matchup_xwoba"]
             color = SAGE if xw > 0.325 else (EMBER if xw < 0.305 else SLATE)
             pos = b.get("position", "")
-            pos_html = f' <span style="color:var(--tdd-slate);font-size:0.55rem">{esc(pos)}</span>' if pos else ""
+            label = b.get("batter_label", "")
+            meta_parts = []
+            if pos:
+                meta_parts.append(pos)
+            if label:
+                meta_parts.append(label)
+            meta_html = f' <span style="color:var(--tdd-slate);font-size:0.7rem">{esc(", ".join(meta_parts))}</span>' if meta_parts else ""
+
+            # Bayesian projections
+            bproj = b.get("projections", {})
+            k_pct = bproj.get("projected_k_rate")
+            bb_pct = bproj.get("projected_bb_rate")
+            woba = bproj.get("projected_woba")
+            k_html = f'<span style="color:var(--tdd-slate);font-family:var(--tdd-font-mono);font-size:0.82rem">{k_pct*100:.0f}</span>' if k_pct else '--'
+            bb_html = f'<span style="color:var(--tdd-slate);font-family:var(--tdd-font-mono);font-size:0.82rem">{bb_pct*100:.0f}</span>' if bb_pct else '--'
+            woba_html = f'<span style="color:var(--tdd-slate);font-family:var(--tdd-font-mono);font-size:0.82rem">.{int(woba*1000):03d}</span>' if woba else '--'
+
+            # Sim stats
+            sim = b.get("sim_stats", {})
+            _dash = '<span style="color:var(--tdd-slate);font-size:0.8rem">--</span>'
+            sim_cells = ""
+            for sk in ("H", "K", "TB"):
+                sv = sim.get(sk)
+                if sv and sv.get("expected") is not None:
+                    sim_cells += f'<span style="{_cell};font-family:var(--tdd-font-mono);font-size:0.82rem;color:var(--tdd-slate)">{sv["expected"]:.1f}</span>'
+                else:
+                    sim_cells += f'<span style="{_cell}">{_dash}</span>'
+
+            # Edge
+            edge = b.get("edge")
+            if edge and edge.get("advantage") == "hitter":
+                edge_html = '<span style="color:var(--tdd-sage);font-size:0.75rem">Hitter</span>'
+            elif edge and edge.get("advantage") == "pitcher":
+                edge_html = '<span style="color:var(--tdd-ember);font-size:0.75rem">Pitcher</span>'
+            else:
+                edge_html = '<span style="color:var(--tdd-slate);font-size:0.75rem">Even</span>'
 
             bench_rows += (
-                '<div style="display:flex;align-items:center;padding:3px 0;'
-                'border-bottom:1px solid var(--tdd-dark-border-faint);font-size:0.72rem;opacity:0.7">'
-                f'<span style="color:var(--tdd-slate);width:1.4rem"></span>'
-                f'<span style="padding:0 0.4rem">{headshot_html(b["batter_id"], size=22)}</span>'
-                f'<span style="color:var(--tdd-cream);flex:1">{esc(b["batter_name"])}{pos_html}</span>'
-                f'<span style="color:{color};font-family:var(--tdd-font-mono);'
-                f'font-size:0.7rem">.{int(xw*1000):03d}</span>'
+                '<div style="display:flex;align-items:center;padding:5px 0;'
+                'border-bottom:1px solid var(--tdd-dark-border-faint);opacity:0.7">'
+                f'<span style="min-width:2rem"></span>'
+                f'<span style="padding:0 0.5rem">{headshot_html(b["batter_id"], size=30)}</span>'
+                f'<span style="color:var(--tdd-cream);width:14rem;min-width:10rem;font-family:var(--tdd-font-heading);'
+                f'font-weight:600;font-size:0.88rem">{esc(b["batter_name"])}{meta_html}</span>'
+                f'<span style="{_cell}">{k_html}</span>'
+                f'<span style="{_cell}">{bb_html}</span>'
+                f'<span style="{_cell}">{woba_html}</span>'
+                f'{sim_cells}'
+                f'<span style="{_cell}">{edge_html}</span>'
+                f'<span style="flex:1.6"></span>'
+                f'<span style="{_cell};color:{color};font-family:var(--tdd-font-mono);'
+                f'font-weight:700;font-size:0.95rem">.{int(xw*1000):03d}</span>'
                 '</div>'
             )
 
         bench_html = (
             '<div style="border-top:1px dashed var(--tdd-slate);margin-top:6px;'
-            'padding-top:4px;opacity:0.7">'
+            'padding-top:4px">'
             '<div style="color:var(--tdd-slate);font-size:0.55rem;letter-spacing:1px;'
             'margin-bottom:3px">BENCH</div>'
             f'{bench_rows}'
@@ -1307,7 +1350,7 @@ def page_game_prep() -> None:
         lineups = pd.DataFrame()
         lineups = backfill_missing_lineups(schedule, lineups)
 
-    # Filter out IL / non-active players from lineups
+    # Filter out IL / non-active players and mislabeled pitchers from lineups
     if not lineups.empty:
         _roster_check = load_roster()
         if not _roster_check.empty:
@@ -1315,6 +1358,12 @@ def page_game_prep() -> None:
                 _roster_check[_roster_check["roster_status"] == "active"]["player_id"].astype(int)
             )
             lineups = lineups[lineups["batter_id"].astype(int).isin(active_ids)]
+        # Remove pitchers mislabeled as position players
+        from services.data_loader import load_reliever_rankings
+        _rr = load_reliever_rankings()
+        if not _rr.empty:
+            pitcher_ids = set(_rr["pitcher_id"].astype(int))
+            lineups = lineups[~lineups["batter_id"].astype(int).isin(pitcher_ids)]
 
     # If lineups are still empty (future games), build from roster
     if lineups.empty:
@@ -1673,6 +1722,11 @@ def page_game_prep() -> None:
                     "matchup_xwoba": b["matchup_xwoba"],
                     "position": pos_lookup.get(b["batter_id"], ""),
                     "optimal_rank": b.get("optimal_rank", 99),
+                    "projections": b.get("projections", {}),
+                    "sim_stats": b.get("sim_stats", {}),
+                    "plan": b.get("plan"),
+                    "edge": b.get("edge"),
+                    "batter_label": b.get("batter_label", ""),
                 })
             bench_data.sort(key=lambda x: x["matchup_xwoba"], reverse=True)
 
