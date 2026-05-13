@@ -17,7 +17,7 @@ from services.data_loader import (
     load_projections, load_pitcher_archetypes, load_hitter_archetypes,
     load_roster,
     backfill_missing_lineups,
-    fetch_live_schedule, fetch_live_lineups,
+    fetch_live_schedule,
     load_prospect_comps_batters, load_prospect_comps_pitchers, load_milb_priors,
     load_pitcher_game_logs,
     load_pitcher_advanced_stats,
@@ -1209,40 +1209,28 @@ def page_game_prep() -> None:
         unsafe_allow_html=True,
     )
 
-    # Date selector: today + next 2 days
-    from datetime import date
+    # Today's date (ET)
     utc_now = datetime.now(timezone.utc)
     et_now = utc_now - timedelta(hours=4)
     today = et_now.date()
-    date_options = [today + timedelta(days=d) for d in range(3)]
-    date_labels = []
-    for d in date_options:
-        if d == today:
-            date_labels.append(f"{d.strftime('%a %b %d')} (Today)")
-        else:
-            date_labels.append(d.strftime("%a %b %d"))
 
-    dcol1, dcol2 = st.columns([1, 3])
-    with dcol1:
-        sel_date_idx = st.selectbox(
-            "Date", range(len(date_options)),
-            format_func=lambda i: date_labels[i],
-            key="gp_date_sel", label_visibility="collapsed",
-        )
-    sel_date = date_options[sel_date_idx]
-
-    # Load schedule for selected date
-    if sel_date == today:
-        schedule = load_todays_games()
-    else:
-        schedule = fetch_live_schedule(sel_date.isoformat())
+    # Load today's schedule
+    schedule = load_todays_games()
+    if not schedule.empty and "game_date" in schedule.columns:
+        schedule = schedule[schedule["game_date"] == today.isoformat()].copy()
+    if schedule.empty:
+        # Fallback to live API
+        schedule = fetch_live_schedule(today.isoformat())
 
     if schedule.empty:
         st.markdown(
-            f'<div class="pl-empty">No games scheduled for {sel_date.strftime("%b %d")}.</div></div>',
+            f'<div class="pl-empty">No games scheduled for {today.strftime("%b %d")}.</div></div>',
             unsafe_allow_html=True,
         )
         return
+
+    if "game_datetime_utc" in schedule.columns:
+        schedule = schedule.sort_values("game_datetime_utc", na_position="last")
 
     # Game selector
     game_labels = []
@@ -1256,22 +1244,17 @@ def page_game_prep() -> None:
         game_labels.append(f"{away} ({ap}) @ {home} ({hp}) - {t}")
         game_pks.append(int(g["game_pk"]))
 
-    with dcol2:
-        sel_idx = st.selectbox(
-            "Select Game", range(len(game_labels)),
-            format_func=lambda i: game_labels[i],
-            key="gp_game_sel", label_visibility="collapsed",
-        )
+    sel_idx = st.selectbox(
+        "Select Game", range(len(game_labels)),
+        format_func=lambda i: game_labels[i],
+        key="gp_game_sel", label_visibility="collapsed",
+    )
     gpk = game_pks[sel_idx]
     game = schedule[schedule["game_pk"] == gpk].iloc[0]
 
     # Load lineups -- build from roster for all position players
-    if sel_date == today:
-        lineups = load_todays_lineups()
-        lineups = backfill_missing_lineups(schedule, lineups)
-    else:
-        lineups = pd.DataFrame()
-        lineups = backfill_missing_lineups(schedule, lineups)
+    lineups = load_todays_lineups()
+    lineups = backfill_missing_lineups(schedule, lineups)
 
     # Filter out IL / non-active players and mislabeled pitchers from lineups
     if not lineups.empty:
