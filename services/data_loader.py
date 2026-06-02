@@ -183,22 +183,6 @@ def load_batter_platoon_splits() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_DATA_TTL)
-def load_pitcher_glicko() -> pd.DataFrame:
-    path = DASHBOARD_DIR / "pitcher_glicko.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-@st.cache_data(ttl=_DATA_TTL)
-def load_batter_glicko() -> pd.DataFrame:
-    path = DASHBOARD_DIR / "batter_glicko.parquet"
-    if not path.exists():
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-@st.cache_data(ttl=_DATA_TTL)
 def load_pitcher_gb_pct() -> pd.DataFrame:
     path = DASHBOARD_DIR / "pitcher_gb_pct.parquet"
     if not path.exists():
