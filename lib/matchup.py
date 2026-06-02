@@ -1097,7 +1097,6 @@ _MATCHUP_CFG_DEFAULTS: dict[str, Any] = {
         "primary_pitch_edge": 0.2,
         "damage_score": -0.15,
         "trajectory_edge": -0.1,
-        "glicko_edge": 0.1,
     },
     "tiers": {"strong": 0.30, "moderate": 0.12},
     "platoon_reliability_pa": 200,
@@ -1454,9 +1453,6 @@ def _find_dominant_reason(
     if dominant == "trajectory_edge":
         return "trajectory mismatch" if advantage == "hitter" else "trajectory favors pitcher"
 
-    if dominant == "glicko_edge":
-        return "skill gap" if advantage == "pitcher" else "batter outclasses"
-
     return "mixed signals"
 
 
@@ -1473,14 +1469,12 @@ def score_matchup_advantage(
     pitcher_gb_pct: float | None = None,
     batter_gb_rate: float | None = None,
     batter_fb_rate: float | None = None,
-    pitcher_glicko_mu: float | None = None,
-    batter_glicko_mu: float | None = None,
     league_platoon: dict[str, dict[str, float]] | None = None,
     matchup_scales: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Unified matchup advantage score (positive edge = pitcher advantage).
 
-    Computes an 8-component composite on logit scale using config-driven
+    Computes a 7-component composite on logit scale using config-driven
     weights and data-derived baselines.  All optional signals degrade
     gracefully to 0 when data is unavailable.
 
@@ -1509,16 +1503,12 @@ def score_matchup_advantage(
         Batter ground-ball rate.
     batter_fb_rate : float | None
         Batter fly-ball rate.
-    pitcher_glicko_mu : float | None
-        Pitcher Glicko-2 mu rating.
-    batter_glicko_mu : float | None
-        Batter Glicko-2 mu rating.
     league_platoon : dict | None
         Precomputed league platoon baselines from
         ``get_league_platoon_baselines()``.
     matchup_scales : dict | None
-        ``{"trajectory_scale": float, "glicko_scale": float}``
-        derived from signal distributions during precompute.
+        ``{"trajectory_scale": float}`` derived from signal
+        distributions during precompute.
 
     Returns
     -------
@@ -1533,10 +1523,8 @@ def score_matchup_advantage(
 
     # Default scaling factors if not precomputed
     t_scale = 5.0
-    g_scale = 1.0 / 1000.0
     if matchup_scales:
         t_scale = matchup_scales.get("trajectory_scale", t_scale)
-        g_scale = matchup_scales.get("glicko_scale", g_scale)
 
     # ------------------------------------------------------------------
     # 1. K / BB / HR lifts (existing functions)
@@ -1596,14 +1584,7 @@ def score_matchup_advantage(
         )
 
     # ------------------------------------------------------------------
-    # 6. Glicko edge
-    # ------------------------------------------------------------------
-    glicko_edge = 0.0
-    if pitcher_glicko_mu is not None and batter_glicko_mu is not None:
-        glicko_edge = (pitcher_glicko_mu - batter_glicko_mu) * g_scale
-
-    # ------------------------------------------------------------------
-    # 7. Composite
+    # 6. Composite
     # ------------------------------------------------------------------
     breakdown = {
         "k_lift": k_lift,
@@ -1613,7 +1594,6 @@ def score_matchup_advantage(
         "primary_pitch_edge": primary_pitch_edge,
         "damage_score": damage_score,
         "trajectory_edge": trajectory_edge,
-        "glicko_edge": glicko_edge,
     }
     edge_score = sum(weights.get(k, 0.0) * v for k, v in breakdown.items())
 
@@ -1636,7 +1616,6 @@ def score_matchup_advantage(
         hitter_str is not None and not (
             isinstance(hitter_str, pd.DataFrame) and hitter_str.empty
         ),
-        pitcher_glicko_mu is not None and batter_glicko_mu is not None,
     ])
     if avg_reliability > 0.6 and optional_signals >= 2:
         confidence = "high"

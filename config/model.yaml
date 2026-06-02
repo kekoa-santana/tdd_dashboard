@@ -12,7 +12,6 @@ matchup_advantage:
     primary_pitch_edge: 0.2
     damage_score: -0.15
     trajectory_edge: -0.1
-    glicko_edge: 0.1
   tiers:
     strong: 0.30
     moderate: 0.12

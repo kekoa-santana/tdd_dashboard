@@ -53,8 +53,6 @@ def page_matchup_explorer() -> None:
     from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE
     from services.data_loader import (
         load_batter_platoon_splits,
-        load_batter_glicko,
-        load_pitcher_glicko,
         load_pitcher_gb_pct,
         load_matchup_baselines,
     )
@@ -221,8 +219,6 @@ def page_matchup_explorer() -> None:
     # --- Unified matchup advantage ---
     # Load auxiliary data for enriched scoring
     platoon_df = load_batter_platoon_splits()
-    pitcher_glicko_df = load_pitcher_glicko()
-    batter_glicko_df = load_batter_glicko()
     pitcher_gb_df = load_pitcher_gb_pct()
     matchup_baselines = load_matchup_baselines()
 
@@ -241,18 +237,6 @@ def page_matchup_explorer() -> None:
             batter_platoon_dict["overall_k_rate"] = float(bp["overall_k_rate"].iloc[0])
             batter_platoon_dict["overall_bb_rate"] = float(bp["overall_bb_rate"].iloc[0])
 
-    # Look up Glicko ratings
-    p_glicko_mu = None
-    if not pitcher_glicko_df.empty:
-        pg = pitcher_glicko_df[pitcher_glicko_df["pitcher_id"] == pitcher_id]
-        if not pg.empty:
-            p_glicko_mu = float(pg["mu"].iloc[0])
-    b_glicko_mu = None
-    if not batter_glicko_df.empty:
-        bg = batter_glicko_df[batter_glicko_df["batter_id"] == batter_id]
-        if not bg.empty:
-            b_glicko_mu = float(bg["mu"].iloc[0])
-
     # Look up pitcher GB% and batter GB/FB rates
     pitcher_gb_val = None
     if not pitcher_gb_df.empty:
@@ -270,7 +254,6 @@ def page_matchup_explorer() -> None:
     if matchup_baselines:
         scales_dict = {
             "trajectory_scale": matchup_baselines.get("trajectory_scale", 5.0),
-            "glicko_scale": matchup_baselines.get("glicko_scale", 0.001),
         }
 
     advantage_result = score_matchup_advantage(
@@ -280,8 +263,6 @@ def page_matchup_explorer() -> None:
         batter_platoon_splits=batter_platoon_dict,
         pitcher_gb_pct=pitcher_gb_val,
         batter_fb_rate=batter_fb_val,
-        pitcher_glicko_mu=p_glicko_mu,
-        batter_glicko_mu=b_glicko_mu,
         league_platoon=matchup_baselines if matchup_baselines else None,
         matchup_scales=scales_dict,
     )
@@ -773,6 +754,9 @@ def page_matchup_explorer() -> None:
                 unsafe_allow_html=True)
 
     # Overall summary | use blended edge (whiff lift + contact quality)
+    # edge_score: positive = pitcher-favorable; damage_score: hitter contact-damage component.
+    blended_edge = advantage_result["edge_score"]
+    damage_score = advantage_result["breakdown"].get("damage_score", 0.0)
     bullets_html = ""
     if pd.notna(mwhiff) and pd.notna(bwhiff):
         whiff_delta_pp = (mwhiff - bwhiff) * 100
