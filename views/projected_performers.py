@@ -746,23 +746,26 @@ def page_projected_performers() -> None:
             'Why this number</div>',
             unsafe_allow_html=True,
         )
-        _opts: dict[str, tuple[int, str]] = {}
+        _opts: dict[str, tuple[int, str, str]] = {}
         for _, _r in _kpicks.iterrows():
-            _opts[f'{_r["player_name"]} — K'] = (
-                int(_r["player_id"]), str(_r.get("player_type", "")),
+            _nm = str(_r["player_name"])
+            _opts[f'{_nm} (K)'] = (
+                int(_r["player_id"]), str(_r.get("player_type", "")), _nm,
             )
+        _PLACEHOLDER = "Select a player..."
         _sel = st.selectbox(
-            "Explain a K projection", ["—"] + list(_opts),
+            "Explain a K projection", [_PLACEHOLDER] + list(_opts),
             key="pl_explain", label_visibility="collapsed",
         )
-        if _sel and _sel != "—":
-            _pid, _ptype = _opts[_sel]
+        if _sel and _sel != _PLACEHOLDER:
+            _pid, _ptype, _nm = _opts[_sel]
             _ar = _attr[(_attr["player_id"] == _pid) & (_attr["stat"] == "K")]
             if _ptype:
                 _ar = _ar[_ar["player_type"] == _ptype]
             if not _ar.empty:
                 st.markdown(
-                    build_attribution_panel(_ar.iloc[0]), unsafe_allow_html=True,
+                    build_attribution_panel(_ar.iloc[0], name=_nm),
+                    unsafe_allow_html=True,
                 )
 
     # Close page wrapper

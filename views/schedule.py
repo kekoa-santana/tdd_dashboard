@@ -449,12 +449,12 @@ def _render_props_section(
             cards_html += _prop_card_html(row)
         st.markdown(cards_html, unsafe_allow_html=True)
 
-    # "Why this number" — K projection attribution for the game's starters
+    # "Why this number" -- K projection attribution for the game's starters
     _attr = load_prop_attribution()
     if not _attr.empty:
-        _pids = list(dict.fromkeys(
-            game_df[game_df["player_type"] == "pitcher"]["player_id"].astype(int)
-        ))
+        _pit = game_df[game_df["player_type"] == "pitcher"]
+        _name_by_pid = dict(zip(_pit["player_id"].astype(int), _pit["player_name"]))
+        _pids = list(dict.fromkeys(_pit["player_id"].astype(int)))
         _panels = []
         for _pid in _pids:
             _ar = _attr[
@@ -464,7 +464,9 @@ def _render_props_section(
                 & (_attr["stat"] == "K")
             ]
             if not _ar.empty:
-                _panels.append(build_attribution_panel(_ar.iloc[0]))
+                _panels.append(build_attribution_panel(
+                    _ar.iloc[0], name=_name_by_pid.get(_pid),
+                ))
         if _panels:
             st.markdown(
                 '<div class="tdd-props-header">Why This Number</div>',
