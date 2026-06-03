@@ -516,7 +516,7 @@ def archive_yesterdays_predictions(game_date: str) -> None:
 
     # --- Archive pitcher predictions ---
     gp = pd.read_parquet(gp_path)
-    from lib.fantasy_report import _build_sims_from_game_props
+    from lib.game_sims import _build_sims_from_game_props
     pitcher_sims = _build_sims_from_game_props(gp, game_date=yesterday)
     if pitcher_sims.empty:
         logger.info("No pitcher predictions for %s in game_props. Skipping archive.", yesterday)

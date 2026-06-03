@@ -10,12 +10,10 @@ from config import GOLD, SAGE, EMBER, SLATE, CREAM
 from utils.alerts import tdd_info, tdd_warn
 from services.data_loader import (
     load_projections, load_game_props, load_dk_props, load_pp_props,
-    load_todays_games, load_todays_lineups,
-    load_pitcher_arsenal, load_hitter_vulnerability, load_hitter_strength,
+    load_todays_games,
     load_stat_tier_thresholds,
     dedupe_pp_against_dk,
 )
-from components.scouting import compute_matchup_xwoba_edge
 from components.headshot import headshot_html
 from utils.helpers import format_game_time
 from utils.html import esc, esc_attr
@@ -531,123 +529,6 @@ def _render_table_header() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Slate-wide xwOBA leaderboard
-# ---------------------------------------------------------------------------
-
-@st.cache_data(ttl=300)
-def _compute_slate_xwoba() -> list[tuple[float, int, str, str, str, str, str]]:
-    """Compute matchup xwOBA for every batter across all today's games.
-
-    Returns sorted list of (xwoba, batter_id, name, team, opp, advantage, opp_pitcher_name).
-    """
-    games = load_todays_games()
-    lineups = load_todays_lineups()
-    arsenal_df = load_pitcher_arsenal()
-    vuln_df = load_hitter_vulnerability(career=True)
-    str_df = load_hitter_strength(career=True)
-
-    if games.empty or lineups.empty or arsenal_df.empty or vuln_df.empty:
-        return []
-
-    # Build lookup: (game_pk, team_id) -> (opp_pitcher_id, opp_abbr, opp_pitcher_name)
-    opp_lookup: dict[tuple[int, int], tuple[int, str, str]] = {}
-    for _, g in games.iterrows():
-        gpk = g["game_pk"]
-        away_tid = g["away_team_id"]
-        home_tid = g["home_team_id"]
-        away_pid = int(g["away_pitcher_id"]) if pd.notna(g.get("away_pitcher_id")) else None
-        home_pid = int(g["home_pitcher_id"]) if pd.notna(g.get("home_pitcher_id")) else None
-        away_abbr = g.get("away_abbr", "")
-        home_abbr = g.get("home_abbr", "")
-        away_pname = g.get("away_pitcher_name", "")
-        home_pname = g.get("home_pitcher_name", "")
-        if home_pid:
-            opp_lookup[(gpk, away_tid)] = (home_pid, home_abbr, home_pname)
-        if away_pid:
-            opp_lookup[(gpk, home_tid)] = (away_pid, away_abbr, away_pname)
-
-    entries: list[tuple[float, int, str, str, str, str, str]] = []
-
-    for _, row in lineups.iterrows():
-        bid = int(row.get("batter_id", 0))
-        if not bid:
-            continue
-        gpk = row["game_pk"]
-        tid = row["team_id"]
-        info = opp_lookup.get((gpk, tid))
-        if not info:
-            continue
-        opp_pid, opp_abbr, opp_pname = info
-
-        _p_ars = arsenal_df[arsenal_df["pitcher_id"] == opp_pid]
-        _h_vul = vuln_df[vuln_df["batter_id"] == bid]
-        _h_str = str_df[str_df["batter_id"] == bid] if not str_df.empty else pd.DataFrame()
-        if _p_ars.empty or _h_vul.empty:
-            continue
-
-        _ph = str(_p_ars["pitch_hand"].iloc[0]) if "pitch_hand" in _p_ars.columns else None
-        _bh = str(_h_vul["batter_stand"].iloc[0]) if "batter_stand" in _h_vul.columns else None
-
-        edge = compute_matchup_xwoba_edge(_p_ars, _h_vul, _h_str, pitcher_hand=_ph, batter_hand=_bh)
-        batter_name = row.get("batter_name", str(bid))
-        team_abbr = row.get("team_abbr", "")
-        entries.append((
-            edge["matchup_xwoba"], bid, batter_name, team_abbr,
-            opp_abbr, edge["advantage"], opp_pname,
-        ))
-
-    entries.sort(key=lambda x: x[0], reverse=True)
-    return entries
-
-
-def _render_slate_xwoba_leaderboard(entries: list, top_n: int = 25) -> str:
-    """Render top-N hitters by matchup xwOBA as HTML."""
-    if not entries:
-        return ""
-
-    LG_XWOBA = 0.315
-    rows = ""
-    for rank, (xw, bid, name, team, opp, adv, opp_p) in enumerate(entries[:top_n], 1):
-        if adv == "hitter":
-            color = SAGE
-        elif adv == "pitcher":
-            color = EMBER
-        else:
-            color = SLATE
-
-        bar_pct = min(xw / 0.500 * 100, 100)
-        lg_pct = LG_XWOBA / 0.500 * 100
-
-        rows += (
-            '<div style="display:flex;gap:8px;align-items:center;'
-            'padding:0.35rem 0;border-bottom:1px solid var(--tdd-dark-border-faint)">'
-            f'<span style="color:var(--tdd-slate);font-size:0.65rem;width:1.4rem;text-align:right">{rank}</span>'
-            f'{headshot_html(bid, size=28)}'
-            '<div style="flex:1;min-width:0">'
-            f'<div style="display:flex;justify-content:space-between;align-items:baseline">'
-            f'<span style="color:var(--tdd-cream);font-family:var(--tdd-font-heading);font-weight:700;font-size:0.78rem">{esc(name)}'
-            f'<span style="color:var(--tdd-slate);font-size:0.62rem;margin-left:0.3rem">{esc(team)}</span>'
-            f'<span style="color:var(--tdd-slate);font-size:0.58rem;margin-left:0.3rem">vs {esc(opp_p)}</span></span>'
-            f'<span style="color:{color};font-family:var(--tdd-font-mono);font-weight:700;font-size:0.78rem">.{int(xw*1000):03d}</span>'
-            '</div>'
-            f'<div style="position:relative;height:4px;background:var(--tdd-dark-border);border-radius:2px;margin-top:2px">'
-            f'<div style="position:absolute;left:{lg_pct:.1f}%;top:-1px;bottom:-1px;width:1px;background:var(--tdd-slate);opacity:0.5"></div>'
-            f'<div style="width:{bar_pct:.1f}%;height:100%;background:{color};border-radius:2px"></div>'
-            '</div>'
-            '</div>'
-            '</div>'
-        )
-
-    return (
-        '<div style="padding:0.2rem 0">'
-        '<div style="color:var(--tdd-slate);font-size:0.6rem;margin-bottom:0.5rem">'
-        'Odds-ratio xwOBA per batter vs opposing starter across all games (league avg .315)</div>'
-        f'{rows}'
-        '</div>'
-    )
-
-
-# ---------------------------------------------------------------------------
 # Main page
 # ---------------------------------------------------------------------------
 
@@ -740,13 +621,6 @@ def page_projected_performers() -> None:
     cal_html = _render_calibration_banner(thresholds)
     if cal_html:
         st.markdown(cal_html, unsafe_allow_html=True)
-
-    # ── xwOBA Matchup Leaderboard ─────────────────────────────────
-    xwoba_entries = _compute_slate_xwoba()
-    if xwoba_entries:
-        with st.expander(f"Top Matchup xwOBA Today ({len(xwoba_entries)} hitters)", expanded=False):
-            xwoba_html = _render_slate_xwoba_leaderboard(xwoba_entries, top_n=25)
-            st.markdown(xwoba_html, unsafe_allow_html=True)
 
     # ── Filters ────────────────────────────────────────────────────
     fcol1, fcol2, fcol3, fcol4, fcol5 = st.columns([1, 1, 1, 1, 2])

@@ -8,34 +8,21 @@ import pandas as pd
 import streamlit as st
 
 from config import (
-    GOLD, EMBER, SAGE, SLATE, CREAM, DASHBOARD_DIR,
+    GOLD, EMBER, SAGE, SLATE, CREAM,
 )
 from utils.alerts import tdd_info
 from services.data_loader import (
     load_todays_games, load_todays_lineups, load_todays_batter_sims,
-    load_update_metadata, load_pitcher_arsenal, load_hitter_vulnerability,
-    load_hitter_strength,
+    load_update_metadata,
     load_projections, load_counting, load_hitter_archetypes, load_pitcher_archetypes,
-    load_bf_priors,
     load_roster, load_game_props,
     fetch_live_schedule, fetch_live_lineups, backfill_missing_lineups,
-    load_pitcher_game_sim_samples, load_batter_game_sim_samples,
 )
 from utils.helpers import format_game_time
 from utils.html import esc, esc_attr
 from components.diamond_rating import diamond_rating_html
 from components.expandable_card import EXPANDABLE_CARD_CSS, expandable_card_html
 from components.headshot import headshot_html
-from lib.fantasy_report import load_report_data, get_pitcher_scouting, ReportData
-
-
-from components.scouting import render_scouting_html as _render_scouting_html
-
-
-@st.cache_data(ttl=300)
-def _get_scouting_report_data() -> ReportData:
-    """Load scouting report data (cached 5 min)."""
-    return load_report_data(DASHBOARD_DIR)
 
 
 def _detect_lineup_changes(
@@ -542,46 +529,6 @@ def _prop_card_html(row: pd.Series) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Scouting Report section
-# ---------------------------------------------------------------------------
-
-def _render_scouting_section(sides: list[dict], gpk: int) -> None:
-    """Side-by-side pitcher scouting reports for a game."""
-    scouting_data = _get_scouting_report_data()
-
-    col_away, col_home = st.columns(2)
-    for side_info, col in zip(sides, [col_away, col_home]):
-        pid = side_info["pitcher_id"]
-        pitcher_name = side_info["pitcher_name"]
-        side_abbr = side_info["abbr"]
-        opp_abbr = side_info["opp_abbr"]
-
-        with col:
-            st.markdown(
-                f'<div class="tdd-section-hdr">'
-                f'<span class="tdd-team-abbr" data-team="{side_abbr}">'
-                f'{side_abbr}</span>'
-                f' <span style="color:var(--tdd-slate); font-size:0.8rem;">'
-                f'{pitcher_name}</span>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-            if not pid:
-                st.markdown(
-                    '<div class="tdd-meta">Starter TBD</div>',
-                    unsafe_allow_html=True,
-                )
-                continue
-
-            report = get_pitcher_scouting(
-                pid, pitcher_name, side_abbr, opp_abbr,
-                scouting_data,
-            )
-            _render_scouting_html(report)
-
-
-# ---------------------------------------------------------------------------
 # Game Drill-Down (Phase 2: Game Center)
 # ---------------------------------------------------------------------------
 
@@ -589,450 +536,34 @@ def _render_scouting_section(sides: list[dict], gpk: int) -> None:
 def _render_game_drilldown(
     game: pd.Series,
     lineups: pd.DataFrame,
-    h_arch_lookup: dict[int, str],
-    p_arch_lookup: dict[int, str],
-    h_stat_lookup: dict[int, dict],
-    bf_priors: pd.DataFrame,
-    arsenal_df: pd.DataFrame,
-    vuln_df: pd.DataFrame,
-    proj_lookup: dict[int, dict],
     gpk: int,
-    pos_lookup: dict[int, str] | None = None,
-    str_df: pd.DataFrame | None = None,
     game_props: pd.DataFrame | None = None,
     live_stats: pd.DataFrame | None = None,
     batter_sims_df: pd.DataFrame | None = None,
-    pitcher_sim_samples: object | None = None,
-    batter_sim_samples: object | None = None,
 ) -> None:
-    """Rich game drill-down: lineup matchups, matchup analysis, and game simulator."""
+    """Game drill-down: props and game simulator."""
     game_lu = lineups[lineups["game_pk"] == gpk] if not lineups.empty else pd.DataFrame()
-
-    # Build per-side info
-    sides = []
-    for side, opp_side in [("away", "home"), ("home", "away")]:
-        pitcher_name = game.get(f"{side}_pitcher_name") or "TBD"
-        pitcher_id_raw = game.get(f"{side}_pitcher_id")
-        pid = int(pitcher_id_raw) if pd.notna(pitcher_id_raw) else None
-        side_team_id = game.get(f"{side}_team_id")
-        opp_team_id = game.get(f"{opp_side}_team_id")
-        opp_abbr = game.get(f"{opp_side}_abbr", "?")
-        side_abbr = game.get(f"{side}_abbr", "?")
-        opp_lu = (
-            game_lu[game_lu["team_id"] == opp_team_id].sort_values("batting_order")
-            if not game_lu.empty and pd.notna(opp_team_id) else pd.DataFrame()
-        )
-        own_lu = (
-            game_lu[game_lu["team_id"] == side_team_id].sort_values("batting_order")
-            if not game_lu.empty and pd.notna(side_team_id) else pd.DataFrame()
-        )
-
-        sides.append({
-            "side": side,
-            "abbr": side_abbr,
-            "opp_abbr": opp_abbr,
-            "pitcher_name": pitcher_name,
-            "pitcher_id": pid,
-            "pitcher_arch": p_arch_lookup.get(pid) if pid else None,
-            "pitcher_proj": proj_lookup.get(pid, {}) if pid else {},
-            "opp_lineup": opp_lu,
-            "own_lineup": own_lu,
-        })
-
-    # --- Inline toolbar: Section ---
-    _SECTIONS = ["Lineups", "Scouting Report", "Props Lab"]
-
-    section = st.selectbox(
-        "Section", _SECTIONS,
-        key=f"dd_section_{gpk}",
-        label_visibility="collapsed",
-    )
 
     _batter_sims = batter_sims_df if batter_sims_df is not None else pd.DataFrame()
 
-    # --- Render selected section ---
-    if section == "Lineups":
-        changes = _detect_lineup_changes(game_lu, _batter_sims, gpk)
-        if changes["changed"]:
-            n_new = len(changes["new_batters"])
-            n_miss = len(changes["missing_batters"])
-            parts = []
-            if n_new:
-                parts.append(f"{n_new} new batter(s)")
-            if n_miss:
-                parts.append(f"{n_miss} removed")
-            tdd_info(f"Lineup changed since last sim. {', '.join(parts)}. Sims will auto-update shortly.")
+    # Surface a notice when the posted lineup has drifted from the sim inputs
+    changes = _detect_lineup_changes(game_lu, _batter_sims, gpk)
+    if changes["changed"]:
+        n_new = len(changes["new_batters"])
+        n_miss = len(changes["missing_batters"])
+        parts = []
+        if n_new:
+            parts.append(f"{n_new} new batter(s)")
+        if n_miss:
+            parts.append(f"{n_miss} removed")
+        tdd_info(f"Lineup changed since last sim. {', '.join(parts)}. Sims will auto-update shortly.")
 
-        _render_matchup_tab_sidebyside(
-            sides, h_arch_lookup, h_stat_lookup,
-            arsenal_df, vuln_df, gpk,
-            pos_lookup=pos_lookup or {},
-            str_df=str_df if str_df is not None else pd.DataFrame(),
-            bf_priors=bf_priors if bf_priors is not None else pd.DataFrame(),
-            batter_sims_df=_batter_sims,
-            pitcher_sim_samples=pitcher_sim_samples,
-            batter_sim_samples=batter_sim_samples,
-            game_props=game_props,
-        )
-
-    elif section == "Scouting Report":
-        _render_scouting_section(sides, gpk)
-
-    elif section == "Props Lab":
-        _render_props_section(
-            gpk,
-            game_props if game_props is not None else pd.DataFrame(),
-            lineups_df=game_lu,
-            live_stats_df=live_stats,
-        )
-
-
-from components.sim_chart import (
-    PITCHER_STAT_META as _PITCHER_STAT_META,
-    BATTER_STAT_META as _BATTER_STAT_META,
-    render_player_sim_from_props as _render_player_sim_from_props,
-)
-
-
-def _render_matchup_tab_sidebyside(
-    sides: list[dict],
-    h_arch_lookup: dict[int, str],
-    h_stat_lookup: dict[int, dict],
-    arsenal_df: pd.DataFrame,
-    vuln_df: pd.DataFrame,
-    gpk: int,
-    pos_lookup: dict[int, str] | None = None,
-    str_df: pd.DataFrame | None = None,
-    bf_priors: pd.DataFrame | None = None,
-    batter_sims_df: pd.DataFrame | None = None,
-    pitcher_sim_samples: object | None = None,
-    batter_sim_samples: object | None = None,
-    game_props: pd.DataFrame | None = None,
-) -> None:
-    """Lineup matchups for both sides rendered in side-by-side columns."""
-    col_away, col_home = st.columns(2)
-    for i, (side_info, col) in enumerate(zip(sides, [col_away, col_home])):
-        opp_side = sides[1 - i]
-        with col:
-            _render_matchup_tab(
-                [side_info], h_arch_lookup, h_stat_lookup,
-                arsenal_df, vuln_df, gpk,
-                pos_lookup=pos_lookup or {},
-                opp_side=opp_side,
-                str_df=str_df if str_df is not None else pd.DataFrame(),
-                bf_priors=bf_priors if bf_priors is not None else pd.DataFrame(),
-                batter_sims_df=batter_sims_df if batter_sims_df is not None else pd.DataFrame(),
-                pitcher_sim_samples=pitcher_sim_samples,
-                batter_sim_samples=batter_sim_samples,
-                game_props=game_props,
-            )
-
-
-from components.grades import (
-    grade_color as _grade_color,
-    hitter_grades_html as _hitter_grades_html,
-    pitcher_grades_html as _pitcher_grades_html,
-    matchup_lift_badge_html as _matchup_lift_badge_html,
-)
-
-
-def _render_matchup_tab(
-    sides: list[dict],
-    h_arch_lookup: dict[int, str],
-    h_stat_lookup: dict[int, dict],
-    arsenal_df: pd.DataFrame,
-    vuln_df: pd.DataFrame,
-    gpk: int,
-    pos_lookup: dict[int, str] | None = None,
-    opp_side: dict | None = None,
-    str_df: pd.DataFrame | None = None,
-    bf_priors: pd.DataFrame | None = None,
-    batter_sims_df: pd.DataFrame | None = None,
-    pitcher_sim_samples: object | None = None,
-    batter_sim_samples: object | None = None,
-    game_props: pd.DataFrame | None = None,
-) -> None:
-    """Team roster with inline matchup scouting on expand.
-
-    When *opp_side* is provided (side-by-side view), each column shows:
-      - Team header
-      - Own SP at top
-      - Own lineup with batter matchup badges vs opposing SP
-      - Expanding a batter shows matchup scouting bullets + grades + game projections
-      - Avg K matchup summary for own SP vs opposing lineup
-
-    All sim results and matchup lifts come from precomputed data -- no live
-    Monte Carlo or matchup scoring runs at render time.
-    """
-    from components.scouting import build_matchup_scouting_bullets, compute_matchup_xwoba_edge
-
-    if pos_lookup is None:
-        pos_lookup = {}
-    if bf_priors is None:
-        bf_priors = pd.DataFrame()
-    if batter_sims_df is None:
-        batter_sims_df = pd.DataFrame()
-
-    if game_props is None:
-        from services.data_loader import load_game_props
-        game_props = load_game_props()
-    game_df = (
-        game_props[game_props["game_pk"] == gpk] if not game_props.empty else pd.DataFrame()
+    _render_props_section(
+        gpk,
+        game_props if game_props is not None else pd.DataFrame(),
+        lineups_df=game_lu,
+        live_stats_df=live_stats,
     )
-
-    # Pre-index DataFrames by player ID to avoid full scans per batter
-    _vuln_by_bid: dict[int, pd.DataFrame] = {}
-    if not vuln_df.empty and "batter_id" in vuln_df.columns:
-        for bid_key, grp in vuln_df.groupby("batter_id"):
-            _vuln_by_bid[int(bid_key)] = grp
-    _str_by_bid: dict[int, pd.DataFrame] = {}
-    if str_df is not None and not str_df.empty and "batter_id" in str_df.columns:
-        for bid_key, grp in str_df.groupby("batter_id"):
-            _str_by_bid[int(bid_key)] = grp
-
-    # Pre-filter batter sims to this game
-    _game_bsims: pd.DataFrame = pd.DataFrame()
-    _bsim_by_bid: dict[int, pd.Series] = {}
-    if not batter_sims_df.empty and "game_pk" in batter_sims_df.columns:
-        _game_bsims = batter_sims_df[batter_sims_df["game_pk"] == gpk]
-        if not _game_bsims.empty and "batter_id" in _game_bsims.columns:
-            for _, _bsr in _game_bsims.iterrows():
-                _bsim_by_bid[int(_bsr["batter_id"])] = _bsr
-
-    # Pre-index game_df by player_id for sim lookups
-    _game_df_by_pid: dict[int, pd.DataFrame] = {}
-    if not game_df.empty and "player_id" in game_df.columns:
-        for pid_key, grp in game_df.groupby("player_id"):
-            _game_df_by_pid[int(pid_key)] = grp
-
-    for side_info in sides:
-        pitcher_name = side_info["pitcher_name"]
-        pid = side_info["pitcher_id"]
-        p_arch = side_info["pitcher_arch"]
-        p_proj = side_info["pitcher_proj"]
-        opp_lu = side_info["opp_lineup"]
-        opp_abbr = side_info["opp_abbr"]
-        side_abbr = side_info["abbr"]
-
-        # Team-centric view: own roster, batter matchups vs opposing SP
-        if opp_side is not None:
-            display_lu = side_info["own_lineup"]
-            matchup_pid = opp_side["pitcher_id"]
-        else:
-            display_lu = opp_lu
-            matchup_pid = pid
-
-        # Section header
-        st.markdown(
-            f'<div class="tdd-section-hdr">'
-            f'<span class="tdd-team-abbr" data-team="{side_abbr}">{side_abbr}</span>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-        if display_lu.empty:
-            st.markdown(
-                f'<div style="color:var(--tdd-slate); font-size:0.85rem; padding:0.5rem 0;">'
-                f'No lineup data available</div>',
-                unsafe_allow_html=True,
-            )
-            continue
-
-        # Detect roster-sourced lineup (no confirmed lineup set)
-        _is_roster_lineup = (
-            "lineup_source" in display_lu.columns
-            and (display_lu["lineup_source"] == "roster").any()
-        )
-        if _is_roster_lineup:
-            st.markdown(
-                f'<div style="color:var(--tdd-slate); font-size:0.82rem; '
-                f'padding:0.3rem 0; margin-bottom:0.3rem; font-style:italic;">'
-                f'No probable lineup set -- showing active roster</div>',
-                unsafe_allow_html=True,
-            )
-
-        name_col = "batter_name" if "batter_name" in display_lu.columns else "player_name"
-        id_col = "batter_id" if "batter_id" in display_lu.columns else "player_id"
-
-        # Pre-filter opposing pitcher arsenal once for all batters on this side
-        _matchup_arsenal = pd.DataFrame()
-        _matchup_pitcher_hand: str | None = None
-        if matchup_pid and not arsenal_df.empty:
-            _matchup_arsenal = arsenal_df[arsenal_df["pitcher_id"] == matchup_pid]
-            if not _matchup_arsenal.empty and "pitch_hand" in _matchup_arsenal.columns:
-                _mh = str(_matchup_arsenal["pitch_hand"].iloc[0]).strip().upper()
-                if _mh and _mh[0] in ("L", "R"):
-                    _matchup_pitcher_hand = _mh[0]
-
-        # Pitcher card at top
-        if pid:
-            _p_hand_letter = ""
-            if pid == matchup_pid and not _matchup_arsenal.empty:
-                _p_ars_hand = _matchup_arsenal
-            else:
-                _p_ars_hand = arsenal_df[arsenal_df["pitcher_id"] == pid] if not arsenal_df.empty else pd.DataFrame()
-            if not _p_ars_hand.empty and "pitch_hand" in _p_ars_hand.columns:
-                _h = str(_p_ars_hand["pitch_hand"].iloc[0]).strip().upper()
-                if _h and _h[0] in ("L", "R"):
-                    _p_hand_letter = _h[0]
-            p_arch_tag = f" | {p_arch}" if p_arch else ""
-            _p_label = f"SP  {pitcher_name} | {_p_hand_letter}{p_arch_tag}"
-
-            with st.expander(_p_label):
-                # Rich detail HTML
-                p_composite = p_proj.get("tdd_value_score")
-                p_diamond = diamond_rating_html(0, size="sm", precomputed=p_composite) if pd.notna(p_composite) else ""
-                p_grades_html = _pitcher_grades_html(p_proj)
-                _p_detail_parts = []
-                if p_diamond:
-                    _p_detail_parts.append(p_diamond)
-                if p_grades_html:
-                    _p_detail_parts.append(p_grades_html)
-                if _p_detail_parts:
-                    st.markdown(" ".join(_p_detail_parts), unsafe_allow_html=True)
-
-                # Pitcher game sim -- read from pre-indexed game_df
-                _p_gdf = _game_df_by_pid.get(pid, pd.DataFrame())
-                if not _p_gdf.empty:
-                    _p_rows = _p_gdf[_p_gdf.get("player_type", "pitcher") == "pitcher"]
-                    if not _p_rows.empty:
-                        _render_player_sim_from_props(
-                            _p_rows,
-                            _PITCHER_STAT_META,
-                            ["K", "BB", "H", "HR", "Outs"],
-                            f"p{pid}_{gpk}",
-                        )
-
-        _display_limit = len(display_lu) if _is_roster_lineup else 9
-        for _, brow in display_lu.head(_display_limit).iterrows():
-            bid = int(brow[id_col]) if pd.notna(brow.get(id_col)) else None
-            bname = brow.get(name_col, "Unknown")
-            order = int(brow["batting_order"])
-
-            # Prefer game-day position (DH, etc.) over roster primary
-            _game_pos = brow.get("game_position", "")
-            if _game_pos and str(_game_pos).strip():
-                pos = str(_game_pos).strip()
-                # Pitcher in batting order = two-way player batting as DH
-                if pos in ("P", "SP", "RP") and order <= 9:
-                    pos = "DH"
-            else:
-                pos = pos_lookup.get(bid, "--") if bid else "--"
-            arch = h_arch_lookup.get(bid, "Prospect") if bid else ""
-            stats = h_stat_lookup.get(bid, {}) if bid else {}
-            hand_letter = ""
-            _bh = stats.get("bat_hand")
-            if _bh and str(_bh).strip().upper()[0] in ("L", "R", "S"):
-                hand_letter = str(_bh).strip().upper()[0]
-
-            # Expander label
-            arch_tag = f" | {arch}" if arch else ""
-            _b_label = f"{order}. {bname} | {pos} | {hand_letter}{arch_tag}"
-
-            with st.expander(_b_label):
-                # Rich HTML detail
-                detail_parts: list[str] = []
-
-                # Matchup edge via odds-ratio xwOBA
-                _advantage_badge = ""
-                _p_arsenal = _matchup_arsenal
-                _h_vuln = _vuln_by_bid.get(bid, pd.DataFrame()) if bid else pd.DataFrame()
-                _h_str = _str_by_bid.get(bid, pd.DataFrame()) if bid else pd.DataFrame()
-                _pitcher_hand = _matchup_pitcher_hand
-                if matchup_pid and bid and not _p_arsenal.empty and not _h_vuln.empty:
-                    _batter_hand = hand_letter or None
-
-                    if not _p_arsenal.empty and not _h_vuln.empty:
-                        _edge_result = compute_matchup_xwoba_edge(
-                            _p_arsenal, _h_vuln, _h_str,
-                            pitcher_hand=_pitcher_hand,
-                            batter_hand=_batter_hand,
-                        )
-                        _adv_label = _edge_result["advantage"]
-                        _edge_val = _edge_result["edge"]
-                        _xw = _edge_result["matchup_xwoba"]
-                        if _adv_label == "pitcher":
-                            _advantage_badge = (
-                                f'<span style="color:var(--tdd-ember); font-size:0.68rem; '
-                                f'font-weight:600; margin-left:0.3rem;">Pitcher Edge'
-                                f'<span style="font-weight:400; font-size:0.6rem; '
-                                f'margin-left:0.2rem;">.{int(_xw*1000):03d} xwOBA</span></span>'
-                            )
-                        elif _adv_label == "hitter":
-                            _advantage_badge = (
-                                f'<span style="color:var(--tdd-sage); font-size:0.68rem; '
-                                f'font-weight:600; margin-left:0.3rem;">Hitter Edge'
-                                f'<span style="font-weight:400; font-size:0.6rem; '
-                                f'margin-left:0.2rem;">.{int(_xw*1000):03d} xwOBA</span></span>'
-                            )
-                        else:
-                            _advantage_badge = (
-                                f'<span style="color:var(--tdd-slate); font-size:0.68rem; '
-                                f'margin-left:0.3rem;">Even'
-                                f'<span style="font-weight:400; font-size:0.6rem; '
-                                f'margin-left:0.2rem;">.{int(_xw*1000):03d} xwOBA</span></span>'
-                            )
-
-                # Headshot + diamond + matchup badge
-                composite = stats.get("tdd_value_score")
-                _top_parts = []
-                if bid:
-                    _top_parts.append(headshot_html(bid, size=32))
-                if pd.notna(composite):
-                    _top_parts.append(diamond_rating_html(0, size="sm", precomputed=composite))
-                if _advantage_badge:
-                    _top_parts.append(_advantage_badge)
-                if _top_parts:
-                    detail_parts.append(
-                        f'<div style="display:flex; align-items:center; gap:0.5rem;">'
-                        + "".join(_top_parts) + '</div>'
-                    )
-
-                # Scouting bullets (descriptive + platoon info)
-                if not _p_arsenal.empty and not _h_vuln.empty:
-                    _opp_pname = opp_side["pitcher_name"] if opp_side else pitcher_name
-                    _scouting_bullets = build_matchup_scouting_bullets(
-                        _p_arsenal, _h_vuln, _h_str,
-                        pitcher_name=_opp_pname, hitter_name=bname,
-                        pitcher_hand=_pitcher_hand,
-                        batter_hand=hand_letter or None,
-                    )
-                    if _scouting_bullets:
-                        bullet_html = "".join(
-                            f'<div style="color:{c}; font-size:0.78rem; margin:0.12rem 0; '
-                            f'padding-left:0.65rem; border-left:2px solid {c};">{t}</div>'
-                            for c, t in _scouting_bullets[:4]
-                        )
-                        detail_parts.append(bullet_html)
-
-                # Grades
-                grades_html = _hitter_grades_html(stats)
-                if grades_html:
-                    detail_parts.append(grades_html)
-
-                if detail_parts:
-                    st.markdown("".join(detail_parts), unsafe_allow_html=True)
-
-                # Batter game sim -- read from pre-indexed game_df
-                _b_gdf = _game_df_by_pid.get(bid, pd.DataFrame()) if bid else pd.DataFrame()
-                if not _b_gdf.empty:
-                    _b_rows = _b_gdf[_b_gdf.get("player_type", "batter") == "batter"]
-                    if not _b_rows.empty:
-                        _render_player_sim_from_props(
-                            _b_rows,
-                            _BATTER_STAT_META,
-                            ["H", "HR", "K", "BB"],
-                            f"b{bid}_{gpk}",
-                        )
-
-        # Scouting report (new engine with creative narratives)
-        if pid:
-            _scouting_data = _get_scouting_report_data()
-            report = get_pitcher_scouting(
-                pid, pitcher_name, side_abbr, opp_abbr,
-                _scouting_data,
-            )
-            _render_scouting_html(report)
 
 
 def _parse_temp_bucket(temp_str: object) -> str:
@@ -1409,13 +940,7 @@ def _render_layout_a(
                 lambda pid: _name_lookup.get(int(pid), str(pid))
             )
         _drilldown_data = {
-            "bf_priors": load_bf_priors(),
-            "arsenal_df": load_pitcher_arsenal(),
-            "vuln_df": load_hitter_vulnerability(career=True),
-            "str_df": load_hitter_strength(career=True),
             "batter_sims_df": load_todays_batter_sims(),
-            "pitcher_sim_samples": load_pitcher_game_sim_samples(),
-            "batter_sim_samples": load_batter_game_sim_samples(),
             "game_props": _game_props,
         }
         return _drilldown_data
@@ -1488,17 +1013,9 @@ def _render_layout_a(
             )
             _dd = _get_dd()
             _render_game_drilldown(
-                game, lineups,
-                _lookups["h_arch_lookup"], _lookups["p_arch_lookup"],
-                _lookups["h_stat_lookup"],
-                _dd["bf_priors"], _dd["arsenal_df"], _dd["vuln_df"],
-                _lookups["proj_lookup"], gpk,
-                pos_lookup=_lookups["pos_lookup"],
-                str_df=_dd["str_df"],
+                game, lineups, gpk,
                 game_props=_dd["game_props"],
                 batter_sims_df=_dd["batter_sims_df"],
-                pitcher_sim_samples=_dd["pitcher_sim_samples"],
-                batter_sim_samples=_dd["batter_sim_samples"],
             )
             st.markdown('</div>', unsafe_allow_html=True)
 
