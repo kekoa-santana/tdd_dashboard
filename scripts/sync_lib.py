@@ -50,7 +50,6 @@ FILE_MAP: dict[str, str] = {
 VERIFY_IMPORTS: dict[str, list[str]] = {
     "constants":         ["PITCH_TO_FAMILY", "LEAGUE_AVG_OVERALL"],
     "theme":             ["GOLD", "EMBER", "SAGE", "SLATE", "CREAM", "DARK", "add_watermark"],
-    "matchup":           ["score_matchup", "score_matchups_batch"],
     "bf_model":          ["get_bf_distribution", "draw_bf_samples"],
     "game_k_model":      ["simulate_game_ks", "compute_k_over_probs"],
     "zone_charts":       ["plot_pitcher_location_heatmap", "plot_hitter_zone_grid", "plot_matchup_overlay"],

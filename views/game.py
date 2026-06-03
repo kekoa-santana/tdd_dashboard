@@ -10,9 +10,9 @@ import streamlit as st
 from config import GOLD, EMBER, SAGE, SLATE, CREAM, DASHBOARD_DIR
 from services.data_loader import (
     load_todays_games, load_todays_lineups, load_todays_batter_sims,
-    load_update_metadata, load_pitcher_arsenal, load_hitter_vulnerability,
-    load_hitter_strength, load_projections, load_hitter_archetypes,
-    load_pitcher_archetypes, load_bf_priors,
+    load_update_metadata, load_pitcher_arsenal,
+    load_projections, load_hitter_archetypes,
+    load_pitcher_archetypes,
     fetch_live_schedule, fetch_live_lineups, backfill_missing_lineups,
     load_park_factors, load_hr_park_factors, load_umpire_tendencies,
     load_reliever_rankings, load_roster,
@@ -22,9 +22,7 @@ from components.headshot import headshot_html
 from components.grades import pitcher_grades_html, hitter_grades_html
 from utils.alerts import tdd_info, tdd_warn
 from utils.html import esc, esc_attr
-from components.sim_chart import render_player_sim_from_props, PITCHER_STAT_META, BATTER_STAT_META
-from components.scouting import render_scouting_html, compute_matchup_xwoba_edge
-from lib.fantasy_report import load_report_data, get_pitcher_scouting, ReportData
+from components.sim_chart import render_player_sim_from_props, PITCHER_STAT_META
 from utils.helpers import format_ip, format_game_time
 from utils.team_names import team_full
 
@@ -32,11 +30,6 @@ from utils.team_names import team_full
 # ---------------------------------------------------------------------------
 # Data helpers (unchanged)
 # ---------------------------------------------------------------------------
-
-@st.cache_data(ttl=300)
-def _get_scouting_report_data() -> ReportData:
-    return load_report_data(DASHBOARD_DIR)
-
 
 @st.cache_data(ttl=300)
 def _build_lookups() -> dict:
@@ -217,113 +210,6 @@ def _render_pitcher_duel_html(game: pd.Series, lookups: dict) -> str:
         )
 
     return f'<div class="tdd-pduel">{cards}</div>'
-
-
-def _render_xwoba_leaderboard_html(
-    game: pd.Series,
-    lineups: pd.DataFrame,
-) -> str:
-    """Leaderboard of all batters in this game ranked by matchup xwOBA."""
-    gpk = game["game_pk"]
-    if lineups.empty or "game_pk" not in lineups.columns:
-        return ""
-
-    game_lu = lineups[lineups["game_pk"] == gpk]
-    if game_lu.empty:
-        return ""
-
-    arsenal_df = load_pitcher_arsenal()
-    vuln_df = load_hitter_vulnerability(career=True)
-    str_df = load_hitter_strength(career=True)
-
-    if arsenal_df.empty or vuln_df.empty:
-        return ""
-
-    away_pid_raw = game.get("away_pitcher_id")
-    home_pid_raw = game.get("home_pitcher_id")
-    away_pid = int(away_pid_raw) if pd.notna(away_pid_raw) else None
-    home_pid = int(home_pid_raw) if pd.notna(home_pid_raw) else None
-    away_team = game.get("away_team_id")
-    home_team = game.get("home_team_id")
-
-    entries: list[tuple[float, int, str, str, str]] = []  # (xwoba, bid, name, team, adv)
-
-    for _, row in game_lu.iterrows():
-        bid = int(row.get("batter_id", 0))
-        if not bid:
-            continue
-        batter_name = row.get("batter_name", str(bid))
-        team_id = row.get("team_id")
-        team_abbr = row.get("team_abbr", "")
-
-        # Determine opposing pitcher
-        if team_id == away_team:
-            opp_pid = home_pid
-        elif team_id == home_team:
-            opp_pid = away_pid
-        else:
-            continue
-        if not opp_pid:
-            continue
-
-        _p_ars = arsenal_df[arsenal_df["pitcher_id"] == opp_pid]
-        _h_vul = vuln_df[vuln_df["batter_id"] == bid]
-        _h_str = str_df[str_df["batter_id"] == bid] if not str_df.empty else pd.DataFrame()
-        if _p_ars.empty or _h_vul.empty:
-            continue
-
-        _ph = str(_p_ars["pitch_hand"].iloc[0]) if "pitch_hand" in _p_ars.columns else None
-        _bh = str(_h_vul["batter_stand"].iloc[0]) if "batter_stand" in _h_vul.columns else None
-
-        edge = compute_matchup_xwoba_edge(_p_ars, _h_vul, _h_str, pitcher_hand=_ph, batter_hand=_bh)
-        entries.append((edge["matchup_xwoba"], bid, batter_name, team_abbr, edge["advantage"]))
-
-    if not entries:
-        return ""
-
-    # Sort by xwOBA descending
-    entries.sort(key=lambda x: x[0], reverse=True)
-
-    LG_XWOBA = 0.315
-    rows = ""
-    for rank, (xw, bid, name, team, adv) in enumerate(entries, 1):
-        if adv == "hitter":
-            color = "var(--tdd-sage)"
-        elif adv == "pitcher":
-            color = "var(--tdd-ember)"
-        else:
-            color = "var(--tdd-slate)"
-
-        # Bar width relative to max possible (~0.500)
-        bar_pct = min(xw / 0.500 * 100, 100)
-        lg_pct = LG_XWOBA / 0.500 * 100
-
-        rows += (
-            '<div style="display:flex;gap:8px;align-items:center;'
-            'padding:0.35rem 0;border-bottom:1px solid var(--tdd-dark-border-faint)">'
-            f'<span style="color:var(--tdd-slate);font-size:0.65rem;width:1.2rem;text-align:right">{rank}</span>'
-            f'{headshot_html(bid, size=28)}'
-            '<div style="flex:1;min-width:0">'
-            f'<div style="display:flex;justify-content:space-between;align-items:baseline">'
-            f'<span style="color:var(--tdd-cream);font-family:var(--tdd-font-heading);font-weight:700;font-size:0.78rem">{esc(name)}'
-            f'<span style="color:var(--tdd-slate);font-size:0.62rem;margin-left:0.3rem">{esc(team)}</span></span>'
-            f'<span style="color:{color};font-family:var(--tdd-font-mono);font-weight:700;font-size:0.78rem">.{int(xw*1000):03d}</span>'
-            '</div>'
-            f'<div style="position:relative;height:4px;background:var(--tdd-dark-border);border-radius:2px;margin-top:2px">'
-            f'<div style="position:absolute;left:{lg_pct:.1f}%;top:-1px;bottom:-1px;width:1px;background:var(--tdd-slate);opacity:0.5"></div>'
-            f'<div style="width:{bar_pct:.1f}%;height:100%;background:{color};border-radius:2px"></div>'
-            '</div>'
-            '</div>'
-            '</div>'
-        )
-
-    return (
-        '<div style="padding:0.2rem 0">'
-        '<div style="color:var(--tdd-slate);font-size:0.6rem;margin-bottom:0.5rem">'
-        'Odds-ratio xwOBA per batter vs opposing starter (league avg .315)</div>'
-        f'{rows}'
-        '</div>'
-    )
 
 
 def _render_weather_park_html(game: pd.Series) -> str:
@@ -778,35 +664,10 @@ def _render_game_plan_html(
         if env_parts:
             narrative_parts.append(f"Environment: {', '.join(env_parts)}.")
 
-        # === Matchup dynamics ===
+        # === Lineup threats (projection-based) ===
         dynamics = []
-        if not side_batters.empty and "matchup_k_lift" in side_batters.columns:
+        if not side_batters.empty:
             sb = side_batters.copy()
-            # Cap extreme lifts for display
-            sb["matchup_k_lift_capped"] = sb["matchup_k_lift"].clip(-0.60, 0.60)
-
-            # Highest K risk — with arsenal context
-            worst_k = sb.nlargest(1, "matchup_k_lift_capped")
-            if not worst_k.empty:
-                w = worst_k.iloc[0]
-                lift = float(w["matchup_k_lift_capped"])
-                if lift > 0.15:
-                    whiff_note = f" — the {top_whiff_pitch} is the weapon" if top_whiff_pitch else ""
-                    dynamics.append(
-                        f'<b>{esc(w["batter_name"])}</b> is the toughest matchup '
-                        f'in this lineup (K lift +{lift:.2f}){whiff_note}'
-                    )
-
-            # Best contact matchup
-            best_k = sb.nsmallest(1, "matchup_k_lift_capped")
-            if not best_k.empty:
-                b = best_k.iloc[0]
-                lift = float(b["matchup_k_lift_capped"])
-                if lift < -0.10:
-                    dynamics.append(
-                        f'<b>{esc(b["batter_name"])}</b> has the best contact profile '
-                        f'against this arsenal (K lift {lift:.2f})'
-                    )
 
             # Walk upside (only for walk-prone pitchers)
             if bb_rate >= 0.08 and "expected_bb" in sb.columns:
@@ -827,19 +688,6 @@ def _render_game_plan_html(
                         f'<b>{esc(best_hr["batter_name"])}</b> carries the most '
                         f'HR upside ({best_hr["expected_hr"]:.2f} expected)'
                     )
-
-            # Lineup-wide K risk assessment
-            avg_lift = float(sb["matchup_k_lift_capped"].mean())
-            if avg_lift > 0.10:
-                dynamics.append(
-                    "This lineup profiles as K-prone against this arsenal — "
-                    "disciplined at-bats will be key"
-                )
-            elif avg_lift < -0.10:
-                dynamics.append(
-                    "This lineup has a collective contact advantage — "
-                    "expect balls in play early"
-                )
 
         # === Render ===
         narrative_html = ""
@@ -1065,13 +913,6 @@ def page_game() -> None:
     # These use st.columns, st.plotly_chart, etc. so they can't be
     # part of the single HTML blob above.
 
-    # xwOBA Matchup Leaderboard (collapsible)
-    if is_today_game and not lineups.empty:
-        xwoba_lb = _render_xwoba_leaderboard_html(game, lineups)
-        if xwoba_lb:
-            with st.expander("xwOBA Matchup Leaderboard", expanded=False):
-                st.markdown(xwoba_lb, unsafe_allow_html=True)
-
     # Pitcher sim distributions (Plotly charts)
     if is_today_game and not game_props_df.empty:
         st.markdown(
@@ -1105,84 +946,14 @@ def page_game() -> None:
                             f"gp_p_{side}_{gpk}",
                         )
 
-    # Lineup matchups (uses schedule.py machinery with st.expanders)
     game_lu = lineups[lineups["game_pk"] == gpk] if not lineups.empty and "game_pk" in lineups.columns else pd.DataFrame()
-    if not game_lu.empty:
-        st.markdown(
-            '<div style="margin-top:1rem">'
-            '<div class="gsec-head" style="color:var(--tdd-gold);font-family:var(--tdd-font-heading);'
-            'font-size:0.7rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;'
-            'margin-bottom:6px">Lineup Matchups</div></div>',
-            unsafe_allow_html=True,
-        )
-        from views.schedule import (
-            _render_matchup_tab_sidebyside,
-            _detect_lineup_changes,
-        )
-
-        h_arch = lookups["h_arch"]
-        p_arch = lookups["p_arch"]
-        h_stat = lookups["h_stat"]
-        proj_lookup = lookups["proj"]
-
-        pos_lookup = {}
-        for _, r in game_lu.iterrows():
-            bid = int(r.get("batter_id", 0))
-            pos = r.get("game_position", "")
-            if bid and pos:
-                pos_lookup[bid] = pos
-
-        sides = []
-        for side, opp_side in [("away", "home"), ("home", "away")]:
-            pitcher_name = game.get(f"{side}_pitcher_name") or "TBD"
-            pid_raw = game.get(f"{side}_pitcher_id")
-            pid = int(pid_raw) if pd.notna(pid_raw) else None
-            side_team_id = game.get(f"{side}_team_id")
-            opp_team_id = game.get(f"{opp_side}_team_id")
-            opp_abbr = game.get(f"{opp_side}_abbr", "?")
-            side_abbr = game.get(f"{side}_abbr", "?")
-
-            opp_lu = (
-                game_lu[game_lu["team_id"] == opp_team_id].sort_values("batting_order")
-                if pd.notna(opp_team_id) else pd.DataFrame()
-            )
-            own_lu = (
-                game_lu[game_lu["team_id"] == side_team_id].sort_values("batting_order")
-                if pd.notna(side_team_id) else pd.DataFrame()
-            )
-
-            sides.append({
-                "side": side,
-                "abbr": side_abbr,
-                "opp_abbr": opp_abbr,
-                "pitcher_name": pitcher_name,
-                "pitcher_id": pid,
-                "pitcher_arch": p_arch.get(pid) if pid else None,
-                "pitcher_proj": proj_lookup.get(pid, {}) if pid else {},
-                "opp_lineup": opp_lu,
-                "own_lineup": own_lu,
-            })
-
-        arsenal_df = load_pitcher_arsenal()
-        vuln_df = load_hitter_vulnerability(career=True)
-        str_df = load_hitter_strength(career=True)
-        bf_priors_df = load_bf_priors()
-
-        _render_matchup_tab_sidebyside(
-            sides, h_arch, h_stat,
-            arsenal_df, vuln_df, gpk,
-            pos_lookup=pos_lookup,
-            str_df=str_df,
-            bf_priors=bf_priors_df,
-            batter_sims_df=batter_sims,
-        )
-    elif not is_today_game:
+    if game_lu.empty and not is_today_game:
         st.markdown(
             '<div class="tdd-meta" style="margin-top:1rem">'
             'Simulations and projections are only available for today\'s games.</div>',
             unsafe_allow_html=True,
         )
-    else:
+    elif game_lu.empty:
         st.markdown(
             '<div class="tdd-meta" style="margin-top:1rem">Lineups not yet available.</div>',
             unsafe_allow_html=True,
