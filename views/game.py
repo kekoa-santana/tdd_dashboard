@@ -957,7 +957,9 @@ def page_game() -> None:
                         ]
                         if not _ar.empty:
                             st.markdown(
-                                build_attribution_panel(_ar.iloc[0]),
+                                build_attribution_panel(
+                                    _ar.iloc[0], name=pitcher_name,
+                                ),
                                 unsafe_allow_html=True,
                             )
 
