@@ -15,10 +15,11 @@ from services.data_loader import (
     load_pitcher_archetypes,
     fetch_live_schedule, fetch_live_lineups, backfill_missing_lineups,
     load_park_factors, load_hr_park_factors, load_umpire_tendencies,
-    load_reliever_rankings, load_roster,
+    load_reliever_rankings, load_roster, load_prop_attribution,
 )
 from components.team_logo import team_logo_html
 from components.headshot import headshot_html
+from components.attribution import build_attribution_panel
 from components.grades import pitcher_grades_html, hitter_grades_html
 from utils.alerts import tdd_info, tdd_warn
 from utils.html import esc, esc_attr
@@ -922,6 +923,7 @@ def page_game() -> None:
             'margin-bottom:6px">Pitcher Projections</div></div>',
             unsafe_allow_html=True,
         )
+        _attr_df = load_prop_attribution()
         col_a, col_h = st.columns(2)
         for side, col in [("away", col_a), ("home", col_h)]:
             pid_raw = game.get(f"{side}_pitcher_id")
@@ -945,6 +947,19 @@ def page_game() -> None:
                             ["K", "BB", "H", "HR", "Outs"],
                             f"gp_p_{side}_{gpk}",
                         )
+                    # "Why this number" — K projection attribution waterfall
+                    if not _attr_df.empty:
+                        _ar = _attr_df[
+                            (_attr_df["game_pk"] == gpk)
+                            & (_attr_df["player_id"] == pid)
+                            & (_attr_df["player_type"] == "pitcher")
+                            & (_attr_df["stat"] == "K")
+                        ]
+                        if not _ar.empty:
+                            st.markdown(
+                                build_attribution_panel(_ar.iloc[0]),
+                                unsafe_allow_html=True,
+                            )
 
     game_lu = lineups[lineups["game_pk"] == gpk] if not lineups.empty and "game_pk" in lineups.columns else pd.DataFrame()
     if game_lu.empty and not is_today_game:

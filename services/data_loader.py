@@ -342,6 +342,20 @@ def load_game_props() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_DATA_TTL)
+def load_prop_attribution() -> pd.DataFrame:
+    """Per-driver projection attribution (game_prop_attribution.parquet).
+
+    Keyed on (game_pk, player_id, stat); columns include baseline, driver_self,
+    driver_opp, tto, umpire, catcher, park, weather, residual, expected, volume.
+    Empty if the parquet is absent (older precompute).
+    """
+    path = DASHBOARD_DIR / "game_prop_attribution.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
 def load_game_predictions() -> pd.DataFrame:
     path = DASHBOARD_DIR / "todays_game_predictions.parquet"
     if not path.exists():
