@@ -11,9 +11,10 @@ from utils.alerts import tdd_info, tdd_warn
 from services.data_loader import (
     load_projections, load_game_props, load_dk_props, load_pp_props,
     load_todays_games,
-    load_stat_tier_thresholds,
+    load_stat_tier_thresholds, load_prop_attribution,
     dedupe_pp_against_dk,
 )
+from components.attribution import build_attribution_panel
 from components.headshot import headshot_html
 from utils.helpers import format_game_time
 from utils.html import esc, esc_attr
@@ -732,6 +733,37 @@ def page_projected_performers() -> None:
             table_html += _render_pick_row(row)
         table_html += '</div></div>'
         st.markdown(table_html, unsafe_allow_html=True)
+
+    # ── Explain a projection (attribution waterfall) ───────────────
+    # The picks table is a single HTML blob, so per-row expanders don't
+    # compose; offer a selector instead. Attribution exists for K only (P1).
+    _attr = load_prop_attribution()
+    _kpicks = filtered[filtered["stat"] == "K"] if not filtered.empty else filtered
+    if not _attr.empty and not _kpicks.empty:
+        st.markdown(
+            '<div style="color:var(--tdd-gold);font-weight:700;font-size:0.7rem;'
+            'letter-spacing:1px;text-transform:uppercase;margin:1.2rem 0 0.3rem">'
+            'Why this number</div>',
+            unsafe_allow_html=True,
+        )
+        _opts: dict[str, tuple[int, str]] = {}
+        for _, _r in _kpicks.iterrows():
+            _opts[f'{_r["player_name"]} — K'] = (
+                int(_r["player_id"]), str(_r.get("player_type", "")),
+            )
+        _sel = st.selectbox(
+            "Explain a K projection", ["—"] + list(_opts),
+            key="pl_explain", label_visibility="collapsed",
+        )
+        if _sel and _sel != "—":
+            _pid, _ptype = _opts[_sel]
+            _ar = _attr[(_attr["player_id"] == _pid) & (_attr["stat"] == "K")]
+            if _ptype:
+                _ar = _ar[_ar["player_type"] == _ptype]
+            if not _ar.empty:
+                st.markdown(
+                    build_attribution_panel(_ar.iloc[0]), unsafe_allow_html=True,
+                )
 
     # Close page wrapper
     st.markdown('</div>', unsafe_allow_html=True)
