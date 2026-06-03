@@ -15,11 +15,13 @@ from services.data_loader import (
     load_todays_games, load_todays_lineups, load_todays_batter_sims,
     load_update_metadata,
     load_projections, load_counting, load_hitter_archetypes, load_pitcher_archetypes,
-    load_roster, load_game_props,
+    load_roster, load_game_props, load_prop_attribution,
+    load_hitters_daily_standouts, load_pitchers_daily_standouts,
     fetch_live_schedule, fetch_live_lineups, backfill_missing_lineups,
 )
 from utils.helpers import format_game_time
 from utils.html import esc, esc_attr
+from components.attribution import build_attribution_panel
 from components.diamond_rating import diamond_rating_html
 from components.expandable_card import EXPANDABLE_CARD_CSS, expandable_card_html
 from components.headshot import headshot_html
@@ -447,6 +449,29 @@ def _render_props_section(
             cards_html += _prop_card_html(row)
         st.markdown(cards_html, unsafe_allow_html=True)
 
+    # "Why this number" — K projection attribution for the game's starters
+    _attr = load_prop_attribution()
+    if not _attr.empty:
+        _pids = list(dict.fromkeys(
+            game_df[game_df["player_type"] == "pitcher"]["player_id"].astype(int)
+        ))
+        _panels = []
+        for _pid in _pids:
+            _ar = _attr[
+                (_attr["game_pk"] == gpk)
+                & (_attr["player_id"] == _pid)
+                & (_attr["player_type"] == "pitcher")
+                & (_attr["stat"] == "K")
+            ]
+            if not _ar.empty:
+                _panels.append(build_attribution_panel(_ar.iloc[0]))
+        if _panels:
+            st.markdown(
+                '<div class="tdd-props-header">Why This Number</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown("".join(_panels), unsafe_allow_html=True)
+
 
 def _prop_card_html(row: pd.Series) -> str:
     """Build an expandable card for a single prop edge."""
@@ -629,44 +654,71 @@ def _schedule_masthead_html(
     )
 
 
-def _top_edges_html(props_df: pd.DataFrame, name_lookup: dict[int, str], n: int = 5) -> str:
-    """Render the top N prop edges as a rail above the game list."""
-    if props_df.empty or "expected" not in props_df.columns:
+def _yesterday_performers_html(hitters: pd.DataFrame, pitchers: pd.DataFrame) -> str:
+    """Render yesterday's top performers widget above the game list."""
+    if hitters.empty and pitchers.empty:
         return ""
 
-    # Compute edge and filter to meaningful ones
-    work = props_df.copy()
-    if "line" not in work.columns or "expected" not in work.columns:
-        return ""
-    work["edge"] = work["expected"] - work["line"]
-    work["abs_edge"] = work["edge"].abs()
-    work = work[work["abs_edge"] > 0.3].sort_values("abs_edge", ascending=False).head(n)
+    items: list[dict] = []
 
-    if work.empty:
+    if not hitters.empty and "daily_standout_score" in hitters.columns:
+        top_h = hitters.sort_values("daily_standout_score", ascending=False).head(3)
+        for _, row in top_h.iterrows():
+            name = str(row.get("batter_name", ""))
+            if not name:
+                continue
+            team = str(row.get("team_abbr", "")) or ""
+            h_val = int(row["hits"]) if pd.notna(row.get("hits")) else 0
+            ab_val = int(row["ab"]) if pd.notna(row.get("ab")) else 0
+            hr_val = int(row["hr"]) if pd.notna(row.get("hr")) else 0
+            stat = f"{h_val}-{ab_val}"
+            if hr_val > 0:
+                stat += f", {hr_val}HR"
+            items.append({"badge": "Hitter", "name": name, "team": team, "stat": stat})
+
+    if not pitchers.empty and "daily_standout_score" in pitchers.columns:
+        top_p = pitchers.sort_values("daily_standout_score", ascending=False).head(2)
+        for _, row in top_p.iterrows():
+            name = str(row.get("pitcher_name", ""))
+            if not name:
+                continue
+            team = str(row.get("team_abbr", "")) or ""
+            ip_val = float(row["ip"]) if pd.notna(row.get("ip")) else 0.0
+            k_val = int(row["k"]) if pd.notna(row.get("k")) else 0
+            bb_val = int(row["bb"]) if pd.notna(row.get("bb")) else 0
+            h_val = int(row["hits"]) if pd.notna(row.get("hits")) else 0
+            stat = f"{ip_val:.1f} IP, {k_val}K, {bb_val}BB, {h_val}H"
+            items.append({"badge": "Pitcher", "name": name, "team": team, "stat": stat})
+
+    if not items:
         return ""
+
+    header = (
+        '<div style="display:flex; align-items:center; justify-content:space-between; '
+        'padding: 0.4rem 0.25rem 0.3rem; border-top: 1px solid var(--tdd-dark-border);">'
+        '<span style="font-size:0.65rem; letter-spacing:1.2px; text-transform:uppercase; '
+        'font-weight:700; color:var(--tdd-slate); font-family:var(--tdd-font-heading);">'
+        "Yesterday's Top Performers</span>"
+        '<a href="?page=the_diamond_daily" target="_self" '
+        'style="font-size:0.7rem; color:var(--tdd-gold); text-decoration:none; '
+        'font-weight:600; letter-spacing:0.3px;">'
+        'View Diamond Daily &rsaquo;'
+        '</a>'
+        '</div>'
+    )
 
     tiles = ""
-    for _, row in work.iterrows():
-        pid = int(row["player_id"]) if pd.notna(row.get("player_id")) else 0
-        name = name_lookup.get(pid, str(pid))
-        stat = str(row.get("stat", ""))
-        edge_val = row["edge"]
-        direction = "over" if edge_val > 0 else "under"
-        edge_str = f"+{edge_val:.1f}" if edge_val > 0 else f"{edge_val:.1f}"
-        line_str = f"{'O' if edge_val > 0 else 'U'} {row.get('line', ''):.1f} {stat}"
-        p_over = row.get("p_over", 0.5)
-        tier = "Lock" if abs(edge_val) > 1.5 else "Strong" if abs(edge_val) > 0.8 else "Lean"
-
+    for item in items:
         tiles += (
             '<div class="e">'
-            f'<div class="tier {esc(tier)}">{esc(tier)}</div>'
-            f'<div class="nm">{esc(name)}</div>'
-            f'<div class="line">{esc(line_str)}</div>'
-            f'<div class="edge-v {esc(direction)}">{esc(edge_str)}</div>'
+            f'<div class="tier">{esc(item["badge"])}</div>'
+            f'<div class="nm">{esc(item["name"])}</div>'
+            f'<div class="line">{esc(item["team"])}</div>'
+            f'<div class="edge-v over">{esc(item["stat"])}</div>'
             '</div>'
         )
 
-    return f'<div class="tdd-top-edges">{tiles}</div>'
+    return f'{header}<div class="tdd-top-edges" style="border-top:none;">{tiles}</div>'
 
 
 def _game_row_html(
@@ -885,11 +937,13 @@ def _render_layout_a(
         unsafe_allow_html=True,
     )
 
-    # Top edges rail
-    if not sims.empty:
-        edges_html = _top_edges_html(sims, _lookups["name_lookup"])
-        if edges_html:
-            st.markdown(edges_html, unsafe_allow_html=True)
+    # Yesterday's top performers widget
+    _yp_html = _yesterday_performers_html(
+        load_hitters_daily_standouts(),
+        load_pitchers_daily_standouts(),
+    )
+    if _yp_html:
+        st.markdown(_yp_html, unsafe_allow_html=True)
 
     if schedule.empty:
         tdd_info("No games scheduled for this date.")
