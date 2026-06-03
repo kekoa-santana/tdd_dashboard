@@ -25,7 +25,6 @@ import pandas as pd
 from scipy.special import expit, logit
 
 from lib.bf_model import draw_bf_samples, get_bf_distribution
-from lib.matchup import score_matchup, score_matchup_for_stat
 from lib.rest_adjustment import (
     apply_rest_to_bf,
     compute_rest_for_game,
@@ -286,62 +285,12 @@ def simulate_game_ks(
     return k_totals
 
 
-def _compute_lineup_matchup_lifts(
-    pitcher_id: int,
-    lineup_batter_ids: list[int],
-    pitcher_arsenal: pd.DataFrame,
-    hitter_vuln: pd.DataFrame,
-    baselines_pt: dict[str, dict[str, float]],
-) -> tuple[np.ndarray, list[dict[str, Any]]]:
-    """Score matchups for a 9-batter lineup.
-
-    Parameters
-    ----------
-    pitcher_id : int
-        Pitcher MLB ID.
-    lineup_batter_ids : list[int]
-        Exactly 9 batter IDs in batting order.
-    pitcher_arsenal : pd.DataFrame
-        Pitcher's arsenal profile for the season.
-    hitter_vuln : pd.DataFrame
-        Hitter vulnerability profiles for the season.
-    baselines_pt : dict
-        League baselines per pitch type.
-
-    Returns
-    -------
-    tuple[np.ndarray, list[dict]]
-        (lifts array shape (9,), list of per-batter matchup dicts)
-    """
-    lifts = np.zeros(9)
-    matchup_details = []
-
-    for i, batter_id in enumerate(lineup_batter_ids):
-        result = score_matchup(
-            pitcher_id=pitcher_id,
-            batter_id=batter_id,
-            pitcher_arsenal=pitcher_arsenal,
-            hitter_vuln=hitter_vuln,
-            baselines_pt=baselines_pt,
-        )
-        lift = result.get("matchup_k_logit_lift", 0.0)
-        if np.isnan(lift):
-            lift = 0.0
-        lifts[i] = lift
-        matchup_details.append(result)
-
-    return lifts, matchup_details
-
-
 def predict_game(
     pitcher_id: int,
     season: int,
     lineup_batter_ids: list[int] | None,
     pitcher_k_rate_samples: np.ndarray,
     bf_priors: pd.DataFrame,
-    pitcher_arsenal: pd.DataFrame | None = None,
-    hitter_vuln: pd.DataFrame | None = None,
-    baselines_pt: dict[str, dict[str, float]] | None = None,
     umpire_k_logit_lift: float = 0.0,
     weather_k_logit_lift: float = 0.0,
     days_rest: int | None = None,
@@ -359,17 +308,11 @@ def predict_game(
     season : int
         Season for BF lookup.
     lineup_batter_ids : list[int] or None
-        9 batter IDs in order. None = no matchup adjustment.
+        9 batter IDs in order. Retained for API compatibility; not used.
     pitcher_k_rate_samples : np.ndarray
         Posterior K% samples from Layer 1.
     bf_priors : pd.DataFrame
         BF priors from ``compute_pitcher_bf_priors``.
-    pitcher_arsenal : pd.DataFrame or None
-        Pitcher arsenal for matchup scoring. Required if lineup given.
-    hitter_vuln : pd.DataFrame or None
-        Hitter vulnerability profiles. Required if lineup given.
-    baselines_pt : dict or None
-        League baselines per pitch type. Required if lineup given.
     umpire_k_logit_lift : float
         Logit-scale shift for HP umpire K-rate tendency (0.0 = neutral).
     weather_k_logit_lift : float
@@ -387,9 +330,8 @@ def predict_game(
     -------
     dict
         Keys: k_samples, k_over_probs, expected_k, std_k,
-        bf_mu, bf_sigma, lineup_matchup_lifts, per_batter_details,
-        umpire_k_logit_lift, weather_k_logit_lift, rest_k_logit_lift,
-        days_rest, rest_bucket.
+        bf_mu, bf_sigma, umpire_k_logit_lift, weather_k_logit_lift,
+        rest_k_logit_lift, days_rest, rest_bucket.
     """
     # BF distribution
     bf_info = get_bf_distribution(pitcher_id, season, bf_priors)
@@ -401,22 +343,11 @@ def predict_game(
     rest_k_lift = rest_adj["k_lift"]
     bf_mu, bf_sigma = apply_rest_to_bf(bf_mu, bf_sigma, days_rest)
 
-    # Matchup lifts
-    lineup_lifts = None
-    per_batter_details = []
-    if lineup_batter_ids is not None and len(lineup_batter_ids) == 9:
-        if pitcher_arsenal is not None and hitter_vuln is not None and baselines_pt is not None:
-            lineup_lifts, per_batter_details = _compute_lineup_matchup_lifts(
-                pitcher_id, lineup_batter_ids,
-                pitcher_arsenal, hitter_vuln, baselines_pt,
-            )
-
     # Monte Carlo simulation
     k_samples = simulate_game_ks(
         pitcher_k_rate_samples=pitcher_k_rate_samples,
         bf_mu=bf_mu,
         bf_sigma=bf_sigma,
-        lineup_matchup_lifts=lineup_lifts,
         umpire_k_logit_lift=umpire_k_logit_lift,
         weather_k_logit_lift=weather_k_logit_lift,
         rest_k_logit_lift=rest_k_lift,
@@ -435,8 +366,6 @@ def predict_game(
         "std_k": float(np.std(k_samples)),
         "bf_mu": bf_mu,
         "bf_sigma": bf_sigma,
-        "lineup_matchup_lifts": lineup_lifts,
-        "per_batter_details": per_batter_details,
         "umpire_k_logit_lift": umpire_k_logit_lift,
         "weather_k_logit_lift": weather_k_logit_lift,
         "rest_k_logit_lift": rest_k_lift,
@@ -449,9 +378,6 @@ def predict_game_batch(
     game_records: pd.DataFrame,
     pitcher_posteriors: dict[int, np.ndarray],
     bf_priors: pd.DataFrame,
-    pitcher_arsenal: pd.DataFrame | None = None,
-    hitter_vuln: pd.DataFrame | None = None,
-    baselines_pt: dict[str, dict[str, float]] | None = None,
     game_batter_ks: pd.DataFrame | None = None,
     game_lineups: pd.DataFrame | None = None,
     umpire_lifts: dict[int, float] | None = None,
@@ -589,9 +515,6 @@ def predict_game_batch(
             lineup_batter_ids=lineup_ids,
             pitcher_k_rate_samples=k_rate_samples,
             bf_priors=bf_priors,
-            pitcher_arsenal=pitcher_arsenal,
-            hitter_vuln=hitter_vuln,
-            baselines_pt=baselines_pt,
             umpire_k_logit_lift=ump_lift,
             weather_k_logit_lift=wx_lift,
             days_rest=dr,
@@ -636,13 +559,6 @@ def predict_game_batch(
 # ---------------------------------------------------------------------------
 # Generalized simulation functions (all prop types: K, BB, HR, H, Outs)
 # ---------------------------------------------------------------------------
-
-# Mapping from stat_name → matchup lift key in score_matchup_for_stat results
-_STAT_LIFT_KEYS: dict[str, str] = {
-    "k": "matchup_k_logit_lift",
-    "bb": "matchup_bb_logit_lift",
-    "hr": "matchup_hr_logit_lift",
-}
 
 
 def simulate_game_stat(
@@ -906,59 +822,6 @@ def simulate_game_stat_poisson(
     return stat_totals
 
 
-def _compute_lineup_matchup_lifts_for_stat(
-    stat_name: str,
-    pitcher_id: int,
-    lineup_batter_ids: list[int],
-    pitcher_arsenal: pd.DataFrame,
-    hitter_vuln: pd.DataFrame,
-    baselines_pt: dict[str, dict[str, float]],
-) -> tuple[np.ndarray, list[dict[str, Any]]]:
-    """Score matchups for a 9-batter lineup for any stat type.
-
-    Parameters
-    ----------
-    stat_name : str
-        Stat to score ('k', 'bb', 'hr', etc.).
-    pitcher_id : int
-        Pitcher MLB ID.
-    lineup_batter_ids : list[int]
-        Exactly 9 batter IDs in batting order.
-    pitcher_arsenal : pd.DataFrame
-        Pitcher's arsenal profile for the season.
-    hitter_vuln : pd.DataFrame
-        Hitter vulnerability profiles for the season.
-    baselines_pt : dict
-        League baselines per pitch type.
-
-    Returns
-    -------
-    tuple[np.ndarray, list[dict]]
-        (lifts array shape (9,), list of per-batter matchup dicts)
-    """
-    lift_key = _STAT_LIFT_KEYS.get(stat_name.lower(), "matchup_logit_lift")
-
-    lifts = np.zeros(len(lineup_batter_ids))
-    matchup_details: list[dict[str, Any]] = []
-
-    for i, batter_id in enumerate(lineup_batter_ids):
-        result = score_matchup_for_stat(
-            stat_name=stat_name,
-            pitcher_id=pitcher_id,
-            batter_id=batter_id,
-            pitcher_arsenal=pitcher_arsenal,
-            hitter_vuln=hitter_vuln,
-            baselines_pt=baselines_pt,
-        )
-        lift = result.get(lift_key, 0.0)
-        if np.isnan(lift):
-            lift = 0.0
-        lifts[i] = lift
-        matchup_details.append(result)
-
-    return lifts, matchup_details
-
-
 def predict_game_stat(
     stat_name: str,
     pitcher_id: int,
@@ -966,9 +829,6 @@ def predict_game_stat(
     lineup_batter_ids: list[int] | None,
     rate_samples: np.ndarray,
     bf_priors: pd.DataFrame,
-    pitcher_arsenal: pd.DataFrame | None = None,
-    hitter_vuln: pd.DataFrame | None = None,
-    baselines_pt: dict[str, dict[str, float]] | None = None,
     context_logit_lift: float = 0.0,
     lineup_proneness_lift: float = 0.0,
     park_factor: float = 1.0,
@@ -996,12 +856,6 @@ def predict_game_stat(
         Posterior rate samples from Layer 1 (values in [0, 1]).
     bf_priors : pd.DataFrame
         BF priors from ``compute_pitcher_bf_priors``.
-    pitcher_arsenal : pd.DataFrame or None
-        Pitcher arsenal for matchup scoring. Required if lineup given.
-    hitter_vuln : pd.DataFrame or None
-        Hitter vulnerability profiles. Required if lineup given.
-    baselines_pt : dict or None
-        League baselines per pitch type. Required if lineup given.
     context_logit_lift : float
         Logit-scale context shift (umpire + weather + park combined).
     lineup_proneness_lift : float
@@ -1028,9 +882,8 @@ def predict_game_stat(
     -------
     dict
         Keys: stat_samples, over_probs, expected_{stat_name},
-        std_{stat_name}, bf_mu, bf_sigma, lineup_matchup_lifts,
-        per_batter_details, context_logit_lift, lineup_proneness_lift,
-        park_factor, days_rest, rest_bucket.
+        std_{stat_name}, bf_mu, bf_sigma, context_logit_lift,
+        lineup_proneness_lift, park_factor, days_rest, rest_bucket.
     """
     # BF distribution
     bf_info = get_bf_distribution(pitcher_id, season, bf_priors)
@@ -1047,15 +900,7 @@ def predict_game_stat(
     if sn_lower in _REST_STATS:
         bf_mu, bf_sigma = apply_rest_to_bf(bf_mu, bf_sigma, days_rest)
 
-    # Matchup lifts
     lineup_lifts = None
-    per_batter_details: list[dict[str, Any]] = []
-    if lineup_batter_ids is not None and len(lineup_batter_ids) == 9:
-        if pitcher_arsenal is not None and hitter_vuln is not None and baselines_pt is not None:
-            lineup_lifts, per_batter_details = _compute_lineup_matchup_lifts_for_stat(
-                stat_name, pitcher_id, lineup_batter_ids,
-                pitcher_arsenal, hitter_vuln, baselines_pt,
-            )
 
     # Combine context + lineup proneness + rest into total context lift
     total_context = context_logit_lift + lineup_proneness_lift + rest_lift
@@ -1101,8 +946,6 @@ def predict_game_stat(
         f"std_{sn}": float(np.std(stat_samples)),
         "bf_mu": bf_mu,
         "bf_sigma": bf_sigma,
-        "lineup_matchup_lifts": lineup_lifts,
-        "per_batter_details": per_batter_details,
         "context_logit_lift": context_logit_lift,
         "lineup_proneness_lift": lineup_proneness_lift,
         "park_factor": park_factor,
@@ -1194,9 +1037,6 @@ def predict_batter_game(
     rate_samples: np.ndarray,
     pa_mu: float,
     pa_sigma: float,
-    pitcher_arsenal: pd.DataFrame | None = None,
-    hitter_vuln: pd.DataFrame | None = None,
-    baselines_pt: dict[str, dict[str, float]] | None = None,
     context_logit_lift: float = 0.0,
     opposing_pitcher_lift: float = 0.0,
     park_factor: float = 1.0,
@@ -1221,12 +1061,6 @@ def predict_batter_game(
         Mean PA for this batter in a game.
     pa_sigma : float
         Std of PA.
-    pitcher_arsenal : pd.DataFrame or None
-        Pitcher arsenal for matchup scoring.
-    hitter_vuln : pd.DataFrame or None
-        Hitter vulnerability profiles.
-    baselines_pt : dict or None
-        League baselines per pitch type.
     context_logit_lift : float
         Logit-scale context shift (umpire + weather).
     opposing_pitcher_lift : float
@@ -1248,27 +1082,11 @@ def predict_batter_game(
     -------
     dict
         Keys: stat_samples, over_probs, expected_{stat_name},
-        std_{stat_name}, pa_mu, pa_sigma, matchup_logit_lift,
-        opposing_pitcher_lift.
+        std_{stat_name}, pa_mu, pa_sigma, opposing_pitcher_lift.
     """
     sn = stat_name.lower()
-    lift_key = _STAT_LIFT_KEYS.get(sn, "matchup_logit_lift")
 
-    # Compute matchup lift
     matchup_lift = 0.0
-    matchup_detail: dict[str, Any] = {}
-    if pitcher_arsenal is not None and hitter_vuln is not None and baselines_pt is not None:
-        matchup_detail = score_matchup_for_stat(
-            stat_name=stat_name,
-            pitcher_id=pitcher_id,
-            batter_id=batter_id,
-            pitcher_arsenal=pitcher_arsenal,
-            hitter_vuln=hitter_vuln,
-            baselines_pt=baselines_pt,
-        )
-        matchup_lift = matchup_detail.get(lift_key, 0.0)
-        if np.isnan(matchup_lift):
-            matchup_lift = 0.0
 
     # Combine context + opposing pitcher lift
     total_context = context_logit_lift + opposing_pitcher_lift
@@ -1295,8 +1113,6 @@ def predict_batter_game(
         f"std_{sn}": float(np.std(stat_samples)),
         "pa_mu": pa_mu,
         "pa_sigma": pa_sigma,
-        "matchup_logit_lift": matchup_lift,
-        "matchup_detail": matchup_detail,
         "opposing_pitcher_lift": opposing_pitcher_lift,
     }
 
@@ -1306,9 +1122,6 @@ def predict_game_batch_stat(
     game_records: pd.DataFrame,
     pitcher_posteriors: dict[int, np.ndarray],
     bf_priors: pd.DataFrame,
-    pitcher_arsenal: pd.DataFrame | None = None,
-    hitter_vuln: pd.DataFrame | None = None,
-    baselines_pt: dict[str, dict[str, float]] | None = None,
     game_batter_ks: pd.DataFrame | None = None,
     game_lineups: pd.DataFrame | None = None,
     context_lifts: dict[int, float] | None = None,
@@ -1339,12 +1152,6 @@ def predict_game_batch_stat(
         Mapping of pitcher_id → rate posterior samples.
     bf_priors : pd.DataFrame
         BF priors from ``compute_pitcher_bf_priors``.
-    pitcher_arsenal : pd.DataFrame or None
-        Full pitcher arsenal data for matchup scoring.
-    hitter_vuln : pd.DataFrame or None
-        Full hitter vulnerability data.
-    baselines_pt : dict or None
-        League baselines per pitch type.
     game_batter_ks : pd.DataFrame or None
         Per (game_pk, pitcher_id, batter_id) PA data. Fallback for lineup
         reconstruction when game_lineups not available.
@@ -1493,9 +1300,6 @@ def predict_game_batch_stat(
             lineup_batter_ids=lineup_ids,
             rate_samples=rate_samples,
             bf_priors=bf_priors,
-            pitcher_arsenal=pitcher_arsenal,
-            hitter_vuln=hitter_vuln,
-            baselines_pt=baselines_pt,
             context_logit_lift=total_ctx,
             lineup_proneness_lift=lp_lift,
             park_factor=pf,

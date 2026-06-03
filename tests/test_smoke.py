@@ -63,9 +63,6 @@ class TestImports:
     def test_import_page_team_overview(self):
         from views.team_overview import page_team_overview  # noqa: F401
 
-    def test_import_page_matchup_explorer(self):
-        from views.matchup_explorer import page_matchup_explorer  # noqa: F401
-
     def test_import_page_game_k_sim(self):
         """game_k_sim merged into schedule — verify schedule still imports."""
         from views.schedule import page_schedule  # noqa: F401
@@ -80,9 +77,6 @@ class TestImports:
     def test_import_lib_constants(self):
         from lib.constants import LEAGUE_AVG_BY_PITCH_TYPE  # noqa: F401
 
-    def test_import_lib_matchup(self):
-        from lib.matchup import score_matchup  # noqa: F401
-
     def test_import_lib_bf_model(self):
         from lib.bf_model import get_bf_distribution  # noqa: F401
 
@@ -91,9 +85,6 @@ class TestImports:
 
     def test_import_lib_rest_adjustment(self):
         from lib.rest_adjustment import get_rest_adjustment, apply_rest_to_bf  # noqa: F401
-
-    def test_import_lib_matchup_for_stat(self):
-        from lib.matchup import score_matchup_for_stat  # noqa: F401
 
     def test_import_model_performance(self):
         from views.model_performance import page_model_performance  # noqa: F401
@@ -120,15 +111,6 @@ class TestImports:
 
     def test_import_render_trade_results(self):
         from views.team_overview import _render_trade_results  # noqa: F401
-
-    def test_import_score_matchup_bb(self):
-        from lib.matchup import score_matchup_bb  # noqa: F401
-
-    def test_import_score_matchup_hr(self):
-        from lib.matchup import score_matchup_hr  # noqa: F401
-
-    def test_import_archetype_matchup_matrix(self):
-        from services.data_loader import load_archetype_matchup_matrix  # noqa: F401
 
     def test_import_simulate_game_stat(self):
         from lib.game_k_model import simulate_game_stat  # noqa: F401

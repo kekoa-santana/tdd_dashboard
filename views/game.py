@@ -219,74 +219,6 @@ def _render_pitcher_duel_html(game: pd.Series, lookups: dict) -> str:
     return f'<div class="tdd-pduel">{cards}</div>'
 
 
-def _render_key_matchups_html(
-    game: pd.Series,
-    batter_sims: pd.DataFrame,
-    lookups: dict,
-) -> str:
-    """Key matchups as HTML rows."""
-    gpk = game["game_pk"]
-    if batter_sims.empty or "game_pk" not in batter_sims.columns:
-        return ""
-
-    game_bs = batter_sims[batter_sims["game_pk"] == gpk].copy()
-    if game_bs.empty or "matchup_k_lift" not in game_bs.columns:
-        return ""
-
-    game_bs["abs_lift"] = game_bs["matchup_k_lift"].abs()
-    top = game_bs.nlargest(6, "abs_lift")
-    if top.empty:
-        return ""
-
-    arsenal_df = load_pitcher_arsenal()
-    vuln_df = load_hitter_vulnerability(career=True)
-    str_df = load_hitter_strength(career=True)
-
-    rows = ""
-    for _, row in top.iterrows():
-        bid = int(row["batter_id"])
-        batter_name = row.get("batter_name", str(bid))
-        team = row.get("team_abbr", "")
-        opp_starter = int(row["opp_starter_id"]) if pd.notna(row.get("opp_starter_id")) else None
-
-        badge = ""
-        if opp_starter and not arsenal_df.empty and not vuln_df.empty:
-            _p_ars = arsenal_df[arsenal_df["pitcher_id"] == opp_starter]
-            _h_vul = vuln_df[vuln_df["batter_id"] == bid]
-            _h_str = str_df[str_df["batter_id"] == bid] if not str_df.empty else pd.DataFrame()
-            _ph = str(_p_ars["pitch_hand"].iloc[0]) if not _p_ars.empty and "pitch_hand" in _p_ars.columns else None
-            _bh = str(_h_vul["batter_stand"].iloc[0]) if not _h_vul.empty and "batter_stand" in _h_vul.columns else None
-            if not _p_ars.empty and not _h_vul.empty:
-                _edge = compute_matchup_xwoba_edge(_p_ars, _h_vul, _h_str, pitcher_hand=_ph, batter_hand=_bh)
-                _adv = _edge["advantage"]
-                _xw = _edge["matchup_xwoba"]
-                if _adv == "pitcher":
-                    badge = f'<span style="color:var(--tdd-ember);font-size:0.68rem;font-weight:600">Pitcher .{int(_xw*1000):03d}</span>'
-                elif _adv == "hitter":
-                    badge = f'<span style="color:var(--tdd-sage);font-size:0.68rem;font-weight:600">Hitter .{int(_xw*1000):03d}</span>'
-                else:
-                    badge = f'<span style="color:var(--tdd-slate);font-size:0.68rem">Even .{int(_xw*1000):03d}</span>'
-
-        rows += (
-            '<div style="display:flex;gap:10px;align-items:center;'
-            'padding:0.5rem 0;border-bottom:1px solid var(--tdd-dark-border-faint)">'
-            f'{headshot_html(bid, size=36)}'
-            '<div style="flex:1;min-width:0">'
-            f'<div style="color:var(--tdd-cream);font-family:var(--tdd-font-heading);font-weight:700;font-size:0.85rem">{esc(batter_name)}</div>'
-            f'<div style="color:var(--tdd-slate);font-size:0.68rem">{esc(team)}</div>'
-            '</div>'
-            f'<div>{badge}</div>'
-            '</div>'
-        )
-
-    return (
-        '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);padding:0.8rem 1rem">'
-        '<div class="gsec-head">Key Matchups</div>'
-        f'{rows}'
-        '</div>'
-    )
-
-
 def _render_xwoba_leaderboard_html(
     game: pd.Series,
     lineups: pd.DataFrame,
@@ -1101,17 +1033,7 @@ def page_game() -> None:
         '</div>'
     )
 
-    # Row 2: Edge Call + Key Matchups (grid 6+6)
-    matchups_html = _render_key_matchups_html(game, batter_sims, lookups) if is_today_game else _stub_section("Key Matchups")
-
-    parts.append(
-        '<div class="section grid12">'
-        
-        f'<div class="col-6">{matchups_html}</div>'
-        '</div>'
-    )
-
-    # Row 2b: Game Plan narratives (grid 6+6)
+    # Row 2: Game Plan narratives (grid 6+6)
     if is_today_game:
         game_plan_html = _render_game_plan_html(game, game_props_df, batter_sims, lookups)
         if game_plan_html:

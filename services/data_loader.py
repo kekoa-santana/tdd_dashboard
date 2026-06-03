@@ -191,15 +191,6 @@ def load_pitcher_gb_pct() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_DATA_TTL)
-def load_matchup_baselines() -> dict:
-    path = DASHBOARD_DIR / "matchup_baselines.json"
-    if not path.exists():
-        return {}
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
-
-
-@st.cache_data(ttl=_DATA_TTL)
 def load_stat_tier_thresholds() -> dict:
     """Per-(player_type, stat) confidence thresholds for Lock/Strong/Lean tiers.
 
