@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from config import (
-    GOLD, EMBER, SAGE, SLATE, CREAM, POSITIVE, NEGATIVE, DASHBOARD_DIR,
+    GOLD, EMBER, SAGE, SLATE, CREAM, DASHBOARD_DIR,
 )
 from utils.alerts import tdd_info
 from services.data_loader import (
@@ -854,9 +854,6 @@ def _render_matchup_tab(
         name_col = "batter_name" if "batter_name" in display_lu.columns else "player_name"
         id_col = "batter_id" if "batter_id" in display_lu.columns else "player_id"
 
-        total_k_lift = total_bb_lift = 0.0
-        n_scored = 0
-
         # Pre-filter opposing pitcher arsenal once for all batters on this side
         _matchup_arsenal = pd.DataFrame()
         _matchup_pitcher_hand: str | None = None
@@ -927,17 +924,6 @@ def _render_matchup_tab(
             _bh = stats.get("bat_hand")
             if _bh and str(_bh).strip().upper()[0] in ("L", "R", "S"):
                 hand_letter = str(_bh).strip().upper()[0]
-
-            # Matchup advantage -- from pre-indexed batter sims
-            k_lift = bb_lift = hr_lift = 0.0
-            _bsim_row = _bsim_by_bid.get(bid) if bid else None
-            if _bsim_row is not None:
-                k_lift = float(_bsim_row.get("matchup_k_lift", 0.0))
-                bb_lift = float(_bsim_row.get("matchup_bb_lift", 0.0))
-                hr_lift = float(_bsim_row.get("matchup_hr_lift", 0.0))
-                total_k_lift += k_lift
-                total_bb_lift += bb_lift
-                n_scored += 1
 
             # Expander label
             arch_tag = f" | {arch}" if arch else ""
@@ -1038,24 +1024,6 @@ def _render_matchup_tab(
                             ["H", "HR", "K", "BB"],
                             f"b{bid}_{gpk}",
                         )
-
-        # Avg K matchup — from precomputed pitcher sims
-        if n_scored > 0:
-            avg_k = total_k_lift / n_scored
-            avg_bb = total_bb_lift / n_scored
-            if avg_k > 0.05:
-                k_color, k_word = POSITIVE, "favorable"
-            elif avg_k < -0.05:
-                k_color, k_word = NEGATIVE, "unfavorable"
-            else:
-                k_color, k_word = SLATE, "neutral"
-            st.markdown(
-                f'<div style="font-size:0.82rem; margin-bottom:0.5rem;">'
-                f'<span style="color:{k_color};">{pitcher_name} avg K matchup: {avg_k:+.3f} '
-                f'({k_word})</span>'
-                f' · <span style="color:var(--tdd-slate);">BB: {avg_bb:+.3f}</span></div>',
-                unsafe_allow_html=True,
-            )
 
         # Scouting report (new engine with creative narratives)
         if pid:

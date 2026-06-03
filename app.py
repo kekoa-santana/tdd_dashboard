@@ -34,7 +34,6 @@ from views.stats import page_stats  # noqa: E402
 from views.diamond_daily import page_diamond_daily  # noqa: E402
 from views.player_profile import page_player_profile  # noqa: E402
 from views.team_overview import page_team_overview  # noqa: E402
-from views.matchup_explorer import page_matchup_explorer  # noqa: E402
 from views.data_health import page_data_health  # noqa: E402
 from views.model_performance import page_model_performance  # noqa: E402
 from views.player_rankings import page_player_rankings  # noqa: E402
@@ -47,7 +46,6 @@ from views.methodology import page_methodology  # noqa: E402
 from views.projected_performers import page_projected_performers  # noqa: E402
 from views.daily_preview import page_daily_preview  # noqa: E402
 from views.game import page_game  # noqa: E402
-from views.game_prep import page_game_prep  # noqa: E402
 from views.home import page_home  # noqa: E402
 
 # Apply dark matplotlib theme at import time
@@ -271,7 +269,6 @@ PAGES = {
     "Team Overview": page_team_overview,
     "Team Rankings": page_team_rankings,
     "Division Standings": page_division_standings,
-    "Matchup Explorer": page_matchup_explorer,
     "Compare Players": page_compare,
     "Lineup Creator": page_lineup_creator,
     "Model Performance": page_model_performance,
@@ -280,7 +277,6 @@ PAGES = {
     "Props Lab": page_projected_performers,
     "Methodology": page_methodology,
     "Game Analysis": page_game,
-    "Game Prep": page_game_prep,
 }
 
 PAGE_URL_MAP = {name.lower().replace(" ", "_"): name for name in PAGES}
@@ -288,13 +284,13 @@ PAGE_URL_MAP = {name.lower().replace(" ", "_"): name for name in PAGES}
 # Nav structure: standalone items + dropdown groups
 _NAV = [
     ("Home", None),
-    ("Games", ["Schedule", "Game Analysis", "Game Prep", "Daily Preview", "Props Lab"]),
+    ("Games", ["Schedule", "Game Analysis", "Daily Preview", "Props Lab"]),
     ("Players", [
         "Player Profile", "Player Rankings", "Stats",
         "The Diamond Daily", "Projections", "Breakout Candidates",
     ]),
     ("Teams", ["Team Overview", "Team Rankings", "Division Standings"]),
-    ("Tools", ["Matchup Explorer", "Compare Players", "Lineup Creator"]),
+    ("Tools", ["Compare Players", "Lineup Creator"]),
     ("About", ["Methodology", "Model Performance", "Data Health"]),
 ]
 
