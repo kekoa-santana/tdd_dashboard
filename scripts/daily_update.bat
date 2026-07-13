@@ -62,7 +62,21 @@ if %ERRORLEVEL% EQU 0 (
 REM -- Step 1b: Precompute -- SKIPPED during season (preseason data is static) --
 REM   Rankings and team profiles update weekly via --weekly flag on update_in_season.py.
 REM   To re-run preseason precompute manually:
-REM     cd /d "%PROFILES_DIR%" && "%PROFILES_PYTHON%" scripts\precompute_dashboard_data.py --include team,rankings,game_data,traditional,glicko,profiles,game_sim,health
+REM     cd /d "%PROFILES_DIR%" && "%PROFILES_PYTHON%" scripts\precompute_dashboard_data.py --include team,rankings,game_data,traditional,profiles,game_sim,health
+
+REM -- Step 1c: Daily news feed + email digest --
+REM   External RSS (MLB.com/MiLB.com) + DB-generated stories -> news_feed.parquet
+REM   plus the morning email digest (needs GMAIL_* in player_profiles\.env).
+if "%IS_SCHEDULE_ONLY%"=="0" (
+    echo [%date% %time%] Building daily news feed... >> "%LOG_FILE%" 2>&1
+    cd /d "%PROFILES_DIR%"
+    "%PROFILES_PYTHON%" -c "import sys; sys.path.insert(0, 'scripts/precompute'); sys.path.insert(0, 'scripts'); from news import run; run()" >> "%LOG_FILE%" 2>&1
+    if !ERRORLEVEL! NEQ 0 (
+        echo [%date% %time%] News feed FAILED -- continuing >> "%LOG_FILE%" 2>&1
+    ) else (
+        echo [%date% %time%] News feed generated successfully >> "%LOG_FILE%" 2>&1
+    )
+)
 
 REM -- Step 2: Dashboard update (projections + bookkeeping, NO sims) --
 if "%IS_SCHEDULE_ONLY%"=="1" (

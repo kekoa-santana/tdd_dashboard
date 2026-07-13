@@ -1069,3 +1069,11 @@ def load_reliever_rankings() -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
     return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_news_feed() -> pd.DataFrame:
+    path = DASHBOARD_DIR / "news_feed.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
