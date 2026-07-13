@@ -30,6 +30,10 @@ _CATEGORY_META: dict[str, tuple[str, str]] = {
     "demotion": ("Demotion", "#7B8FA6"),
     "debut": ("MLB Debut", "#4FC3C8"),
     "milestone": ("Milestone", "#C8A96E"),
+    "trend_velocity": ("Velo Trend", "#4FC3C8"),
+    "trend_pitch_mix": ("Pitch Mix", "#C8A96E"),
+    "trend_discipline": ("Discipline", "#7B8FA6"),
+    "trend_quality": ("Contact Quality", "#D9A05B"),
 }
 
 _MAIN_CATEGORIES = [
@@ -38,6 +42,12 @@ _MAIN_CATEGORIES = [
     "standout_hitter",
     "standout_pitcher",
     "milestone",
+]
+_TREND_CATEGORIES = [
+    "trend_velocity",
+    "trend_pitch_mix",
+    "trend_discipline",
+    "trend_quality",
 ]
 _RAIL_INJURY_CATEGORIES = ["injury", "transaction"]
 _RAIL_PROSPECT_CATEGORIES = ["debut", "promotion", "demotion", "prospect"]
@@ -187,6 +197,16 @@ def page_news() -> None:
                 "Yesterday's Standouts",
             )
             _render_group(generated[generated["category"] == "milestone"], "Milestones")
+
+        trends = day[day["category"].isin(_TREND_CATEGORIES)]
+        if not trends.empty:
+            st.markdown("### Season Trends")
+            _render_group(trends[trends["category"] == "trend_velocity"], "Velocity")
+            _render_group(trends[trends["category"] == "trend_pitch_mix"], "Pitch Mix")
+            _render_group(
+                trends[trends["category"].isin(["trend_discipline", "trend_quality"])],
+                "Batter Skill Shifts",
+            )
 
     with col_rail:
         moves = day[day["category"].isin(_RAIL_INJURY_CATEGORIES)]
