@@ -8,12 +8,15 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+import numpy as np
 
 from config import RUNTIME
 
@@ -32,7 +35,10 @@ class ManifestStatus:
     missing_artifacts: list[str] = field(default_factory=list)
     extra_artifacts: list[str] = field(default_factory=list)
     row_count_mismatches: list[str] = field(default_factory=list)
+    schema_mismatches: list[str] = field(default_factory=list)
+    invalid_artifacts: list[str] = field(default_factory=list)
     manifest_age_hours: float | None = None
+    release_status: str | None = None
     warnings: list[str] = field(default_factory=list)
 
 
@@ -95,10 +101,12 @@ def validate_manifest(
     Checks
     ------
     1. manifest.json exists
-    2. schema_version matches ``RUNTIME["schema_version"]``
+    2. contract version matches ``RUNTIME["schema_version"]``
     3. All artifacts listed in manifest exist on disk
     4. Row counts match (parquet files only)
-    5. Manifest is not stale (warn if > 24 h old)
+    5. Required columns and column hashes match
+    6. Producer validation and release status are safe
+    7. Manifest is not stale (warn if > 24 h old)
     """
     manifest = load_manifest(dashboard_dir)
 
@@ -113,15 +121,26 @@ def validate_manifest(
     missing: list[str] = []
     extra: list[str] = []
     row_mismatches: list[str] = []
+    schema_mismatches: list[str] = []
+    invalid_artifacts: list[str] = []
     age_hours: float | None = None
 
     # 2. Schema version
-    manifest_version = manifest.get("schema_version")
+    manifest_version = manifest.get("contract_version", manifest.get("schema_version"))
     if manifest_version != EXPECTED_SCHEMA_VERSION:
-        warnings.append(
+        schema_mismatches.append(
             f"Schema version mismatch: manifest has {manifest_version}, "
             f"expected {EXPECTED_SCHEMA_VERSION}"
         )
+
+    release_status = manifest.get("release_status")
+    if release_status == "experimental":
+        warnings.append("Artifacts were produced by an experimental/quick run")
+    elif release_status == "internal-only":
+        schema_mismatches.append("Internal-only artifacts cannot power the dashboard")
+
+    if manifest.get("validation_status") not in {None, "validated"}:
+        invalid_artifacts.append("Manifest producer validation did not pass")
 
     # 5. Staleness (check early so we always report age)
     generated_at = manifest.get("generated_at")
@@ -166,33 +185,51 @@ def validate_manifest(
     if extra:
         warnings.append(f"{len(extra)} artifact(s) on disk not in manifest")
 
-    # 4. Row-count validation (parquet only)
+    # 4-5. Parquet row-count and schema validation
     for name, art in artifact_map.items():
+        if art.get("validation_status") not in {None, "validated"}:
+            invalid_artifacts.append(f"{name}: producer validation did not pass")
         if not name.endswith(".parquet"):
             continue
         file_path = dashboard_dir / name
         if not file_path.exists():
             continue  # already captured as missing
-        expected_rows = art.get("row_count")
-        if expected_rows is None:
-            continue
         try:
-            actual_rows = len(pd.read_parquet(file_path))
-            if actual_rows != expected_rows:
+            frame = pd.read_parquet(file_path)
+            expected_rows = art.get("row_count")
+            if expected_rows is not None and len(frame) != expected_rows:
                 msg = (
-                    f"{name}: row count {actual_rows} != manifest {expected_rows}"
+                    f"{name}: row count {len(frame)} != manifest {expected_rows}"
                 )
                 row_mismatches.append(msg)
+
+            required_columns = set(art.get("required_columns", []))
+            missing_columns = sorted(required_columns - set(frame.columns))
+            if missing_columns:
+                schema_mismatches.append(
+                    f"{name}: missing required columns {missing_columns}"
+                )
+
+            expected_hash = art.get("column_hash")
+            actual_hash = _column_hash([str(column) for column in frame.columns])
+            if expected_hash is not None and actual_hash != expected_hash:
+                schema_mismatches.append(f"{name}: column hash does not match manifest")
         except Exception as exc:
-            warnings.append(f"Could not read {name} for row check: {exc}")
+            invalid_artifacts.append(f"Could not validate {name}: {exc}")
 
     if row_mismatches:
         warnings.append(
             f"{len(row_mismatches)} artifact(s) have row-count mismatches"
         )
+    if schema_mismatches:
+        warnings.append(f"{len(schema_mismatches)} schema contract issue(s)")
+    if invalid_artifacts:
+        warnings.append(f"{len(invalid_artifacts)} artifact validation issue(s)")
 
     # Determine validity
-    has_errors = bool(missing) or bool(row_mismatches)
+    has_errors = bool(
+        missing or row_mismatches or schema_mismatches or invalid_artifacts
+    )
     valid = not has_errors if strict else True
 
     return ManifestStatus(
@@ -200,9 +237,34 @@ def validate_manifest(
         missing_artifacts=missing,
         extra_artifacts=extra,
         row_count_mismatches=row_mismatches,
+        schema_mismatches=schema_mismatches,
+        invalid_artifacts=invalid_artifacts,
         manifest_age_hours=age_hours,
+        release_status=release_status,
         warnings=warnings,
     )
+
+
+def write_manifest(dashboard_dir: Path, manifest: dict) -> Path:
+    """Atomically publish ``manifest.json`` in the dashboard artifact directory."""
+    dashboard_dir.mkdir(parents=True, exist_ok=True)
+    destination = dashboard_dir / "manifest.json"
+    handle = tempfile.NamedTemporaryFile(
+        dir=dashboard_dir,
+        prefix=".manifest.json.",
+        suffix=".tmp",
+        delete=False,
+    )
+    temporary = Path(handle.name)
+    handle.close()
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as output:
+            json.dump(manifest, output, indent=2)
+            output.write("\n")
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return destination
 
 
 def generate_manifest(dashboard_dir: Path) -> dict:
@@ -212,6 +274,21 @@ def generate_manifest(dashboard_dir: Path) -> dict:
     column names. Used by ``update_in_season.py`` to produce a fresh
     manifest after each update run.
     """
+    previous = load_manifest(dashboard_dir) or {}
+    previous_artifacts = {
+        artifact.get("artifact_name"): artifact
+        for artifact in previous.get("artifacts", [])
+        if artifact.get("artifact_name")
+    }
+    contract_fields = {
+        "schema_version",
+        "model_version",
+        "classification",
+        "consumers",
+        "required_upstream_artifacts",
+        "required_columns",
+        "key_pattern",
+    }
     artifacts: list[dict] = []
 
     for name in _scan_artifact_files(dashboard_dir):
@@ -219,7 +296,10 @@ def generate_manifest(dashboard_dir: Path) -> dict:
         entry: dict = {
             "artifact_name": name,
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "validation_status": "validated",
         }
+        prior = previous_artifacts.get(name, {})
+        entry.update({key: prior[key] for key in contract_fields if key in prior})
 
         if name.endswith(".parquet"):
             try:
@@ -227,20 +307,33 @@ def generate_manifest(dashboard_dir: Path) -> dict:
                 entry["row_count"] = len(df)
                 entry["column_hash"] = _column_hash(list(df.columns))
             except Exception as exc:
-                logger.warning("Could not read %s for manifest: %s", name, exc)
-                entry["row_count"] = None
-                entry["column_hash"] = None
+                raise ValueError(f"Could not read {name} for manifest: {exc}") from exc
+            required = set(entry.get("required_columns", []))
+            missing = sorted(required - set(df.columns))
+            if missing:
+                raise ValueError(f"{name} is missing required columns: {missing}")
         elif name.endswith(".npz"):
             entry["row_count"] = None
             entry["column_hash"] = None
+            try:
+                with np.load(file_path) as archive:
+                    entry["array_count"] = len(archive.files)
+            except Exception as exc:
+                raise ValueError(f"Could not read {name} for manifest: {exc}") from exc
 
         artifacts.append(entry)
 
     manifest: dict = {
+        "contract_version": previous.get(
+            "contract_version", previous.get("schema_version", EXPECTED_SCHEMA_VERSION)
+        ),
         "schema_version": EXPECTED_SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "producer_repo": "tdd-dashboard",
         "producer_commit": _get_git_commit(),
+        "target_season": RUNTIME["current_season"],
+        "release_status": "canonical",
+        "validation_status": "validated",
         "artifacts": artifacts,
     }
     return manifest
