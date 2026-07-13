@@ -778,11 +778,9 @@ def main() -> None:
         _save_metadata(game_date, {"last_sims_refresh": datetime.now().isoformat()})
 
         # Generate artifact manifest
-        from services.manifest import generate_manifest
+        from services.manifest import generate_manifest, write_manifest
         manifest = generate_manifest(DASHBOARD_DIR)
-        manifest_path = DASHBOARD_DIR / "manifest.json"
-        with open(manifest_path, "w") as f:
-            json.dump(manifest, f, indent=2)
+        manifest_path = write_manifest(DASHBOARD_DIR, manifest)
         logger.info("Saved manifest with %d artifacts to %s",
                     len(manifest.get("artifacts", [])), manifest_path)
 
@@ -825,11 +823,9 @@ def main() -> None:
     _run_game_accuracy_report()
 
     # Step 6: Generate artifact manifest
-    from services.manifest import generate_manifest
+    from services.manifest import generate_manifest, write_manifest
     manifest = generate_manifest(DASHBOARD_DIR)
-    manifest_path = DASHBOARD_DIR / "manifest.json"
-    with open(manifest_path, "w") as f:
-        json.dump(manifest, f, indent=2)
+    manifest_path = write_manifest(DASHBOARD_DIR, manifest)
     logger.info("Saved manifest with %d artifacts to %s",
                 len(manifest.get("artifacts", [])), manifest_path)
 
