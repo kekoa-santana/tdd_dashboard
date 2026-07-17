@@ -2,7 +2,7 @@
 
 **Branch:** `feat/mobile-responsive-overhaul`
 
-**Status:** Planning
+**Status:** In progress - Steps 1 and 2 implemented
 
 **Primary review sizes:** 390 x 844 phone, 768 x 1024 tablet, 1440 x 900 desktop
 
@@ -460,3 +460,8 @@ Begin with **Steps 1 and 2 only**: repair the Player Profile structure and rebui
 the responsive hero/headshot. Stop after verifying hitter, pitcher, two-way, and
 fallback-image states at 390, 768, and 1440px. Review those results before changing
 the global Streamlit column behavior in Step 3.
+
+**Checkpoint result (2026-07-16):** Steps 1 and 2 are implemented. Hitter, pitcher,
+and two-way profiles were verified at 360, 390, 768, and 1440px with no page-level
+horizontal overflow. Fallback headshot and balanced markup behavior are covered by
+targeted tests. Step 3 remains intentionally deferred pending review.
