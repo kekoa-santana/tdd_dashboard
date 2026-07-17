@@ -49,6 +49,62 @@ def _edge_direction(edge: float) -> str:
     return "over" if edge > 0 else "under"
 
 
+def _top_prop_edges(props: pd.DataFrame, limit: int = 8) -> list[dict]:
+    """Return the strongest projection-vs-line edges across prop schemas.
+
+    Older game-prop artifacts provided ``model_edge`` and ``vegas_line``.
+    Current artifacts provide ``expected`` and ``line`` instead, so derive the
+    same displayed edge as expected minus line. Missing or partial schemas
+    should leave the Home page with an empty edge list rather than crash it.
+    """
+    if props.empty or "expected" not in props.columns:
+        return []
+
+    work = props.copy()
+    if {"model_edge", "vegas_line"}.issubset(work.columns):
+        edge_col = "model_edge"
+        line_col = "vegas_line"
+        odds_col = "vegas_odds"
+    elif "line" in work.columns:
+        edge_col = "_derived_edge"
+        line_col = "line"
+        odds_col = ""
+        work[edge_col] = (
+            pd.to_numeric(work["expected"], errors="coerce")
+            - pd.to_numeric(work[line_col], errors="coerce")
+        )
+    else:
+        return []
+
+    work[edge_col] = pd.to_numeric(work[edge_col], errors="coerce")
+    work[line_col] = pd.to_numeric(work[line_col], errors="coerce")
+    work["expected"] = pd.to_numeric(work["expected"], errors="coerce")
+    with_edge = work[
+        work[edge_col].notna()
+        & work[line_col].notna()
+        & work["expected"].notna()
+    ].copy()
+    if with_edge.empty:
+        return []
+
+    with_edge["abs_edge"] = with_edge[edge_col].abs()
+    best_edges = with_edge.nlargest(limit, "abs_edge")
+    return [
+        {
+            "name": e.get("player_name", ""),
+            "player_type": e.get("player_type", ""),
+            "team": e.get("team", ""),
+            "stat": e.get("stat", ""),
+            "expected": round(e["expected"], 2),
+            "line": e[line_col],
+            "edge": round(e[edge_col], 3),
+            "odds": e.get(odds_col, "") if odds_col else "",
+            "direction": _edge_direction(e[edge_col]),
+        }
+        for _, e in best_edges.iterrows()
+    ]
+
+
 def _stat_chip_color(stat: str) -> tuple[str, str]:
     """Return (background, text-color) for a stat chip."""
     colors = {
@@ -166,27 +222,7 @@ def _assemble_home_data() -> dict:
             })
 
     # --- Top props edges ---
-    top_edges = []
-    if not today_props.empty:
-        with_edge = today_props[
-            today_props["model_edge"].notna()
-            & today_props["vegas_line"].notna()
-        ].copy()
-        if not with_edge.empty:
-            with_edge["abs_edge"] = with_edge["model_edge"].abs()
-            best_edges = with_edge.nlargest(8, "abs_edge")
-            for _, e in best_edges.iterrows():
-                top_edges.append({
-                    "name": e.get("player_name", ""),
-                    "player_type": e.get("player_type", ""),
-                    "team": e.get("team", ""),
-                    "stat": e.get("stat", ""),
-                    "expected": round(e["expected"], 2),
-                    "line": e.get("vegas_line"),
-                    "edge": round(e["model_edge"], 3),
-                    "odds": e.get("vegas_odds", ""),
-                    "direction": _edge_direction(e["model_edge"]),
-                })
+    top_edges = _top_prop_edges(today_props)
 
     # --- Model performance from backtests ---
     bt_summary = load_backtest("game_prop_summary")
