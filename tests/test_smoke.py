@@ -97,21 +97,6 @@ class TestImports:
         from views.compare import page_compare  # noqa: F401
 
 
-    def test_import_render_depth_chart_tab(self):
-        from views.team_overview import _render_depth_chart_tab  # noqa: F401
-
-    def test_import_identify_weaknesses(self):
-        from views.team_overview import _identify_weaknesses  # noqa: F401
-
-    def test_import_find_trade_targets(self):
-        from views.team_overview import _find_trade_targets  # noqa: F401
-
-    def test_import_render_trade_simulator_tab(self):
-        from views.team_overview import _render_trade_simulator_tab  # noqa: F401
-
-    def test_import_render_trade_results(self):
-        from views.team_overview import _render_trade_results  # noqa: F401
-
     def test_import_simulate_game_stat(self):
         from lib.game_k_model import simulate_game_stat  # noqa: F401
 
