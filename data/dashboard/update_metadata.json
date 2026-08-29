@@ -1,10 +1,9 @@
 {
-  "last_updated": "2026-08-28T22:32:30.015259",
-  "game_date": "2026-08-28",
+  "last_updated": "2026-08-29T06:29:35.005229",
+  "game_date": "2026-08-29",
   "season": 2026,
-  "hitters_updated": 730,
-  "pitchers_updated": 924,
+  "hitters_updated": 731,
+  "pitchers_updated": 926,
   "k_samples_count": 3295,
-  "last_sims_refresh": "2026-08-28T22:32:30.015259",
-  "last_schedule_refresh": "2026-08-28T23:00:06.494537"
+  "last_sims_refresh": "2026-08-29T06:29:35.005229"
 }
