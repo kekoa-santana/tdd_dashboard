@@ -1,9 +1,17 @@
 {
-  "last_updated": "2026-09-06T15:31:43.092080",
-  "game_date": "2026-09-06",
+  "last_updated": "2026-09-06T15:40:54.496123",
+  "game_date": "2026-09-05",
+  "feature_cutoff_date": "2026-09-04",
   "season": 2026,
   "hitters_updated": 738,
   "pitchers_updated": 934,
-  "k_samples_count": 3295,
-  "last_sims_refresh": "2026-09-06T15:31:43.092080"
+  "pitcher_k_samples_count": 3295,
+  "pitcher_bb_samples_count": 3295,
+  "pitcher_hr_samples_count": 3295,
+  "hitter_k_samples_count": 2610,
+  "hitter_bb_samples_count": 2610,
+  "hitter_hr_samples_count": 2610,
+  "hitter_trad_count": 649,
+  "pitcher_trad_count": 839,
+  "weekly_refresh": false
 }
