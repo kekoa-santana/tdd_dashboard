@@ -9,7 +9,6 @@ import streamlit as st
 
 from config import CURRENT_SEASON
 from services.data_loader import (
-    load_game_props,
     load_hitters_daily_standouts,
     load_todays_batter_sims,
     load_todays_games,
@@ -45,82 +44,6 @@ def _format_odds(odds: str | float | None) -> str:
     return s
 
 
-def _edge_direction(edge: float) -> str:
-    return "over" if edge > 0 else "under"
-
-
-def _top_prop_edges(props: pd.DataFrame, limit: int = 8) -> list[dict]:
-    """Return the strongest projection-vs-line edges across prop schemas.
-
-    Older game-prop artifacts provided ``model_edge`` and ``vegas_line``.
-    Current artifacts provide ``expected`` and ``line`` instead, so derive the
-    same displayed edge as expected minus line. Missing or partial schemas
-    should leave the Home page with an empty edge list rather than crash it.
-    """
-    if props.empty or "expected" not in props.columns:
-        return []
-
-    work = props.copy()
-    if {"model_edge", "vegas_line"}.issubset(work.columns):
-        edge_col = "model_edge"
-        line_col = "vegas_line"
-        odds_col = "vegas_odds"
-    elif "line" in work.columns:
-        edge_col = "_derived_edge"
-        line_col = "line"
-        odds_col = ""
-        work[edge_col] = (
-            pd.to_numeric(work["expected"], errors="coerce")
-            - pd.to_numeric(work[line_col], errors="coerce")
-        )
-    else:
-        return []
-
-    work[edge_col] = pd.to_numeric(work[edge_col], errors="coerce")
-    work[line_col] = pd.to_numeric(work[line_col], errors="coerce")
-    work["expected"] = pd.to_numeric(work["expected"], errors="coerce")
-    with_edge = work[
-        work[edge_col].notna()
-        & work[line_col].notna()
-        & work["expected"].notna()
-    ].copy()
-    if with_edge.empty:
-        return []
-
-    with_edge["abs_edge"] = with_edge[edge_col].abs()
-    best_edges = with_edge.nlargest(limit, "abs_edge")
-    return [
-        {
-            "name": e.get("player_name", ""),
-            "player_type": e.get("player_type", ""),
-            "team": e.get("team", ""),
-            "stat": e.get("stat", ""),
-            "expected": round(e["expected"], 2),
-            "line": e[line_col],
-            "edge": round(e[edge_col], 3),
-            "odds": e.get(odds_col, "") if odds_col else "",
-            "direction": _edge_direction(e[edge_col]),
-        }
-        for _, e in best_edges.iterrows()
-    ]
-
-
-def _stat_chip_color(stat: str) -> tuple[str, str]:
-    """Return (background, text-color) for a stat chip."""
-    colors = {
-        "H": ("var(--tdd-gold)", "var(--tdd-dark)"),
-        "HR": ("var(--tdd-ember)", "var(--tdd-dark)"),
-        "TB": ("var(--tdd-gold)", "var(--tdd-dark)"),
-        "HRR": ("var(--tdd-gold)", "var(--tdd-dark)"),
-        "BB": ("var(--tdd-sage)", "var(--tdd-dark)"),
-        "Outs": ("var(--tdd-sage)", "var(--tdd-dark)"),
-        "R": ("var(--tdd-gold)", "var(--tdd-dark)"),
-        "RBI": ("var(--tdd-gold)", "var(--tdd-dark)"),
-        "K": ("transparent", "var(--tdd-slate)"),
-    }
-    return colors.get(stat, ("var(--tdd-slate)", "var(--tdd-dark)"))
-
-
 # ---------------------------------------------------------------------------
 # Data assembly
 # ---------------------------------------------------------------------------
@@ -130,15 +53,11 @@ def _assemble_home_data() -> dict:
     """Pull together all data needed for the home page from existing loaders."""
     meta = load_update_metadata()
     games = load_todays_games()
-    props = load_game_props()
     dk = load_dk_props()
     batter_sims = load_todays_batter_sims()
     standouts = load_hitters_daily_standouts()
 
     game_date = meta.get("game_date", datetime.now().strftime("%Y-%m-%d"))
-
-    # --- Today's props ---
-    today_props = props[props["game_date"] == game_date] if not props.empty else pd.DataFrame()
 
     # --- Schedule (games only, no predictions) ---
     schedule = []
@@ -221,9 +140,6 @@ def _assemble_home_data() -> dict:
                 "p_hr_1": round(h.get("p_hr_over_0_5", 0) * 100),
             })
 
-    # --- Top props edges ---
-    top_edges = _top_prop_edges(today_props)
-
     # --- Model performance from backtests ---
     bt_summary = load_backtest("game_prop_summary")
     model_stats = {}
@@ -285,7 +201,6 @@ def _assemble_home_data() -> dict:
         "schedule": schedule,
         "best_matchups": best_matchups,
         "top_hitters": top_hitters,
-        "top_edges": top_edges,
         "model_stats": model_stats,
         "yesterday_hit": yesterday_hit,
         "yesterday_miss": yesterday_miss,
@@ -619,38 +534,6 @@ def _render_top_hitters(hitters: list[dict]) -> str:
                 <div class="home-perf-main">{h["proj_h"]} H</div>
                 <div class="home-perf-sub">{h["proj_hr"]} HR &middot; {h["proj_tb"]} TB &middot; {h["proj_bb"]} BB</div>
                 <div class="home-perf-ci">{h["p_h_1"]}% for 1+ H &middot; {h["p_h_2"]}% for 2+</div>
-            </div>
-        </a>
-        ''')
-    return "".join(rows)
-
-
-def _render_edges_list(edges: list[dict]) -> str:
-    """Props edges list with stat-colored chips."""
-    rows = []
-    for e in edges[:6]:
-        bg, fg = _stat_chip_color(e["stat"])
-        border = "var(--tdd-slate)" if e["stat"] == "K" else bg
-        dir_cls = "home-edge-over" if e["direction"] == "over" else "home-edge-under"
-        edge_sign = "+" if e["edge"] > 0 else ""
-
-        name_display = e["name"]
-        # player_name might be an ID, try to use it as-is
-        if isinstance(name_display, (int, float)):
-            name_display = str(int(name_display))
-
-        rows.append(f'''
-        <a href="{_nav_url("Props Lab")}" target="_self" class="home-edge-row">
-            <div class="home-edge-chip" style="background:{bg};color:{fg};border:1px solid {border};">{escape(e["stat"])}</div>
-            <div class="home-edge-who">
-                <div class="home-edge-nm">{escape(str(name_display))}</div>
-                <div class="home-edge-meta">
-                    <span data-team="{escape(e["team"])}">{escape(e["team"])}</span>
-                    &middot; Proj {e["expected"]} &middot; Line {e["line"]}
-                </div>
-            </div>
-            <div class="home-edge-prop">
-                <div class="home-edge-val {dir_cls}">{edge_sign}{e["edge"]:.2f} {"&uarr;" if e["direction"] == "over" else "&darr;"}</div>
             </div>
         </a>
         ''')
