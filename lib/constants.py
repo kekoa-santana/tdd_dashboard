@@ -4,6 +4,7 @@ priors for the Bayesian projection system.
 
 All constants derived from the actual mlb_fantasy.production schema.
 """
+
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
@@ -43,9 +44,7 @@ PITCH_FAMILIES: dict[str, list[str]] = {
 }
 
 # Reverse lookup: pitch_type → family
-PITCH_TO_FAMILY: dict[str, str] = {
-    pt: family for family, pts in PITCH_FAMILIES.items() for pt in pts
-}
+PITCH_TO_FAMILY: dict[str, str] = {pt: family for family, pts in PITCH_FAMILIES.items() for pt in pts}
 
 # ---------------------------------------------------------------------------
 # Pitch-outcome definitions  (description column in production.fact_pitch)
@@ -57,7 +56,7 @@ PITCH_TO_FAMILY: dict[str, str] = {
 WHIFF_DESCRIPTIONS: set[str] = {
     "swinging_strike",
     "swinging_strike_blocked",
-    "foul_tip",               # foul tips are strikes / outs — count as whiff
+    "foul_tip",  # foul tips are strikes / outs — count as whiff
 }
 
 SWING_DESCRIPTIONS: set[str] = {
@@ -123,29 +122,29 @@ CHASE_ZONES: set[int] = {11, 12, 13, 14}
 # Plate location boundaries (feet from center of plate)
 # Used when zone column is missing or for continuous-location analysis.
 ZONE_BOUNDARIES = {
-    "plate_x_left": -0.8333,   # left edge of zone (batter's perspective)
-    "plate_x_right": 0.8333,   # right edge of zone
-    "plate_z_top_avg": 3.5,    # average top of zone (use per-batter sz_top when available)
-    "plate_z_bot_avg": 1.5,    # average bottom of zone (use per-batter sz_bot when available)
+    "plate_x_left": -0.8333,  # left edge of zone (batter's perspective)
+    "plate_x_right": 0.8333,  # right edge of zone
+    "plate_z_top_avg": 3.5,  # average top of zone (use per-batter sz_top when available)
+    "plate_z_bot_avg": 1.5,  # average bottom of zone (use per-batter sz_bot when available)
 }
 
 # 5x5 zone grid for location visualization
 ZONE_GRID = {
     "n_cols": 5,
     "n_rows": 5,
-    "x_min": -1.33,     # left edge (extends past zone)
-    "x_max": 1.33,      # right edge
-    "z_min": 1.0,       # bottom edge (below avg zone bottom)
-    "z_max": 4.0,       # top edge (above avg zone top)
-    "x_step": 0.532,    # (1.33 - (-1.33)) / 5
-    "z_step": 0.6,      # (4.0 - 1.0) / 5
+    "x_min": -1.33,  # left edge (extends past zone)
+    "x_max": 1.33,  # right edge
+    "z_min": 1.0,  # bottom edge (below avg zone bottom)
+    "z_max": 4.0,  # top edge (above avg zone top)
+    "x_step": 0.532,  # (1.33 - (-1.33)) / 5
+    "z_step": 0.6,  # (4.0 - 1.0) / 5
 }
 
 # ---------------------------------------------------------------------------
 # Batted-ball thresholds
 # ---------------------------------------------------------------------------
-HARD_HIT_THRESHOLD: float = 95.0      # exit velo (mph)
-BARREL_EV_MIN: float = 98.0           # minimum EV for barrel
+HARD_HIT_THRESHOLD: float = 95.0  # exit velo (mph)
+BARREL_EV_MIN: float = 98.0  # minimum EV for barrel
 BARREL_LA_SWEET_SPOT: tuple[float, float] = (26.0, 30.0)  # ideal LA range at 98 mph
 # Barrel zone widens as EV increases — simplified here; full barrel def is complex.
 
@@ -250,9 +249,9 @@ LEAGUE_AVG_OVERALL: dict[str, float] = {
     "csw_pct": 0.29,
     "hard_hit_rate": 0.33,
     # Batted ball type rates (2022-2024 pooled, LA-based)
-    "gb_rate": 0.446,   # ground ball: LA < 10°
-    "fb_rate": 0.321,   # fly ball: LA > 25°
-    "hr_per_fb": 0.098, # HR per fly ball
+    "gb_rate": 0.446,  # ground ball: LA < 10°
+    "fb_rate": 0.321,  # fly ball: LA > 25°
+    "hr_per_fb": 0.098,  # HR per fly ball
 }
 
 # ---------------------------------------------------------------------------
@@ -263,28 +262,105 @@ CLIP_HI: float = 1 - 1e-6
 
 # ---------------------------------------------------------------------------
 # Game-sim league baselines (used for logit centering)
+# Updated 2026-04-22: blended 70% historical (2022-2025) + 30% April-debiased
+# 2026 YTD.  April BB% runs +0.5pp hot, HR% runs -0.3pp cold historically.
+# Raw 2026 YTD (26,906 BF): K=0.224, BB=0.099, HR=0.027
 # ---------------------------------------------------------------------------
-SIM_LEAGUE_K_RATE: float = 0.226
-SIM_LEAGUE_BB_RATE: float = 0.082
-SIM_LEAGUE_HR_RATE: float = 0.031
+SIM_LEAGUE_K_RATE: float = 0.224
+SIM_LEAGUE_BB_RATE: float = 0.086
+SIM_LEAGUE_HR_RATE: float = 0.030
 
 # ---------------------------------------------------------------------------
 # BABIP constants
+# Historical (2022-2025 pooled): 0.290.  Batter BABIP includes speed/LD%
+# component so slightly higher than pitcher (which regresses harder).
 # ---------------------------------------------------------------------------
-LEAGUE_BABIP_PITCHER: float = 0.292
+LEAGUE_BABIP_PITCHER: float = 0.295
 LEAGUE_BABIP_BATTER: float = 0.300
+
+# BABIP adjustment coefficients (LD% and sprint speed)
+BABIP_LD_COEFF: float = 0.60  # logit-scale lift per unit LD% deviation (boosted from 0.25)
+BABIP_LEAGUE_LD_RATE: float = 0.22  # league-average line-drive rate
+BABIP_LEAGUE_SPEED: float = 27.0  # league-average sprint speed (ft/s)
+BABIP_SPEED_COEFF: float = 0.010  # logit-scale lift per ft/s speed deviation
 
 # ---------------------------------------------------------------------------
 # HBP rate
 # ---------------------------------------------------------------------------
 LEAGUE_HBP_RATE: float = 0.011
+LEAGUE_SF_RATE: float = 0.007  # SF/PA (2022-2025)
+LEAGUE_TB_PER_BIP_HIT: float = 1.27  # (1B + 2*2B + 3*3B) / (H - HR), non-HR BIP hits
 
 # ---------------------------------------------------------------------------
 # Bullpen baseline rates (game sim defaults)
+# Updated 2026-04-22: blended historical (2022-2025) + April-debiased 2026.
+# Raw 2026 YTD reliever data (11,753 BF): K=0.226, BB=0.109, HR=0.026
 # ---------------------------------------------------------------------------
-BULLPEN_K_RATE: float = 0.253
-BULLPEN_BB_RATE: float = 0.084
-BULLPEN_HR_RATE: float = 0.024
+BULLPEN_K_RATE: float = 0.226
+BULLPEN_BB_RATE: float = 0.096
+BULLPEN_HR_RATE: float = 0.028
+
+# ---------------------------------------------------------------------------
+# wOBA linear weights by season (FanGraphs, derived from RE24 run expectancy)
+# 2026 uses 2025 estimate until FanGraphs publishes official values.
+# ---------------------------------------------------------------------------
+WOBA_WEIGHTS: dict[int, dict[str, float]] = {
+    2018: dict(w_bb=0.690, w_hbp=0.720, w_1b=0.882, w_hr=2.036),
+    2019: dict(w_bb=0.692, w_hbp=0.723, w_1b=0.882, w_hr=2.048),
+    2020: dict(w_bb=0.693, w_hbp=0.723, w_1b=0.877, w_hr=2.006),
+    2021: dict(w_bb=0.688, w_hbp=0.721, w_1b=0.880, w_hr=2.058),
+    2022: dict(w_bb=0.689, w_hbp=0.720, w_1b=0.883, w_hr=2.013),
+    2023: dict(w_bb=0.696, w_hbp=0.726, w_1b=0.883, w_hr=2.058),
+    2024: dict(w_bb=0.690, w_hbp=0.722, w_1b=0.881, w_hr=2.098),
+    2025: dict(w_bb=0.692, w_hbp=0.723, w_1b=0.882, w_hr=2.070),  # estimate
+    2026: dict(w_bb=0.692, w_hbp=0.723, w_1b=0.882, w_hr=2.070),  # use 2025 until published
+}
+
+_WOBA_FALLBACK_SEASON: int = max(WOBA_WEIGHTS)
+
+
+def get_woba_weights(season: int) -> dict[str, float]:
+    """Return wOBA linear weights for a given season.
+
+    Falls back to the most recent known season for future or unknown years.
+    """
+    if season in WOBA_WEIGHTS:
+        return WOBA_WEIGHTS[season]
+    if season > _WOBA_FALLBACK_SEASON:
+        return WOBA_WEIGHTS[_WOBA_FALLBACK_SEASON]
+    return WOBA_WEIGHTS[min(WOBA_WEIGHTS, key=lambda y: abs(y - season))]
+
+
+# ---------------------------------------------------------------------------
+# FIP constants by season (FanGraphs published values, set so league FIP == league ERA)
+# 2026 uses 2025 estimate until FanGraphs publishes.
+# ---------------------------------------------------------------------------
+FIP_CONSTANTS: dict[int, float] = {
+    2018: 3.161,
+    2019: 3.214,
+    2020: 3.184,
+    2021: 3.170,
+    2022: 3.104,
+    2023: 3.128,
+    2024: 3.140,
+    2025: 3.150,  # estimate
+    2026: 3.150,  # use 2025 until published
+}
+
+_FIP_FALLBACK_SEASON: int = max(FIP_CONSTANTS)
+
+
+def get_fip_constant(season: int) -> float:
+    """Return the FIP constant for a given season.
+
+    Falls back to the most recent known season for future or unknown years.
+    """
+    if season in FIP_CONSTANTS:
+        return FIP_CONSTANTS[season]
+    if season > _FIP_FALLBACK_SEASON:
+        return FIP_CONSTANTS[_FIP_FALLBACK_SEASON]
+    return FIP_CONSTANTS[min(FIP_CONSTANTS, key=lambda y: abs(y - season))]
+
 
 # ---------------------------------------------------------------------------
 # Branding — The Data Diamond color palette
