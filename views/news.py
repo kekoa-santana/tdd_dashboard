@@ -34,6 +34,8 @@ _CATEGORY_META: dict[str, tuple[str, str]] = {
     "trend_pitch_mix": ("Pitch Mix", "#C8A96E"),
     "trend_discipline": ("Discipline", "#7B8FA6"),
     "trend_quality": ("Contact Quality", "#D9A05B"),
+    "team_trend": ("Team Trend", "#4FC3C8"),
+    "league_trend": ("MLB Trend", "#C8A96E"),
 }
 
 _MAIN_CATEGORIES = [
@@ -49,6 +51,7 @@ _TREND_CATEGORIES = [
     "trend_discipline",
     "trend_quality",
 ]
+_BIG_PICTURE_CATEGORIES = ["team_trend", "league_trend"]
 _RAIL_INJURY_CATEGORIES = ["injury", "transaction"]
 _RAIL_PROSPECT_CATEGORIES = ["debut", "promotion", "demotion", "prospect"]
 
@@ -207,6 +210,12 @@ def page_news() -> None:
                 trends[trends["category"].isin(["trend_discipline", "trend_quality"])],
                 "Batter Skill Shifts",
             )
+
+        big_picture = day[day["category"].isin(_BIG_PICTURE_CATEGORIES)]
+        if not big_picture.empty:
+            st.markdown("### Big Picture")
+            _render_group(big_picture[big_picture["category"] == "league_trend"], "Across MLB")
+            _render_group(big_picture[big_picture["category"] == "team_trend"], "Team Trends")
 
     with col_rail:
         moves = day[day["category"].isin(_RAIL_INJURY_CATEGORIES)]
