@@ -48,3 +48,6 @@ data/dashboard/history/
 
 # Scratch screenshots dropped in the repo root while debugging
 /image.png
+
+# Exploratory notebooks -- kept local, they carry large output cells
+notebooks/
