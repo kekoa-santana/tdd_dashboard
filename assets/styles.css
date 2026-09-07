@@ -3428,31 +3428,24 @@ hr {
    Ported from design handoff profile.css
    ================================================================ */
 
-.tdd-profile {
-  padding: var(--tdd-space-5) var(--tdd-space-5) var(--tdd-space-8);
-  max-width: 1180px;
-  margin: 0 auto;
-}
-
-.tdd-profile .p-section {
+.p-section {
   margin-top: var(--tdd-space-5);
   padding-top: var(--tdd-space-4);
   border-top: 1px solid var(--tdd-dark-border);
 }
-.tdd-profile .p-section:first-of-type { border-top: none; margin-top: 0; padding-top: 0; }
 
-.tdd-profile .p-shead {
+.p-shead {
   display: flex; align-items: baseline; justify-content: space-between;
   margin-bottom: var(--tdd-space-3);
 }
-.tdd-profile .p-shead h2 {
+.p-shead h2 {
   font-family: var(--tdd-font-heading);
   font-size: 0.82rem; font-weight: 700;
   letter-spacing: 2px; text-transform: uppercase;
   color: var(--tdd-gold);
   margin: 0;
 }
-.tdd-profile .p-shead .p-shead-sub {
+.p-shead .p-shead-sub {
   font-family: var(--tdd-font-heading);
   font-size: 0.66rem; letter-spacing: 1.5px;
   text-transform: uppercase; color: var(--tdd-slate);
@@ -3461,20 +3454,32 @@ hr {
 /* --- Hero (editorial) ---------------------------------------- */
 .tdd-hero-player.editorial {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 280px minmax(0, 1fr);
   gap: var(--tdd-space-6);
   padding: var(--tdd-space-5) 0 var(--tdd-space-6);
   border-bottom: 1px solid var(--tdd-dark-border);
 }
 .tdd-hero-player.editorial .portrait {
   position: relative;
+  width: 100%;
   height: 360px;
   border-radius: var(--tdd-radius-md);
   overflow: hidden;
   display: flex; align-items: center; justify-content: center;
+  background-color: var(--tdd-dark-card);
   background-image:
     repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0 1px, transparent 1px 24px),
     repeating-linear-gradient(90deg, rgba(255,255,255,0.02) 0 1px, transparent 1px 24px);
+}
+.tdd-hero-player.editorial .portrait .portrait-img {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
 }
 .tdd-hero-player.editorial .portrait .initials {
   font-family: var(--tdd-font-heading);
@@ -3484,6 +3489,7 @@ hr {
   text-shadow: 0 4px 24px rgba(0,0,0,0.35);
   z-index: 2;
 }
+.tdd-hero-player.editorial .portrait .portrait-fallback { z-index: 0; }
 .tdd-hero-player.editorial .portrait .jersey {
   position: absolute; top: 14px; right: 16px;
   font-family: var(--tdd-font-heading); font-weight: 800;
@@ -3500,10 +3506,15 @@ hr {
   z-index: 2;
 }
 
-.tdd-hero-player.editorial .body { display: flex; flex-direction: column; gap: var(--tdd-space-4); }
+.tdd-hero-player.editorial .body {
+  display: flex; flex-direction: column; gap: var(--tdd-space-4);
+  min-width: 0;
+}
 .tdd-hero-player.editorial .top {
   display: flex; align-items: flex-start; justify-content: space-between; gap: var(--tdd-space-4);
+  min-width: 0;
 }
+.tdd-hero-player.editorial .idblock { min-width: 0; }
 .tdd-hero-player.editorial .idblock .eyebrow {
   font-family: var(--tdd-font-heading);
   font-size: 0.7rem; letter-spacing: 2px; text-transform: uppercase;
@@ -3520,7 +3531,9 @@ hr {
   font-family: var(--tdd-font-body);
   font-size: 0.92rem; color: var(--tdd-cream);
   max-width: 56ch; line-height: 1.5;
+  overflow-wrap: anywhere;
 }
+.tdd-hero-player.editorial .idblock .sub .sep { color: var(--tdd-slate); }
 .tdd-hero-player.editorial .rating {
   text-align: right; flex-shrink: 0;
 }
@@ -3730,10 +3743,82 @@ hr {
 
 /* --- Responsive ---------------------------------------------- */
 @media (max-width: 900px) {
-  .tdd-hero-player.editorial { grid-template-columns: 1fr; }
-  .tdd-hero-player.editorial .portrait { height: 240px; }
-  .tdd-hero-player .vitals { grid-template-columns: repeat(4, 1fr); }
+  .tdd-hero-player.editorial {
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: var(--tdd-space-5);
+  }
+  .tdd-hero-player.editorial .portrait {
+    height: auto;
+    aspect-ratio: 4 / 5;
+    align-self: start;
+  }
+  .tdd-hero-player.editorial .top {
+    flex-direction: column;
+    gap: var(--tdd-space-3);
+  }
+  .tdd-hero-player.editorial .rating { text-align: left; }
+  .tdd-hero-player .vitals {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
   .tdd-discipline { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 600px) {
+  .tdd-hero-player.editorial {
+    grid-template-columns: clamp(108px, 32vw, 128px) minmax(0, 1fr);
+    column-gap: var(--tdd-space-3);
+    row-gap: var(--tdd-space-4);
+    padding: var(--tdd-space-4) 0 var(--tdd-space-5);
+  }
+  .tdd-hero-player.editorial .body { display: contents; }
+  .tdd-hero-player.editorial .portrait {
+    grid-column: 1;
+    grid-row: 1;
+    aspect-ratio: 4 / 5;
+  }
+  .tdd-hero-player.editorial .portrait .initials { font-size: 3rem; }
+  .tdd-hero-player.editorial .portrait .team-strip {
+    padding: var(--tdd-space-2);
+    font-size: 0.8rem;
+    letter-spacing: 2px;
+  }
+  .tdd-hero-player.editorial .top {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: start;
+    gap: var(--tdd-space-2);
+  }
+  .tdd-hero-player.editorial .idblock .eyebrow {
+    font-size: 0.6rem;
+    letter-spacing: 1.5px;
+  }
+  .tdd-hero-player.editorial .idblock h1 {
+    font-size: clamp(1.55rem, 8vw, 2.15rem);
+    letter-spacing: 1px;
+    overflow-wrap: anywhere;
+  }
+  .tdd-hero-player.editorial .idblock .sub {
+    font-size: 0.75rem;
+    line-height: 1.45;
+  }
+  .tdd-hero-player.editorial .rating > span {
+    font-size: 0.82rem !important;
+    letter-spacing: 1px !important;
+  }
+  .tdd-hero-player.editorial .vitals {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .tdd-hero-player.editorial .scouting {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+  .p-shead {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--tdd-space-1);
+  }
 }
 
 
