@@ -42,3 +42,9 @@ test.ipynb
 
 # Per-date sim sample archive (local-only, used for long-term accuracy validation)
 data/dashboard/history/
+
+# Salvage copies written when a history parquet fails to read -- local triage only
+*.corrupt_backup
+
+# Scratch screenshots dropped in the repo root while debugging
+/image.png

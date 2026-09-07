@@ -16,6 +16,7 @@ REM                     Task Scheduler handles repetition; each invocation runs 
 REM ----------------------------------------------------------------
 
 set PROJECT_DIR=C:\Users\kekoa\Documents\data_analytics\tdd-dashboard
+set DEPLOY_DIR=C:\Users\kekoa\Documents\data_analytics\tdd-dashboard-deploy
 set PROFILES_DIR=C:\Users\kekoa\Documents\data_analytics\player_profiles
 set ETL_DIR=C:\Users\kekoa\Documents\data_analytics\mlb_fantasy_ETL
 set ETL_PYTHON=%ETL_DIR%\myenv\Scripts\python.exe
@@ -29,6 +30,16 @@ if %ERRORLEVEL% EQU 0 set IS_SCHEDULE_ONLY=1
 
 REM Create logs directory if needed
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
+
+REM -- Single-instance lock: overlapping task firings skip instead of colliding --
+REM   A lock older than 2 hours is treated as stale and removed.
+set LOCK_FILE=%LOG_DIR%\update.lock
+if exist "%LOCK_FILE%" powershell -NoProfile -Command "if ((Get-Item '%LOCK_FILE%').LastWriteTime -lt (Get-Date).AddHours(-2)) { Remove-Item -Force '%LOCK_FILE%' }" >nul 2>&1
+if exist "%LOCK_FILE%" (
+    echo [%date% %time%] Skipping run, another update holds the lock >> "%LOG_FILE%" 2>&1
+    goto skip_locked
+)
+echo locked > "%LOCK_FILE%"
 
 if "%IS_SCHEDULE_ONLY%"=="1" (
     echo [%date% %time%] Starting schedule-only refresh... >> "%LOG_FILE%" 2>&1
@@ -51,8 +62,8 @@ if %ERRORLEVEL% EQU 0 (
     echo [%date% %time%] Running ETL for %YESTERDAY%... >> "%LOG_FILE%" 2>&1
     cd /d "%ETL_DIR%"
     "%ETL_PYTHON%" "%ETL_DIR%\full_pipeline.py" --start-date %YESTERDAY% --end-date %YESTERDAY% >> "%LOG_FILE%" 2>&1
-    if %ERRORLEVEL% NEQ 0 (
-        echo [%date% %time%] ETL FAILED with exit code %ERRORLEVEL% >> "%LOG_FILE%" 2>&1
+    if !ERRORLEVEL! NEQ 0 (
+        echo [%date% %time%] ETL FAILED with exit code !ERRORLEVEL! >> "%LOG_FILE%" 2>&1
         echo [%date% %time%] Continuing with dashboard update using existing data... >> "%LOG_FILE%" 2>&1
     ) else (
         echo [%date% %time%] ETL completed successfully >> "%LOG_FILE%" 2>&1
@@ -80,14 +91,14 @@ if "%IS_SCHEDULE_ONLY%"=="0" (
 
 REM -- Step 2: Dashboard update (projections + bookkeeping, NO sims) --
 if "%IS_SCHEDULE_ONLY%"=="1" (
-    echo [%date% %time%] Running dashboard schedule-only (roster moves + odds)... >> "%LOG_FILE%" 2>&1
+    echo [%date% %time%] Running dashboard schedule-only ^(roster moves + odds^)... >> "%LOG_FILE%" 2>&1
     "%PYTHON%" "%PROJECT_DIR%\scripts\update_in_season.py" --schedule-only >> "%LOG_FILE%" 2>&1
 ) else (
     set DASH_ARGS=%*
     if defined DASH_ARGS (
         set DASH_ARGS=!DASH_ARGS:--skip-etl=!
     )
-    echo [%date% %time%] Running dashboard update (projections + bookkeeping)... >> "%LOG_FILE%" 2>&1
+    echo [%date% %time%] Running dashboard update ^(projections + bookkeeping^)... >> "%LOG_FILE%" 2>&1
     "%PYTHON%" "%PROJECT_DIR%\scripts\update_in_season.py" !DASH_ARGS! >> "%LOG_FILE%" 2>&1
 )
 
@@ -102,7 +113,7 @@ REM -- Step 3: Run game sims via confident_picks (sole sim runner) --
 REM   Fetches schedule + lineups from MLB API, runs pitcher + batter sims,
 REM   produces: game_props.parquet, todays_games.parquet,
 REM   todays_lineups.parquet, todays_batter_sims.parquet, game_predictions.parquet.
-echo [%date% %time%] Running game sims (confident_picks)... >> "%LOG_FILE%" 2>&1
+echo [%date% %time%] Running game sims ^(confident_picks^)... >> "%LOG_FILE%" 2>&1
 cd /d "%PROFILES_DIR%"
 "%PROFILES_PYTHON%" -c "import sys; sys.path.insert(0, 'scripts/precompute'); sys.path.insert(0, 'scripts'); from confident_picks import run; run()" >> "%LOG_FILE%" 2>&1
 
@@ -119,14 +130,14 @@ if "%IS_SCHEDULE_ONLY%"=="1" (
     echo [%date% %time%] Generating live standouts... >> "%LOG_FILE%" 2>&1
     cd /d "%PROFILES_DIR%"
     "%PROFILES_PYTHON%" -c "import sys; sys.path.insert(0, 'scripts/precompute'); sys.path.insert(0, 'scripts'); from rankings import run_live_standouts; run_live_standouts()" >> "%LOG_FILE%" 2>&1
-    if %ERRORLEVEL% NEQ 0 (
+    if !ERRORLEVEL! NEQ 0 (
         echo [%date% %time%] Live standouts FAILED >> "%LOG_FILE%" 2>&1
     ) else (
         echo [%date% %time%] Live standouts generated successfully >> "%LOG_FILE%" 2>&1
     )
 )
 
-REM -- Step 3c: Post-sim bookkeeping (game predictions reshape + odds + metadata) --
+REM -- Step 3c: Post-sim bookkeeping, game predictions reshape + odds + metadata --
 echo [%date% %time%] Running post-sim bookkeeping... >> "%LOG_FILE%" 2>&1
 "%PYTHON%" "%PROJECT_DIR%\scripts\update_in_season.py" --post-sims >> "%LOG_FILE%" 2>&1
 
@@ -136,28 +147,49 @@ if %ERRORLEVEL% NEQ 0 (
     echo [%date% %time%] Post-sim bookkeeping completed >> "%LOG_FILE%" 2>&1
 )
 
-REM -- Step 4: Git commit + push data to GitHub --
-echo [%date% %time%] Pushing updated data to GitHub... >> "%LOG_FILE%" 2>&1
+REM -- Step 4: Publish data to origin/main via deploy worktree --
+REM   The dev checkout can sit on any branch; publishing happens from a
+REM   detached worktree pinned to origin/main so branches never collide.
+REM   Streamlit Cloud serves main, so this is the deploy step.
+echo [%date% %time%] Publishing data to origin/main... >> "%LOG_FILE%" 2>&1
 cd /d "%PROJECT_DIR%"
 
-REM Stage only data files and manifest
-git add data/dashboard/*.parquet data/dashboard/*.json data/dashboard/*.npz data/dashboard/snapshots/ >> "%LOG_FILE%" 2>&1
+if not exist "%DEPLOY_DIR%\.git" (
+    git worktree add --detach "%DEPLOY_DIR%" origin/main >> "%LOG_FILE%" 2>&1
+)
 
-REM Check if there are changes to commit
-git diff --cached --quiet
+git -C "%DEPLOY_DIR%" fetch origin main >> "%LOG_FILE%" 2>&1
+git -C "%DEPLOY_DIR%" reset --hard origin/main >> "%LOG_FILE%" 2>&1
+
+REM Copy the published artifact set: top-level parquet/json/npz/pkl + snapshots.
+REM   /PURGE removes deploy-side files that no longer exist locally, so deleted
+REM   artifacts actually leave main instead of being restored by the reset above.
+REM   /XD keeps purge away from the subdirectories: history is gitignored and
+REM   never published, snapshots is mirrored separately on the next line.
+robocopy "%PROJECT_DIR%\data\dashboard" "%DEPLOY_DIR%\data\dashboard" *.parquet *.json *.npz *.pkl /PURGE /XD history snapshots /NJH /NJS /NDL /NP >> "%LOG_FILE%" 2>&1
+robocopy "%PROJECT_DIR%\data\dashboard\snapshots" "%DEPLOY_DIR%\data\dashboard\snapshots" /MIR /NJH /NJS /NDL /NP >> "%LOG_FILE%" 2>&1
+
+REM robocopy uses 0-7 for success (1 = files copied); only 8+ is a real failure.
+if !ERRORLEVEL! GEQ 8 echo [%date% %time%] Artifact copy FAILED with code !ERRORLEVEL! >> "%LOG_FILE%" 2>&1
+
+REM -A so removals are staged, not just modifications and additions
+git -C "%DEPLOY_DIR%" add -A data/dashboard >> "%LOG_FILE%" 2>&1
+git -C "%DEPLOY_DIR%" diff --cached --quiet
 if %ERRORLEVEL% NEQ 0 (
-    git commit -m "data update" >> "%LOG_FILE%" 2>&1
-    git push >> "%LOG_FILE%" 2>&1
-    if %ERRORLEVEL% NEQ 0 (
+    git -C "%DEPLOY_DIR%" commit -m "data update" >> "%LOG_FILE%" 2>&1
+    git -C "%DEPLOY_DIR%" push origin HEAD:main >> "%LOG_FILE%" 2>&1
+    if !ERRORLEVEL! NEQ 0 (
         echo [%date% %time%] Git push FAILED >> "%LOG_FILE%" 2>&1
     ) else (
-        echo [%date% %time%] Data pushed to GitHub successfully >> "%LOG_FILE%" 2>&1
+        echo [%date% %time%] Data published to origin/main successfully >> "%LOG_FILE%" 2>&1
     )
 ) else (
-    echo [%date% %time%] No data changes to push >> "%LOG_FILE%" 2>&1
+    echo [%date% %time%] No data changes to publish >> "%LOG_FILE%" 2>&1
 )
 exit /b 0
 
 :end
 echo [%date% %time%] Update finished >> "%LOG_FILE%" 2>&1
+del "%LOCK_FILE%" >nul 2>&1
+:skip_locked
 endlocal
