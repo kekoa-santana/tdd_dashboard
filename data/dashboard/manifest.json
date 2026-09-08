@@ -1,7 +1,7 @@
 {
   "contract_version": 1,
   "schema_version": 1,
-  "generated_at": "2026-09-08T16:21:50.518249+00:00",
+  "generated_at": "2026-09-08T20:42:03.014769+00:00",
   "producer_repo": "tdd-dashboard",
   "producer_commit": "764c89a",
   "target_season": 2026,
@@ -10,7 +10,7 @@
   "artifacts": [
     {
       "artifact_name": "archetype_matchup_matrix.parquet",
-      "generated_at": "2026-09-08T16:21:49.367667+00:00",
+      "generated_at": "2026-09-08T20:42:01.524363+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -23,7 +23,7 @@
     },
     {
       "artifact_name": "backtest_batter_sim_backtest_predictions.parquet",
-      "generated_at": "2026-09-08T16:21:49.369662+00:00",
+      "generated_at": "2026-09-08T20:42:01.527025+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -36,7 +36,7 @@
     },
     {
       "artifact_name": "backtest_batter_sim_backtest_summary.parquet",
-      "generated_at": "2026-09-08T16:21:49.372348+00:00",
+      "generated_at": "2026-09-08T20:42:01.531769+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -49,7 +49,7 @@
     },
     {
       "artifact_name": "backtest_bip_backtest_results.parquet",
-      "generated_at": "2026-09-08T16:21:49.375346+00:00",
+      "generated_at": "2026-09-08T20:42:01.534669+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -62,7 +62,7 @@
     },
     {
       "artifact_name": "backtest_breakout_backtest_hitter.parquet",
-      "generated_at": "2026-09-08T16:21:49.384797+00:00",
+      "generated_at": "2026-09-08T20:42:01.546625+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -75,7 +75,7 @@
     },
     {
       "artifact_name": "backtest_breakout_backtest_pitcher.parquet",
-      "generated_at": "2026-09-08T16:21:49.385798+00:00",
+      "generated_at": "2026-09-08T20:42:01.548195+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -88,7 +88,7 @@
     },
     {
       "artifact_name": "backtest_confidence_tiers.parquet",
-      "generated_at": "2026-09-08T16:21:49.386797+00:00",
+      "generated_at": "2026-09-08T20:42:01.549281+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -101,7 +101,7 @@
     },
     {
       "artifact_name": "backtest_game_k_backtest.parquet",
-      "generated_at": "2026-09-08T16:21:49.389022+00:00",
+      "generated_at": "2026-09-08T20:42:01.551370+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -114,7 +114,7 @@
     },
     {
       "artifact_name": "backtest_game_prop_summary.parquet",
-      "generated_at": "2026-09-08T16:21:49.389022+00:00",
+      "generated_at": "2026-09-08T20:42:01.552991+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -127,7 +127,7 @@
     },
     {
       "artifact_name": "backtest_game_sim_backtest_predictions.parquet",
-      "generated_at": "2026-09-08T16:21:49.392630+00:00",
+      "generated_at": "2026-09-08T20:42:01.556609+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -140,7 +140,7 @@
     },
     {
       "artifact_name": "backtest_game_sim_backtest_summary.parquet",
-      "generated_at": "2026-09-08T16:21:49.401287+00:00",
+      "generated_at": "2026-09-08T20:42:01.567755+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -153,7 +153,7 @@
     },
     {
       "artifact_name": "backtest_game_stat_backtest.parquet",
-      "generated_at": "2026-09-08T16:21:49.406486+00:00",
+      "generated_at": "2026-09-08T20:42:01.572831+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -166,7 +166,7 @@
     },
     {
       "artifact_name": "backtest_hitter_counting_backtest.parquet",
-      "generated_at": "2026-09-08T16:21:49.407485+00:00",
+      "generated_at": "2026-09-08T20:42:01.574432+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -179,7 +179,7 @@
     },
     {
       "artifact_name": "backtest_hitter_k_backtest.parquet",
-      "generated_at": "2026-09-08T16:21:49.408522+00:00",
+      "generated_at": "2026-09-08T20:42:01.576071+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -192,7 +192,7 @@
     },
     {
       "artifact_name": "backtest_hitter_multi_stat_backtest.parquet",
-      "generated_at": "2026-09-08T16:21:49.410032+00:00",
+      "generated_at": "2026-09-08T20:42:01.577637+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -205,7 +205,7 @@
     },
     {
       "artifact_name": "backtest_hitter_sim_backtest_summary.parquet",
-      "generated_at": "2026-09-08T16:21:49.411099+00:00",
+      "generated_at": "2026-09-08T20:42:01.579636+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -218,7 +218,7 @@
     },
     {
       "artifact_name": "backtest_lineup_sim.parquet",
-      "generated_at": "2026-09-08T16:21:49.413417+00:00",
+      "generated_at": "2026-09-08T20:42:01.581636+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -231,7 +231,7 @@
     },
     {
       "artifact_name": "backtest_pitcher_counting_backtest.parquet",
-      "generated_at": "2026-09-08T16:21:49.415452+00:00",
+      "generated_at": "2026-09-08T20:42:01.584638+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -244,7 +244,7 @@
     },
     {
       "artifact_name": "backtest_pitcher_k_backtest.parquet",
-      "generated_at": "2026-09-08T16:21:49.417263+00:00",
+      "generated_at": "2026-09-08T20:42:01.586918+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -257,7 +257,7 @@
     },
     {
       "artifact_name": "backtest_pitcher_multi_stat_backtest.parquet",
-      "generated_at": "2026-09-08T16:21:49.418305+00:00",
+      "generated_at": "2026-09-08T20:42:01.588444+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -270,7 +270,7 @@
     },
     {
       "artifact_name": "backtest_season_sim_backtest_summary.parquet",
-      "generated_at": "2026-09-08T16:21:49.419303+00:00",
+      "generated_at": "2026-09-08T20:42:01.590030+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -283,7 +283,7 @@
     },
     {
       "artifact_name": "baselines_arch.parquet",
-      "generated_at": "2026-09-08T16:21:49.421779+00:00",
+      "generated_at": "2026-09-08T20:42:01.592200+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -296,7 +296,7 @@
     },
     {
       "artifact_name": "batter_bip_profiles.parquet",
-      "generated_at": "2026-09-08T16:21:49.423449+00:00",
+      "generated_at": "2026-09-08T20:42:01.593711+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -309,7 +309,7 @@
     },
     {
       "artifact_name": "batter_game_sim_samples.npz",
-      "generated_at": "2026-09-08T16:21:49.424529+00:00",
+      "generated_at": "2026-09-08T20:42:01.595710+00:00",
       "validation_status": "validated",
       "classification": "canonical",
       "model_version": "game-sim-2026.1",
@@ -321,11 +321,11 @@
       "key_pattern": "{game_pk}_{player_id}_{stat}",
       "row_count": null,
       "column_hash": null,
-      "array_count": 3568
+      "array_count": 3728
     },
     {
       "artifact_name": "batter_ld_rate.parquet",
-      "generated_at": "2026-09-08T16:21:49.460938+00:00",
+      "generated_at": "2026-09-08T20:42:01.615710+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -338,7 +338,7 @@
     },
     {
       "artifact_name": "batter_pitch_count_features.parquet",
-      "generated_at": "2026-09-08T16:21:49.463289+00:00",
+      "generated_at": "2026-09-08T20:42:01.617219+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -351,7 +351,7 @@
     },
     {
       "artifact_name": "batter_platoon_splits.parquet",
-      "generated_at": "2026-09-08T16:21:49.464328+00:00",
+      "generated_at": "2026-09-08T20:42:01.619088+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -364,7 +364,7 @@
     },
     {
       "artifact_name": "batter_sprint_speed.parquet",
-      "generated_at": "2026-09-08T16:21:49.465327+00:00",
+      "generated_at": "2026-09-08T20:42:01.621086+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -377,7 +377,7 @@
     },
     {
       "artifact_name": "bf_priors.parquet",
-      "generated_at": "2026-09-08T16:21:49.466327+00:00",
+      "generated_at": "2026-09-08T20:42:01.622737+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -390,7 +390,7 @@
     },
     {
       "artifact_name": "catcher_framing.parquet",
-      "generated_at": "2026-09-08T16:21:49.468302+00:00",
+      "generated_at": "2026-09-08T20:42:01.623734+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -403,7 +403,7 @@
     },
     {
       "artifact_name": "dk_lineups.parquet",
-      "generated_at": "2026-09-08T16:21:49.469300+00:00",
+      "generated_at": "2026-09-08T20:42:01.625446+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -416,7 +416,7 @@
     },
     {
       "artifact_name": "dk_props.parquet",
-      "generated_at": "2026-09-08T16:21:49.470894+00:00",
+      "generated_at": "2026-09-08T20:42:01.627431+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -429,7 +429,7 @@
     },
     {
       "artifact_name": "dk_props_history.parquet",
-      "generated_at": "2026-09-08T16:21:49.472440+00:00",
+      "generated_at": "2026-09-08T20:42:01.629431+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -442,7 +442,7 @@
     },
     {
       "artifact_name": "game_batter_ks.parquet",
-      "generated_at": "2026-09-08T16:21:49.475390+00:00",
+      "generated_at": "2026-09-08T20:42:01.632431+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -455,7 +455,7 @@
     },
     {
       "artifact_name": "game_info.parquet",
-      "generated_at": "2026-09-08T16:21:49.477845+00:00",
+      "generated_at": "2026-09-08T20:42:01.635431+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -468,7 +468,7 @@
     },
     {
       "artifact_name": "game_lineups.parquet",
-      "generated_at": "2026-09-08T16:21:49.478881+00:00",
+      "generated_at": "2026-09-08T20:42:01.637431+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -481,7 +481,7 @@
     },
     {
       "artifact_name": "game_odds_daily.parquet",
-      "generated_at": "2026-09-08T16:21:49.482479+00:00",
+      "generated_at": "2026-09-08T20:42:01.642430+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -494,7 +494,7 @@
     },
     {
       "artifact_name": "game_odds_history.parquet",
-      "generated_at": "2026-09-08T16:21:49.489449+00:00",
+      "generated_at": "2026-09-08T20:42:01.651431+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -502,12 +502,12 @@
       "consumers": [],
       "schema_version": null,
       "required_columns": [],
-      "row_count": 506414,
+      "row_count": 506862,
       "column_hash": "16e1f424ab6702a78cec8f57175cbd8a749fc424bfbc45d5ba39e0ca7af9782a"
     },
     {
       "artifact_name": "game_predictions.parquet",
-      "generated_at": "2026-09-08T16:21:49.601165+00:00",
+      "generated_at": "2026-09-08T20:42:01.768286+00:00",
       "validation_status": "validated",
       "classification": "canonical",
       "model_version": "game-sim-2026.1",
@@ -548,7 +548,7 @@
     },
     {
       "artifact_name": "game_predictions_history.parquet",
-      "generated_at": "2026-09-08T16:21:49.609779+00:00",
+      "generated_at": "2026-09-08T20:42:01.777628+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -556,12 +556,12 @@
       "consumers": [],
       "schema_version": null,
       "required_columns": [],
-      "row_count": 17427,
+      "row_count": 17450,
       "column_hash": "7d0f53bed33419c79826539d25ec9d6b97ba6cbae861ca54e481ae043c20c9b1"
     },
     {
       "artifact_name": "game_prop_attribution.parquet",
-      "generated_at": "2026-09-08T16:21:49.624414+00:00",
+      "generated_at": "2026-09-08T20:42:01.794787+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -569,12 +569,12 @@
       "consumers": [],
       "schema_version": null,
       "required_columns": [],
-      "row_count": 496,
+      "row_count": 518,
       "column_hash": "3008cbd2c5f43564b92650d6abdc8a493092468ec18b54a3fc7317fdcc59ccb1"
     },
     {
       "artifact_name": "game_prop_predictions_batter_bb.parquet",
-      "generated_at": "2026-09-08T16:21:49.632888+00:00",
+      "generated_at": "2026-09-08T20:42:01.845685+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -587,7 +587,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_batter_h.parquet",
-      "generated_at": "2026-09-08T16:21:49.635421+00:00",
+      "generated_at": "2026-09-08T20:42:01.851112+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -600,7 +600,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_batter_hr.parquet",
-      "generated_at": "2026-09-08T16:21:49.638617+00:00",
+      "generated_at": "2026-09-08T20:42:01.855267+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -613,7 +613,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_batter_k.parquet",
-      "generated_at": "2026-09-08T16:21:49.641211+00:00",
+      "generated_at": "2026-09-08T20:42:01.860446+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -626,7 +626,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_pitcher_bb.parquet",
-      "generated_at": "2026-09-08T16:21:49.644632+00:00",
+      "generated_at": "2026-09-08T20:42:01.865146+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -639,7 +639,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_pitcher_bb_legacy.parquet",
-      "generated_at": "2026-09-08T16:21:49.647760+00:00",
+      "generated_at": "2026-09-08T20:42:01.869290+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -652,7 +652,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_pitcher_bb_pa_sim.parquet",
-      "generated_at": "2026-09-08T16:21:49.650962+00:00",
+      "generated_at": "2026-09-08T20:42:01.873866+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -665,7 +665,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_pitcher_h.parquet",
-      "generated_at": "2026-09-08T16:21:49.652985+00:00",
+      "generated_at": "2026-09-08T20:42:01.876495+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -678,7 +678,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_pitcher_h_legacy.parquet",
-      "generated_at": "2026-09-08T16:21:49.655041+00:00",
+      "generated_at": "2026-09-08T20:42:01.880164+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -691,7 +691,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_pitcher_h_pa_sim.parquet",
-      "generated_at": "2026-09-08T16:21:49.658220+00:00",
+      "generated_at": "2026-09-08T20:42:01.884413+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -704,7 +704,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_pitcher_hr.parquet",
-      "generated_at": "2026-09-08T16:21:49.660124+00:00",
+      "generated_at": "2026-09-08T20:42:01.887005+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -717,7 +717,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_pitcher_hr_legacy.parquet",
-      "generated_at": "2026-09-08T16:21:49.662821+00:00",
+      "generated_at": "2026-09-08T20:42:01.890139+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -730,7 +730,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_pitcher_hr_pa_sim.parquet",
-      "generated_at": "2026-09-08T16:21:49.665394+00:00",
+      "generated_at": "2026-09-08T20:42:01.894180+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -743,7 +743,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_pitcher_k.parquet",
-      "generated_at": "2026-09-08T16:21:49.667381+00:00",
+      "generated_at": "2026-09-08T20:42:01.896725+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -756,7 +756,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_pitcher_k_legacy.parquet",
-      "generated_at": "2026-09-08T16:21:49.669401+00:00",
+      "generated_at": "2026-09-08T20:42:01.900609+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -769,7 +769,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_pitcher_k_pa_sim.parquet",
-      "generated_at": "2026-09-08T16:21:49.672305+00:00",
+      "generated_at": "2026-09-08T20:42:01.905160+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -782,7 +782,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_pitcher_outs.parquet",
-      "generated_at": "2026-09-08T16:21:49.675147+00:00",
+      "generated_at": "2026-09-08T20:42:01.908200+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -795,7 +795,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_pitcher_outs_legacy.parquet",
-      "generated_at": "2026-09-08T16:21:49.676618+00:00",
+      "generated_at": "2026-09-08T20:42:01.910252+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -808,7 +808,7 @@
     },
     {
       "artifact_name": "game_prop_predictions_pitcher_outs_pa_sim.parquet",
-      "generated_at": "2026-09-08T16:21:49.679402+00:00",
+      "generated_at": "2026-09-08T20:42:01.914957+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -821,7 +821,7 @@
     },
     {
       "artifact_name": "game_props.parquet",
-      "generated_at": "2026-09-08T16:21:49.681398+00:00",
+      "generated_at": "2026-09-08T20:42:01.917623+00:00",
       "validation_status": "validated",
       "classification": "canonical",
       "model_version": "game-sim-2026.1",
@@ -855,12 +855,12 @@
         "producer_commit",
         "prediction_variant"
       ],
-      "row_count": 258710,
+      "row_count": 258986,
       "column_hash": "d5e9a1e20e9b217bb0bbfe0be24d8b04b05fe2620c8ba280c310f87bb0384031"
     },
     {
       "artifact_name": "game_props_with_weather.parquet",
-      "generated_at": "2026-09-08T16:21:49.788258+00:00",
+      "generated_at": "2026-09-08T20:42:02.031574+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -873,7 +873,7 @@
     },
     {
       "artifact_name": "game_run_sim_samples.npz",
-      "generated_at": "2026-09-08T16:21:49.813494+00:00",
+      "generated_at": "2026-09-08T20:42:02.059236+00:00",
       "validation_status": "validated",
       "classification": "canonical",
       "model_version": "game-sim-2026.1",
@@ -889,7 +889,7 @@
     },
     {
       "artifact_name": "health_scores.parquet",
-      "generated_at": "2026-09-08T16:21:49.820476+00:00",
+      "generated_at": "2026-09-08T20:42:02.067527+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -902,7 +902,7 @@
     },
     {
       "artifact_name": "hitter_advanced.parquet",
-      "generated_at": "2026-09-08T16:21:49.823476+00:00",
+      "generated_at": "2026-09-08T20:42:02.071639+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -915,7 +915,7 @@
     },
     {
       "artifact_name": "hitter_aggressiveness.parquet",
-      "generated_at": "2026-09-08T16:21:49.825476+00:00",
+      "generated_at": "2026-09-08T20:42:02.074179+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -928,7 +928,7 @@
     },
     {
       "artifact_name": "hitter_aggressiveness_all.parquet",
-      "generated_at": "2026-09-08T16:21:49.826476+00:00",
+      "generated_at": "2026-09-08T20:42:02.076284+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -941,7 +941,7 @@
     },
     {
       "artifact_name": "hitter_archetype_metadata.parquet",
-      "generated_at": "2026-09-08T16:21:49.828477+00:00",
+      "generated_at": "2026-09-08T20:42:02.078962+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -954,7 +954,7 @@
     },
     {
       "artifact_name": "hitter_archetypes.parquet",
-      "generated_at": "2026-09-08T16:21:49.830476+00:00",
+      "generated_at": "2026-09-08T20:42:02.080579+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -967,7 +967,7 @@
     },
     {
       "artifact_name": "hitter_bb_samples.npz",
-      "generated_at": "2026-09-08T16:21:49.831476+00:00",
+      "generated_at": "2026-09-08T20:42:02.082145+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -981,7 +981,7 @@
     },
     {
       "artifact_name": "hitter_breakout_candidates.parquet",
-      "generated_at": "2026-09-08T16:21:49.838476+00:00",
+      "generated_at": "2026-09-08T20:42:02.088884+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -994,7 +994,7 @@
     },
     {
       "artifact_name": "hitter_counting.parquet",
-      "generated_at": "2026-09-08T16:21:49.840477+00:00",
+      "generated_at": "2026-09-08T20:42:02.092514+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1007,7 +1007,7 @@
     },
     {
       "artifact_name": "hitter_counting_sim.parquet",
-      "generated_at": "2026-09-08T16:21:49.843477+00:00",
+      "generated_at": "2026-09-08T20:42:02.096690+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1020,7 +1020,7 @@
     },
     {
       "artifact_name": "hitter_full_stats.parquet",
-      "generated_at": "2026-09-08T16:21:49.852624+00:00",
+      "generated_at": "2026-09-08T20:42:02.106888+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1033,7 +1033,7 @@
     },
     {
       "artifact_name": "hitter_grade_ci.parquet",
-      "generated_at": "2026-09-08T16:21:49.858516+00:00",
+      "generated_at": "2026-09-08T20:42:02.116983+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1046,7 +1046,7 @@
     },
     {
       "artifact_name": "hitter_hr_samples.npz",
-      "generated_at": "2026-09-08T16:21:49.862127+00:00",
+      "generated_at": "2026-09-08T20:42:02.120492+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1060,7 +1060,7 @@
     },
     {
       "artifact_name": "hitter_k_samples.npz",
-      "generated_at": "2026-09-08T16:21:49.868528+00:00",
+      "generated_at": "2026-09-08T20:42:02.127565+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1074,7 +1074,7 @@
     },
     {
       "artifact_name": "hitter_position_eligibility.parquet",
-      "generated_at": "2026-09-08T16:21:49.874166+00:00",
+      "generated_at": "2026-09-08T20:42:02.133902+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1087,7 +1087,7 @@
     },
     {
       "artifact_name": "hitter_projections.parquet",
-      "generated_at": "2026-09-08T16:21:49.875279+00:00",
+      "generated_at": "2026-09-08T20:42:02.137002+00:00",
       "validation_status": "validated",
       "classification": "canonical",
       "model_version": "layer1-2026.1",
@@ -1114,7 +1114,7 @@
     },
     {
       "artifact_name": "hitter_statcast_projections.parquet",
-      "generated_at": "2026-09-08T16:21:49.879159+00:00",
+      "generated_at": "2026-09-08T20:42:02.141134+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1127,7 +1127,7 @@
     },
     {
       "artifact_name": "hitter_str.parquet",
-      "generated_at": "2026-09-08T16:21:49.881667+00:00",
+      "generated_at": "2026-09-08T20:42:02.143820+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1140,7 +1140,7 @@
     },
     {
       "artifact_name": "hitter_str_all.parquet",
-      "generated_at": "2026-09-08T16:21:49.882688+00:00",
+      "generated_at": "2026-09-08T20:42:02.146403+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1153,7 +1153,7 @@
     },
     {
       "artifact_name": "hitter_str_career.parquet",
-      "generated_at": "2026-09-08T16:21:49.891214+00:00",
+      "generated_at": "2026-09-08T20:42:02.153537+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1166,7 +1166,7 @@
     },
     {
       "artifact_name": "hitter_traditional.parquet",
-      "generated_at": "2026-09-08T16:21:49.894289+00:00",
+      "generated_at": "2026-09-08T20:42:02.157188+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1179,7 +1179,7 @@
     },
     {
       "artifact_name": "hitter_traditional_all.parquet",
-      "generated_at": "2026-09-08T16:21:49.896296+00:00",
+      "generated_at": "2026-09-08T20:42:02.160348+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1192,7 +1192,7 @@
     },
     {
       "artifact_name": "hitter_venues.parquet",
-      "generated_at": "2026-09-08T16:21:49.898992+00:00",
+      "generated_at": "2026-09-08T20:42:02.164521+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1205,7 +1205,7 @@
     },
     {
       "artifact_name": "hitter_vuln.parquet",
-      "generated_at": "2026-09-08T16:21:49.898992+00:00",
+      "generated_at": "2026-09-08T20:42:02.165516+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1218,7 +1218,7 @@
     },
     {
       "artifact_name": "hitter_vuln_all.parquet",
-      "generated_at": "2026-09-08T16:21:49.902171+00:00",
+      "generated_at": "2026-09-08T20:42:02.168338+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1231,7 +1231,7 @@
     },
     {
       "artifact_name": "hitter_vuln_arch.parquet",
-      "generated_at": "2026-09-08T16:21:49.908976+00:00",
+      "generated_at": "2026-09-08T20:42:02.180242+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1244,7 +1244,7 @@
     },
     {
       "artifact_name": "hitter_vuln_arch_career.parquet",
-      "generated_at": "2026-09-08T16:21:49.911298+00:00",
+      "generated_at": "2026-09-08T20:42:02.182321+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1257,7 +1257,7 @@
     },
     {
       "artifact_name": "hitter_vuln_career.parquet",
-      "generated_at": "2026-09-08T16:21:49.913154+00:00",
+      "generated_at": "2026-09-08T20:42:02.183873+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1270,7 +1270,7 @@
     },
     {
       "artifact_name": "hitter_zone_grid.parquet",
-      "generated_at": "2026-09-08T16:21:49.916744+00:00",
+      "generated_at": "2026-09-08T20:42:02.187978+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1283,7 +1283,7 @@
     },
     {
       "artifact_name": "hitter_zone_grid_all.parquet",
-      "generated_at": "2026-09-08T16:21:49.927812+00:00",
+      "generated_at": "2026-09-08T20:42:02.204058+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1296,7 +1296,7 @@
     },
     {
       "artifact_name": "hitter_zone_grid_career.parquet",
-      "generated_at": "2026-09-08T16:21:50.007483+00:00",
+      "generated_at": "2026-09-08T20:42:02.290126+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1309,7 +1309,7 @@
     },
     {
       "artifact_name": "hitters_core_rankings.parquet",
-      "generated_at": "2026-09-08T16:21:50.042583+00:00",
+      "generated_at": "2026-09-08T20:42:02.332329+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1322,7 +1322,7 @@
     },
     {
       "artifact_name": "hitters_daily_standouts.parquet",
-      "generated_at": "2026-09-08T16:21:50.049856+00:00",
+      "generated_at": "2026-09-08T20:42:02.340800+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1335,7 +1335,7 @@
     },
     {
       "artifact_name": "hitters_rankings.parquet",
-      "generated_at": "2026-09-08T16:21:50.052214+00:00",
+      "generated_at": "2026-09-08T20:42:02.344798+00:00",
       "validation_status": "validated",
       "classification": "canonical",
       "model_version": "front-office-rankings-2026.1",
@@ -1361,7 +1361,7 @@
     },
     {
       "artifact_name": "hitters_weekly_form.parquet",
-      "generated_at": "2026-09-08T16:21:50.057294+00:00",
+      "generated_at": "2026-09-08T20:42:02.351559+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1374,7 +1374,7 @@
     },
     {
       "artifact_name": "hr_park_factors.parquet",
-      "generated_at": "2026-09-08T16:21:50.059342+00:00",
+      "generated_at": "2026-09-08T20:42:02.354690+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1387,7 +1387,7 @@
     },
     {
       "artifact_name": "league_rolling_baseline.parquet",
-      "generated_at": "2026-09-08T16:21:50.059852+00:00",
+      "generated_at": "2026-09-08T20:42:02.355723+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1400,7 +1400,7 @@
     },
     {
       "artifact_name": "league_sim.parquet",
-      "generated_at": "2026-09-08T16:21:50.066452+00:00",
+      "generated_at": "2026-09-08T20:42:02.363210+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1413,7 +1413,7 @@
     },
     {
       "artifact_name": "lineup_priors.parquet",
-      "generated_at": "2026-09-08T16:21:50.067452+00:00",
+      "generated_at": "2026-09-08T20:42:02.365802+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1426,7 +1426,7 @@
     },
     {
       "artifact_name": "market_edge.parquet",
-      "generated_at": "2026-09-08T16:21:50.069530+00:00",
+      "generated_at": "2026-09-08T20:42:02.366857+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1439,7 +1439,7 @@
     },
     {
       "artifact_name": "market_legs.parquet",
-      "generated_at": "2026-09-08T16:21:50.070531+00:00",
+      "generated_at": "2026-09-08T20:42:02.368926+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1452,7 +1452,7 @@
     },
     {
       "artifact_name": "market_parlays.parquet",
-      "generated_at": "2026-09-08T16:21:50.072637+00:00",
+      "generated_at": "2026-09-08T20:42:02.371469+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1465,7 +1465,7 @@
     },
     {
       "artifact_name": "market_portfolio.parquet",
-      "generated_at": "2026-09-08T16:21:50.074480+00:00",
+      "generated_at": "2026-09-08T20:42:02.374523+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1478,7 +1478,7 @@
     },
     {
       "artifact_name": "milb_batter_bb_rate_samples.npz",
-      "generated_at": "2026-09-08T16:21:50.076078+00:00",
+      "generated_at": "2026-09-08T20:42:02.376601+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1492,7 +1492,7 @@
     },
     {
       "artifact_name": "milb_batter_factors.parquet",
-      "generated_at": "2026-09-08T16:21:50.081637+00:00",
+      "generated_at": "2026-09-08T20:42:02.382794+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1505,7 +1505,7 @@
     },
     {
       "artifact_name": "milb_batter_hr_rate_samples.npz",
-      "generated_at": "2026-09-08T16:21:50.082661+00:00",
+      "generated_at": "2026-09-08T20:42:02.384793+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1519,7 +1519,7 @@
     },
     {
       "artifact_name": "milb_batter_k_rate_samples.npz",
-      "generated_at": "2026-09-08T16:21:50.087679+00:00",
+      "generated_at": "2026-09-08T20:42:02.391547+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1533,7 +1533,7 @@
     },
     {
       "artifact_name": "milb_pitcher_bb_rate_samples.npz",
-      "generated_at": "2026-09-08T16:21:50.093343+00:00",
+      "generated_at": "2026-09-08T20:42:02.397131+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1547,7 +1547,7 @@
     },
     {
       "artifact_name": "milb_pitcher_factors.parquet",
-      "generated_at": "2026-09-08T16:21:50.099357+00:00",
+      "generated_at": "2026-09-08T20:42:02.405683+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1560,7 +1560,7 @@
     },
     {
       "artifact_name": "milb_pitcher_hr_per_bf_samples.npz",
-      "generated_at": "2026-09-08T16:21:50.100866+00:00",
+      "generated_at": "2026-09-08T20:42:02.408250+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1574,7 +1574,7 @@
     },
     {
       "artifact_name": "milb_pitcher_k_rate_samples.npz",
-      "generated_at": "2026-09-08T16:21:50.106511+00:00",
+      "generated_at": "2026-09-08T20:42:02.415102+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1588,7 +1588,7 @@
     },
     {
       "artifact_name": "milb_priors.parquet",
-      "generated_at": "2026-09-08T16:21:50.112502+00:00",
+      "generated_at": "2026-09-08T20:42:02.423272+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1601,7 +1601,7 @@
     },
     {
       "artifact_name": "milb_translated_batters.parquet",
-      "generated_at": "2026-09-08T16:21:50.115584+00:00",
+      "generated_at": "2026-09-08T20:42:02.428524+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1614,7 +1614,7 @@
     },
     {
       "artifact_name": "milb_translated_pitchers.parquet",
-      "generated_at": "2026-09-08T16:21:50.133481+00:00",
+      "generated_at": "2026-09-08T20:42:02.454542+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1627,7 +1627,7 @@
     },
     {
       "artifact_name": "news_feed.parquet",
-      "generated_at": "2026-09-08T16:21:50.153423+00:00",
+      "generated_at": "2026-09-08T20:42:02.481075+00:00",
       "validation_status": "validated",
       "classification": "canonical",
       "model_version": "news-feed-2026.1",
@@ -1652,7 +1652,7 @@
     },
     {
       "artifact_name": "outs_priors.parquet",
-      "generated_at": "2026-09-08T16:21:50.157591+00:00",
+      "generated_at": "2026-09-08T20:42:02.486347+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1665,7 +1665,7 @@
     },
     {
       "artifact_name": "park_factor_lifts.parquet",
-      "generated_at": "2026-09-08T16:21:50.158614+00:00",
+      "generated_at": "2026-09-08T20:42:02.487920+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1678,7 +1678,7 @@
     },
     {
       "artifact_name": "park_factors.parquet",
-      "generated_at": "2026-09-08T16:21:50.159880+00:00",
+      "generated_at": "2026-09-08T20:42:02.488958+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1691,7 +1691,7 @@
     },
     {
       "artifact_name": "park_run_factors.parquet",
-      "generated_at": "2026-09-08T16:21:50.160877+00:00",
+      "generated_at": "2026-09-08T20:42:02.490514+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1704,7 +1704,7 @@
     },
     {
       "artifact_name": "pitcher_advanced.parquet",
-      "generated_at": "2026-09-08T16:21:50.161876+00:00",
+      "generated_at": "2026-09-08T20:42:02.491034+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1717,7 +1717,7 @@
     },
     {
       "artifact_name": "pitcher_archetype_metadata.parquet",
-      "generated_at": "2026-09-08T16:21:50.163425+00:00",
+      "generated_at": "2026-09-08T20:42:02.493672+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1730,7 +1730,7 @@
     },
     {
       "artifact_name": "pitcher_archetypes.parquet",
-      "generated_at": "2026-09-08T16:21:50.164525+00:00",
+      "generated_at": "2026-09-08T20:42:02.495253+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1743,7 +1743,7 @@
     },
     {
       "artifact_name": "pitcher_arsenal.parquet",
-      "generated_at": "2026-09-08T16:21:50.166466+00:00",
+      "generated_at": "2026-09-08T20:42:02.497328+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1756,7 +1756,7 @@
     },
     {
       "artifact_name": "pitcher_arsenal_all.parquet",
-      "generated_at": "2026-09-08T16:21:50.168474+00:00",
+      "generated_at": "2026-09-08T20:42:02.499400+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1769,7 +1769,7 @@
     },
     {
       "artifact_name": "pitcher_arsenal_by_stand.parquet",
-      "generated_at": "2026-09-08T16:21:50.173139+00:00",
+      "generated_at": "2026-09-08T20:42:02.506342+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1782,7 +1782,7 @@
     },
     {
       "artifact_name": "pitcher_bb_samples.npz",
-      "generated_at": "2026-09-08T16:21:50.176218+00:00",
+      "generated_at": "2026-09-08T20:42:02.511469+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1796,7 +1796,7 @@
     },
     {
       "artifact_name": "pitcher_breakout_candidates.parquet",
-      "generated_at": "2026-09-08T16:21:50.184457+00:00",
+      "generated_at": "2026-09-08T20:42:02.560136+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1809,7 +1809,7 @@
     },
     {
       "artifact_name": "pitcher_cluster_metadata.parquet",
-      "generated_at": "2026-09-08T16:21:50.186439+00:00",
+      "generated_at": "2026-09-08T20:42:02.564097+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1822,7 +1822,7 @@
     },
     {
       "artifact_name": "pitcher_counting.parquet",
-      "generated_at": "2026-09-08T16:21:50.187439+00:00",
+      "generated_at": "2026-09-08T20:42:02.566091+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1835,7 +1835,7 @@
     },
     {
       "artifact_name": "pitcher_counting_sim.parquet",
-      "generated_at": "2026-09-08T16:21:50.191764+00:00",
+      "generated_at": "2026-09-08T20:42:02.571579+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1848,7 +1848,7 @@
     },
     {
       "artifact_name": "pitcher_efficiency.parquet",
-      "generated_at": "2026-09-08T16:21:50.199743+00:00",
+      "generated_at": "2026-09-08T20:42:02.583203+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1861,7 +1861,7 @@
     },
     {
       "artifact_name": "pitcher_efficiency_all.parquet",
-      "generated_at": "2026-09-08T16:21:50.201251+00:00",
+      "generated_at": "2026-09-08T20:42:02.585202+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1874,7 +1874,7 @@
     },
     {
       "artifact_name": "pitcher_exit_tendencies.parquet",
-      "generated_at": "2026-09-08T16:21:50.203251+00:00",
+      "generated_at": "2026-09-08T20:42:02.589202+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1887,7 +1887,7 @@
     },
     {
       "artifact_name": "pitcher_full_stats.parquet",
-      "generated_at": "2026-09-08T16:21:50.203251+00:00",
+      "generated_at": "2026-09-08T20:42:02.591201+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1900,7 +1900,7 @@
     },
     {
       "artifact_name": "pitcher_game_logs.parquet",
-      "generated_at": "2026-09-08T16:21:50.209398+00:00",
+      "generated_at": "2026-09-08T20:42:02.601202+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1913,7 +1913,7 @@
     },
     {
       "artifact_name": "pitcher_game_sim_samples.npz",
-      "generated_at": "2026-09-08T16:21:50.212478+00:00",
+      "generated_at": "2026-09-08T20:42:02.608202+00:00",
       "validation_status": "validated",
       "classification": "canonical",
       "model_version": "game-sim-2026.1",
@@ -1925,11 +1925,11 @@
       "key_pattern": "{game_pk}_{player_id}_{stat}",
       "row_count": null,
       "column_hash": null,
-      "array_count": 250
+      "array_count": 260
     },
     {
       "artifact_name": "pitcher_gb_pct.parquet",
-      "generated_at": "2026-09-08T16:21:50.220529+00:00",
+      "generated_at": "2026-09-08T20:42:02.618527+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1942,7 +1942,7 @@
     },
     {
       "artifact_name": "pitcher_grade_ci.parquet",
-      "generated_at": "2026-09-08T16:21:50.221557+00:00",
+      "generated_at": "2026-09-08T20:42:02.620528+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1955,7 +1955,7 @@
     },
     {
       "artifact_name": "pitcher_hr_samples.npz",
-      "generated_at": "2026-09-08T16:21:50.224124+00:00",
+      "generated_at": "2026-09-08T20:42:02.624527+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1969,7 +1969,7 @@
     },
     {
       "artifact_name": "pitcher_k_samples.npz",
-      "generated_at": "2026-09-08T16:21:50.231042+00:00",
+      "generated_at": "2026-09-08T20:42:02.635527+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1983,7 +1983,7 @@
     },
     {
       "artifact_name": "pitcher_location_grid.parquet",
-      "generated_at": "2026-09-08T16:21:50.237969+00:00",
+      "generated_at": "2026-09-08T20:42:02.644527+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -1996,7 +1996,7 @@
     },
     {
       "artifact_name": "pitcher_location_grid_all.parquet",
-      "generated_at": "2026-09-08T16:21:50.247257+00:00",
+      "generated_at": "2026-09-08T20:42:02.657529+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2009,7 +2009,7 @@
     },
     {
       "artifact_name": "pitcher_offerings.parquet",
-      "generated_at": "2026-09-08T16:21:50.301125+00:00",
+      "generated_at": "2026-09-08T20:42:02.728559+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2022,7 +2022,7 @@
     },
     {
       "artifact_name": "pitcher_pitch_count_features.parquet",
-      "generated_at": "2026-09-08T16:21:50.308618+00:00",
+      "generated_at": "2026-09-08T20:42:02.737560+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2035,7 +2035,7 @@
     },
     {
       "artifact_name": "pitcher_pitch_locations.parquet",
-      "generated_at": "2026-09-08T16:21:50.310138+00:00",
+      "generated_at": "2026-09-08T20:42:02.740560+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2048,7 +2048,7 @@
     },
     {
       "artifact_name": "pitcher_platoon_bb.parquet",
-      "generated_at": "2026-09-08T16:21:50.359038+00:00",
+      "generated_at": "2026-09-08T20:42:02.802549+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2061,7 +2061,7 @@
     },
     {
       "artifact_name": "pitcher_projections.parquet",
-      "generated_at": "2026-09-08T16:21:50.362554+00:00",
+      "generated_at": "2026-09-08T20:42:02.806549+00:00",
       "validation_status": "validated",
       "classification": "canonical",
       "model_version": "layer1-2026.1",
@@ -2088,7 +2088,7 @@
     },
     {
       "artifact_name": "pitcher_putaway.parquet",
-      "generated_at": "2026-09-08T16:21:50.366561+00:00",
+      "generated_at": "2026-09-08T20:42:02.810550+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2101,7 +2101,7 @@
     },
     {
       "artifact_name": "pitcher_roles.parquet",
-      "generated_at": "2026-09-08T16:21:50.368326+00:00",
+      "generated_at": "2026-09-08T20:42:02.813550+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2114,7 +2114,7 @@
     },
     {
       "artifact_name": "pitcher_statcast_projections.parquet",
-      "generated_at": "2026-09-08T16:21:50.369295+00:00",
+      "generated_at": "2026-09-08T20:42:02.815550+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2127,7 +2127,7 @@
     },
     {
       "artifact_name": "pitcher_traditional.parquet",
-      "generated_at": "2026-09-08T16:21:50.371847+00:00",
+      "generated_at": "2026-09-08T20:42:02.818257+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2140,7 +2140,7 @@
     },
     {
       "artifact_name": "pitcher_traditional_all.parquet",
-      "generated_at": "2026-09-08T16:21:50.373853+00:00",
+      "generated_at": "2026-09-08T20:42:02.821230+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2153,7 +2153,7 @@
     },
     {
       "artifact_name": "pitcher_tto_by_pitch.parquet",
-      "generated_at": "2026-09-08T16:21:50.377021+00:00",
+      "generated_at": "2026-09-08T20:42:02.826142+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2166,7 +2166,7 @@
     },
     {
       "artifact_name": "pitchers_core_rankings.parquet",
-      "generated_at": "2026-09-08T16:21:50.378539+00:00",
+      "generated_at": "2026-09-08T20:42:02.828783+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2179,7 +2179,7 @@
     },
     {
       "artifact_name": "pitchers_daily_standouts.parquet",
-      "generated_at": "2026-09-08T16:21:50.382800+00:00",
+      "generated_at": "2026-09-08T20:42:02.835471+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2192,7 +2192,7 @@
     },
     {
       "artifact_name": "pitchers_rankings.parquet",
-      "generated_at": "2026-09-08T16:21:50.384799+00:00",
+      "generated_at": "2026-09-08T20:42:02.838699+00:00",
       "validation_status": "validated",
       "classification": "canonical",
       "model_version": "front-office-rankings-2026.1",
@@ -2218,7 +2218,7 @@
     },
     {
       "artifact_name": "pitchers_weekly_form.parquet",
-      "generated_at": "2026-09-08T16:21:50.389756+00:00",
+      "generated_at": "2026-09-08T20:42:02.844924+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2231,7 +2231,7 @@
     },
     {
       "artifact_name": "pitches_priors.parquet",
-      "generated_at": "2026-09-08T16:21:50.391795+00:00",
+      "generated_at": "2026-09-08T20:42:02.847619+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2244,7 +2244,7 @@
     },
     {
       "artifact_name": "pitching_prospect_rankings.parquet",
-      "generated_at": "2026-09-08T16:21:50.391795+00:00",
+      "generated_at": "2026-09-08T20:42:02.848664+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2257,7 +2257,7 @@
     },
     {
       "artifact_name": "player_teams.parquet",
-      "generated_at": "2026-09-08T16:21:50.396913+00:00",
+      "generated_at": "2026-09-08T20:42:02.854931+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2270,7 +2270,7 @@
     },
     {
       "artifact_name": "pp_props.parquet",
-      "generated_at": "2026-09-08T16:21:50.397913+00:00",
+      "generated_at": "2026-09-08T20:42:02.856488+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2283,7 +2283,7 @@
     },
     {
       "artifact_name": "pp_props_history.parquet",
-      "generated_at": "2026-09-08T16:21:50.401210+00:00",
+      "generated_at": "2026-09-08T20:42:02.859099+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2296,7 +2296,7 @@
     },
     {
       "artifact_name": "preseason_injuries.parquet",
-      "generated_at": "2026-09-08T16:21:50.406592+00:00",
+      "generated_at": "2026-09-08T20:42:02.866547+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2309,7 +2309,7 @@
     },
     {
       "artifact_name": "probable_starters.parquet",
-      "generated_at": "2026-09-08T16:21:50.408170+00:00",
+      "generated_at": "2026-09-08T20:42:02.868633+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2322,7 +2322,7 @@
     },
     {
       "artifact_name": "probable_starters_by_hand.parquet",
-      "generated_at": "2026-09-08T16:21:50.409221+00:00",
+      "generated_at": "2026-09-08T20:42:02.870355+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2335,7 +2335,7 @@
     },
     {
       "artifact_name": "prop_calibration.parquet",
-      "generated_at": "2026-09-08T16:21:50.410730+00:00",
+      "generated_at": "2026-09-08T20:42:02.871920+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2348,7 +2348,7 @@
     },
     {
       "artifact_name": "prospect_comps_batters.parquet",
-      "generated_at": "2026-09-08T16:21:50.410730+00:00",
+      "generated_at": "2026-09-08T20:42:02.872960+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2361,7 +2361,7 @@
     },
     {
       "artifact_name": "prospect_comps_pitchers.parquet",
-      "generated_at": "2026-09-08T16:21:50.414503+00:00",
+      "generated_at": "2026-09-08T20:42:02.877619+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2374,7 +2374,7 @@
     },
     {
       "artifact_name": "prospect_rankings.parquet",
-      "generated_at": "2026-09-08T16:21:50.419236+00:00",
+      "generated_at": "2026-09-08T20:42:02.883565+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2387,7 +2387,7 @@
     },
     {
       "artifact_name": "prospect_readiness.parquet",
-      "generated_at": "2026-09-08T16:21:50.423278+00:00",
+      "generated_at": "2026-09-08T20:42:02.889344+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2400,7 +2400,7 @@
     },
     {
       "artifact_name": "reliever_rankings.parquet",
-      "generated_at": "2026-09-08T16:21:50.425905+00:00",
+      "generated_at": "2026-09-08T20:42:02.893385+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2413,7 +2413,7 @@
     },
     {
       "artifact_name": "roster.parquet",
-      "generated_at": "2026-09-08T16:21:50.428437+00:00",
+      "generated_at": "2026-09-08T20:42:02.896965+00:00",
       "validation_status": "validated",
       "classification": "canonical",
       "model_version": "roster-control-2026.1",
@@ -2436,7 +2436,7 @@
     },
     {
       "artifact_name": "sim_predictions_archive.parquet",
-      "generated_at": "2026-09-08T16:21:50.430946+00:00",
+      "generated_at": "2026-09-08T20:42:02.900080+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2449,7 +2449,7 @@
     },
     {
       "artifact_name": "softmax_batter_predictions.parquet",
-      "generated_at": "2026-09-08T16:21:50.440917+00:00",
+      "generated_at": "2026-09-08T20:42:02.911553+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2462,7 +2462,7 @@
     },
     {
       "artifact_name": "softmax_pitcher_predictions.parquet",
-      "generated_at": "2026-09-08T16:21:50.454201+00:00",
+      "generated_at": "2026-09-08T20:42:02.928963+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2475,7 +2475,7 @@
     },
     {
       "artifact_name": "team_bullpen_profiles.parquet",
-      "generated_at": "2026-09-08T16:21:50.462214+00:00",
+      "generated_at": "2026-09-08T20:42:02.939401+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2488,7 +2488,7 @@
     },
     {
       "artifact_name": "team_bullpen_rates.parquet",
-      "generated_at": "2026-09-08T16:21:50.463233+00:00",
+      "generated_at": "2026-09-08T20:42:02.941460+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2501,7 +2501,7 @@
     },
     {
       "artifact_name": "team_defense_lifts.parquet",
-      "generated_at": "2026-09-08T16:21:50.464294+00:00",
+      "generated_at": "2026-09-08T20:42:02.942460+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2514,7 +2514,7 @@
     },
     {
       "artifact_name": "team_elo.parquet",
-      "generated_at": "2026-09-08T16:21:50.464805+00:00",
+      "generated_at": "2026-09-08T20:42:02.944460+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2527,7 +2527,7 @@
     },
     {
       "artifact_name": "team_elo_history.parquet",
-      "generated_at": "2026-09-08T16:21:50.466805+00:00",
+      "generated_at": "2026-09-08T20:42:02.946028+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2540,7 +2540,7 @@
     },
     {
       "artifact_name": "team_elo_preseason.parquet",
-      "generated_at": "2026-09-08T16:21:50.469426+00:00",
+      "generated_at": "2026-09-08T20:42:02.952868+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2553,7 +2553,7 @@
     },
     {
       "artifact_name": "team_power_rankings.parquet",
-      "generated_at": "2026-09-08T16:21:50.471426+00:00",
+      "generated_at": "2026-09-08T20:42:02.955027+00:00",
       "validation_status": "validated",
       "classification": "canonical",
       "model_version": "front-office-team-2026.1",
@@ -2579,7 +2579,7 @@
     },
     {
       "artifact_name": "team_profiles.parquet",
-      "generated_at": "2026-09-08T16:21:50.473533+00:00",
+      "generated_at": "2026-09-08T20:42:02.957396+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2592,7 +2592,7 @@
     },
     {
       "artifact_name": "team_rankings.parquet",
-      "generated_at": "2026-09-08T16:21:50.477516+00:00",
+      "generated_at": "2026-09-08T20:42:02.962588+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2605,7 +2605,7 @@
     },
     {
       "artifact_name": "team_series_elo.parquet",
-      "generated_at": "2026-09-08T16:21:50.482298+00:00",
+      "generated_at": "2026-09-08T20:42:02.967772+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2618,7 +2618,7 @@
     },
     {
       "artifact_name": "team_series_elo_preseason.parquet",
-      "generated_at": "2026-09-08T16:21:50.482806+00:00",
+      "generated_at": "2026-09-08T20:42:02.969421+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2631,7 +2631,7 @@
     },
     {
       "artifact_name": "team_sim_wins.parquet",
-      "generated_at": "2026-09-08T16:21:50.483806+00:00",
+      "generated_at": "2026-09-08T20:42:02.970964+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2644,7 +2644,7 @@
     },
     {
       "artifact_name": "todays_batter_sims.parquet",
-      "generated_at": "2026-09-08T16:21:50.484806+00:00",
+      "generated_at": "2026-09-08T20:42:02.972524+00:00",
       "validation_status": "validated",
       "classification": "canonical",
       "model_version": "game-sim-2026.1",
@@ -2668,12 +2668,12 @@
         "expected_hr",
         "expected_h"
       ],
-      "row_count": 800,
+      "row_count": 838,
       "column_hash": "1a47688e4ff87f9a2248f79ae035866781b560be1ade83f7bb24d038b631f554"
     },
     {
       "artifact_name": "todays_game_predictions.parquet",
-      "generated_at": "2026-09-08T16:21:50.492462+00:00",
+      "generated_at": "2026-09-08T20:42:02.980854+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2686,7 +2686,7 @@
     },
     {
       "artifact_name": "todays_games.parquet",
-      "generated_at": "2026-09-08T16:21:50.501170+00:00",
+      "generated_at": "2026-09-08T20:42:02.990786+00:00",
       "validation_status": "validated",
       "classification": "canonical",
       "model_version": "game-sim-2026.1",
@@ -2710,7 +2710,7 @@
     },
     {
       "artifact_name": "todays_lineups.parquet",
-      "generated_at": "2026-09-08T16:21:50.506479+00:00",
+      "generated_at": "2026-09-08T20:42:02.997984+00:00",
       "validation_status": "validated",
       "classification": "canonical",
       "model_version": "game-sim-2026.1",
@@ -2735,7 +2735,7 @@
     },
     {
       "artifact_name": "todays_sims.parquet",
-      "generated_at": "2026-09-08T16:21:50.511540+00:00",
+      "generated_at": "2026-09-08T20:42:03.004842+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2748,7 +2748,7 @@
     },
     {
       "artifact_name": "tto_profiles.parquet",
-      "generated_at": "2026-09-08T16:21:50.514155+00:00",
+      "generated_at": "2026-09-08T20:42:03.009010+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2761,7 +2761,7 @@
     },
     {
       "artifact_name": "umpire_tendencies.parquet",
-      "generated_at": "2026-09-08T16:21:50.515666+00:00",
+      "generated_at": "2026-09-08T20:42:03.011049+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
@@ -2774,7 +2774,7 @@
     },
     {
       "artifact_name": "weather_effects.parquet",
-      "generated_at": "2026-09-08T16:21:50.517211+00:00",
+      "generated_at": "2026-09-08T20:42:03.013106+00:00",
       "validation_status": "validated",
       "classification": "unclassified",
       "model_version": null,
