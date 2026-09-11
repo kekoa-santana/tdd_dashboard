@@ -358,8 +358,8 @@ def page_team_rankings() -> None:
     # Preseason snapshot for rank deltas
     preseason_ranks: dict[str, int] = {}
     try:
-        from config import DASHBOARD_DIR
-        pre_path = DASHBOARD_DIR / "snapshots" / "team_rankings_2026_preseason.parquet"
+        from services.artifacts import artifact_path
+        pre_path = artifact_path("snapshots/team_rankings_2026_preseason.parquet")
         if pre_path.exists():
             import pandas as _pd
             pre_df = _pd.read_parquet(pre_path, columns=["abbreviation", "rank"])

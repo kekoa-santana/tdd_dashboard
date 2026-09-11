@@ -10,6 +10,7 @@ import streamlit as st
 
 from config import DASHBOARD_DIR
 from services.data_loader import load_player_teams, load_preseason_injuries
+from services.artifacts import artifact_path
 from services.manifest import validate_manifest
 
 logger = logging.getLogger(__name__)
@@ -101,14 +102,24 @@ def check_data_exists() -> bool:
     storing any warnings in ``st.session_state["manifest_warnings"]``
     for the Data Health page to display.
     """
+    # Resolved through artifact_path so this works both locally and on the
+    # deployed app, where the artifacts live in object storage rather than on
+    # disk. This gates the whole dashboard, so it must not assume local files.
     required = [
-        DASHBOARD_DIR / "hitter_projections.parquet",
-        DASHBOARD_DIR / "pitcher_projections.parquet",
+        artifact_path("hitter_projections.parquet"),
+        artifact_path("pitcher_projections.parquet"),
     ]
     if not all(p.exists() for p in required):
         return False
 
-    # Lenient manifest validation (non-blocking)
+    # Lenient manifest validation (non-blocking). Validation reads every
+    # artifact to check row counts and column hashes, so it only runs against a
+    # populated local directory; doing that remotely would mean downloading the
+    # entire artifact set on startup, which is the cost this migration removes.
+    if not (DASHBOARD_DIR / "manifest.json").exists():
+        st.session_state["manifest_warnings"] = []
+        return True
+
     try:
         status = validate_manifest(DASHBOARD_DIR, strict=False)
         if status.warnings:

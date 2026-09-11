@@ -1,0 +1,14 @@
+# Local pipeline dependencies -- NOT installed by the deployed app.
+#
+# requirements.txt is what Streamlit Cloud installs on every cold start, so it
+# stays limited to what the dashboard itself imports. Everything here is used
+# only by scripts/ on the machine that runs the update pipeline.
+#
+#   pip install -r requirements-pipeline.txt
+
+# Uploads artifacts to the R2 bucket the deployed app reads.
+boto3>=1.34
+
+# scripts/update_in_season.py queries the mlb_fantasy database.
+sqlalchemy>=2.0
+psycopg2-binary>=2.9

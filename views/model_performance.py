@@ -20,6 +20,7 @@ from components.backtest_charts import (
     create_rolling_mae_chart,
     create_prop_calibration_chart,
 )
+from services.artifacts import artifact_path
 from services.data_loader import (
     load_backtest,
     load_projections,
@@ -65,7 +66,7 @@ def _load_preseason(player_type: str) -> pd.DataFrame:
     """Load preseason snapshot from the snapshots directory."""
     from config import CURRENT_SEASON
     fname = f"{player_type}_projections_{CURRENT_SEASON}_preseason.parquet"
-    path = DASHBOARD_DIR / "snapshots" / fname
+    path = artifact_path(f"snapshots/{fname}")
     if path.exists():
         return pd.read_parquet(path)
     return pd.DataFrame()

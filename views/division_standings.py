@@ -7,7 +7,8 @@ import streamlit as st
 
 from utils.alerts import tdd_info, tdd_warn
 from utils.team_names import team_short
-from config import GOLD, SAGE, SLATE, DARK_BORDER, DASHBOARD_DIR
+from config import GOLD, SAGE, SLATE, DARK_BORDER
+from services.artifacts import artifact_path
 from components.team_logo import team_logo_html
 from services.data_loader import load_team_rankings
 
@@ -29,13 +30,16 @@ _TIER_COLORS = {
     "Rebuilding": "#7B8FA6",
 }
 
-_PRESEASON_SNAPSHOT = DASHBOARD_DIR / "snapshots" / "team_rankings_2026_preseason.parquet"
+_PRESEASON_SNAPSHOT_NAME = "snapshots/team_rankings_2026_preseason.parquet"
 
 
 def _load_preseason_rankings() -> pd.DataFrame:
-    if not _PRESEASON_SNAPSHOT.exists():
+    # Resolved per call rather than at import so the artifact is fetched
+    # lazily, not while the module is being loaded.
+    path = artifact_path(_PRESEASON_SNAPSHOT_NAME)
+    if not path.exists():
         return pd.DataFrame()
-    return pd.read_parquet(_PRESEASON_SNAPSHOT)
+    return pd.read_parquet(path)
 
 
 def _division_card(teams: pd.DataFrame, short_name: str,

@@ -13,6 +13,7 @@ from config import (
     CURRENT_SEASON, PRIOR_SEASON, TRAIN_START, TRAIN_END,
     TRAINING_RANGE, AVAILABLE_SEASONS,
 )
+from services.artifacts import remote_enabled
 from services.data_loader import load_update_metadata
 from components.metric_cards import metric_card
 
@@ -42,6 +43,24 @@ def _freshness_color(hours: float | None) -> str:
 
 
 @st.cache_data(ttl=300)
+def _inventory_from_manifest() -> pd.DataFrame:
+    """Build the artifact inventory from manifest.json, for remote artifacts."""
+    from services.manifest import load_manifest
+
+    manifest = load_manifest(DASHBOARD_DIR)
+    rows: list[dict] = []
+    for artifact in manifest.get("artifacts", []) if manifest else []:
+        generated = str(artifact.get("generated_at", ""))[:16].replace("T", " ")
+        rows.append({
+            "filename": artifact.get("artifact_name", ""),
+            "size": "-",          # object size is not recorded in the manifest
+            "size_bytes": 0,
+            "last_modified": generated,
+            "rows": artifact.get("row_count"),
+        })
+    return pd.DataFrame(rows)
+
+
 def _scan_artifacts(directory: str) -> pd.DataFrame:
     """Scan a directory for parquet/npz/json files and return inventory DataFrame."""
     dir_path = Path(directory)
@@ -172,6 +191,13 @@ def page_data_health() -> None:
     df_main = _scan_artifacts(str(DASHBOARD_DIR))
     snapshot_dir = DASHBOARD_DIR / "snapshots"
     df_snap = _scan_artifacts(str(snapshot_dir))
+
+    # On the deployed app the artifacts live in object storage, not on disk, so
+    # there is nothing to stat. Fall back to the manifest, which already records
+    # per-artifact row counts and generation times. Downloading every artifact
+    # just to inventory it would defeat the point of remote storage.
+    if df_main.empty and remote_enabled():
+        df_main = _inventory_from_manifest()
 
     if df_main.empty:
         tdd_info("No artifacts found in data/dashboard/.")
