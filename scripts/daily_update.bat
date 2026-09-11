@@ -5,9 +5,13 @@ REM  TDD Dashboard -- Update Runner
 REM  Called by Windows Task Scheduler.
 REM
 REM  Modes:
-REM    daily_update.bat                 -- full update (ETL + projections + sims + push)
-REM    daily_update.bat --skip-etl      -- skip ETL, projections + sims + push
-REM    daily_update.bat --schedule-only -- roster moves + sims + push (single run)
+REM    daily_update.bat                 -- full update ^(ETL + projections + sims + publish^)
+REM    daily_update.bat --skip-etl      -- skip ETL, projections + sims + publish
+REM    daily_update.bat --schedule-only -- roster moves + sims + publish ^(single run^)
+REM
+REM  Artifacts publish to the R2 bucket, not to git, so a data refresh never
+REM  redeploys the Streamlit app. Requires requirements-pipeline.txt installed
+REM  and R2_* credentials in .env.
 REM
 REM  Task Scheduler setup:
 REM    1. Full daily:   6:00 AM  -> daily_update.bat
@@ -16,7 +20,6 @@ REM                     Task Scheduler handles repetition; each invocation runs 
 REM ----------------------------------------------------------------
 
 set PROJECT_DIR=C:\Users\kekoa\Documents\data_analytics\tdd-dashboard
-set DEPLOY_DIR=C:\Users\kekoa\Documents\data_analytics\tdd-dashboard-deploy
 set PROFILES_DIR=C:\Users\kekoa\Documents\data_analytics\player_profiles
 set ETL_DIR=C:\Users\kekoa\Documents\data_analytics\mlb_fantasy_ETL
 set ETL_PYTHON=%ETL_DIR%\myenv\Scripts\python.exe
@@ -147,44 +150,23 @@ if %ERRORLEVEL% NEQ 0 (
     echo [%date% %time%] Post-sim bookkeeping completed >> "%LOG_FILE%" 2>&1
 )
 
-REM -- Step 4: Publish data to origin/main via deploy worktree --
-REM   The dev checkout can sit on any branch; publishing happens from a
-REM   detached worktree pinned to origin/main so branches never collide.
-REM   Streamlit Cloud serves main, so this is the deploy step.
-echo [%date% %time%] Publishing data to origin/main... >> "%LOG_FILE%" 2>&1
+REM -- Step 4: Publish artifacts to the R2 bucket the dashboard reads --
+REM   Artifacts no longer live in git. Publishing to object storage does not
+REM   touch the repo, so Streamlit never redeploys on a data refresh; the app
+REM   picks up new artifacts on its own cache timer instead. Only changed
+REM   objects upload, and only the set the dashboard actually reads.
+REM
+REM   Credentials come from .env (gitignored): R2_ACCOUNT_ID,
+REM   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY. Needs requirements-pipeline.txt
+REM   installed for boto3.
+echo [%date% %time%] Publishing artifacts to R2... >> "%LOG_FILE%" 2>&1
 cd /d "%PROJECT_DIR%"
 
-if not exist "%DEPLOY_DIR%\.git" (
-    git worktree add --detach "%DEPLOY_DIR%" origin/main >> "%LOG_FILE%" 2>&1
-)
-
-git -C "%DEPLOY_DIR%" fetch origin main >> "%LOG_FILE%" 2>&1
-git -C "%DEPLOY_DIR%" reset --hard origin/main >> "%LOG_FILE%" 2>&1
-
-REM Copy the published artifact set: top-level parquet/json/npz/pkl + snapshots.
-REM   /PURGE removes deploy-side files that no longer exist locally, so deleted
-REM   artifacts actually leave main instead of being restored by the reset above.
-REM   /XD keeps purge away from the subdirectories: history is gitignored and
-REM   never published, snapshots is mirrored separately on the next line.
-robocopy "%PROJECT_DIR%\data\dashboard" "%DEPLOY_DIR%\data\dashboard" *.parquet *.json *.npz *.pkl /PURGE /XD history snapshots /NJH /NJS /NDL /NP >> "%LOG_FILE%" 2>&1
-robocopy "%PROJECT_DIR%\data\dashboard\snapshots" "%DEPLOY_DIR%\data\dashboard\snapshots" /MIR /NJH /NJS /NDL /NP >> "%LOG_FILE%" 2>&1
-
-REM robocopy uses 0-7 for success (1 = files copied); only 8+ is a real failure.
-if !ERRORLEVEL! GEQ 8 echo [%date% %time%] Artifact copy FAILED with code !ERRORLEVEL! >> "%LOG_FILE%" 2>&1
-
-REM -A so removals are staged, not just modifications and additions
-git -C "%DEPLOY_DIR%" add -A data/dashboard >> "%LOG_FILE%" 2>&1
-git -C "%DEPLOY_DIR%" diff --cached --quiet
-if %ERRORLEVEL% NEQ 0 (
-    git -C "%DEPLOY_DIR%" commit -m "data update" >> "%LOG_FILE%" 2>&1
-    git -C "%DEPLOY_DIR%" push origin HEAD:main >> "%LOG_FILE%" 2>&1
-    if !ERRORLEVEL! NEQ 0 (
-        echo [%date% %time%] Git push FAILED >> "%LOG_FILE%" 2>&1
-    ) else (
-        echo [%date% %time%] Data published to origin/main successfully >> "%LOG_FILE%" 2>&1
-    )
+"%PYTHON%" "%PROJECT_DIR%\scripts\publish_artifacts.py" --prune >> "%LOG_FILE%" 2>&1
+if !ERRORLEVEL! NEQ 0 (
+    echo [%date% %time%] Artifact publish FAILED with exit code !ERRORLEVEL! >> "%LOG_FILE%" 2>&1
 ) else (
-    echo [%date% %time%] No data changes to publish >> "%LOG_FILE%" 2>&1
+    echo [%date% %time%] Artifacts published to R2 successfully >> "%LOG_FILE%" 2>&1
 )
 exit /b 0
 
