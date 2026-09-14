@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -293,7 +294,12 @@ def append_to_history(new_odds: pd.DataFrame) -> int:
     else:
         combined = new_odds
 
-    combined.to_parquet(HISTORY_PATH, index=False)
+    # Write to a sibling then rename: this file is rewritten whole every cycle,
+    # and an interrupted in-place write corrupted it (Sep 8), which then broke
+    # manifest generation for every later run.
+    temporary = HISTORY_PATH.with_name(HISTORY_PATH.name + ".tmp")
+    combined.to_parquet(temporary, index=False)
+    os.replace(temporary, HISTORY_PATH)
     logger.info(
         "Appended %d rows to game_odds_history.parquet (total: %d)",
         len(new_odds), len(combined),
