@@ -26,9 +26,34 @@ from pathlib import Path
 
 import config
 
+_BASE_URL_KEY = "TDD_ARTIFACT_BASE_URL"
+
+
+def _resolve_base_url() -> str:
+    """Read the bucket URL from the environment, then Streamlit secrets.
+
+    Streamlit Cloud only mirrors root-level secrets into os.environ, and
+    environment names are case-sensitive on Linux, so a secret saved as
+    ``tdd_artifact_base_url`` would silently leave the app local-only. Checking
+    st.secrets case-insensitively removes that failure mode.
+    """
+    for key in (_BASE_URL_KEY, _BASE_URL_KEY.lower()):
+        if os.environ.get(key):
+            return os.environ[key].strip().rstrip("/")
+    try:
+        import streamlit as st
+
+        for key, value in st.secrets.items():
+            if key.upper() == _BASE_URL_KEY and isinstance(value, str) and value.strip():
+                return value.strip().rstrip("/")
+    except Exception:  # no secrets file locally, or streamlit unavailable
+        pass
+    return ""
+
+
 # Public base URL for the artifact bucket, e.g. "https://pub-xxxx.r2.dev".
 # Empty means local-only: every lookup resolves to data/dashboard.
-ARTIFACT_BASE_URL: str = os.environ.get("TDD_ARTIFACT_BASE_URL", "").rstrip("/")
+ARTIFACT_BASE_URL: str = _resolve_base_url()
 
 # Downloads land here and persist for the life of the container.
 _CACHE_DIR = Path(tempfile.gettempdir()) / "tdd_artifacts"

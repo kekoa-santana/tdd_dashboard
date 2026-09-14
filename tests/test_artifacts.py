@@ -244,3 +244,16 @@ def test_missing_index_yields_empty_listing_rather_than_raising(isolated, monkey
     monkeypatch.setattr(artifacts, "ARTIFACT_BASE_URL", "https://cdn.example")
     _stub_requests(monkeypatch, lambda url, timeout=None, **kw: _Response(404))
     assert artifacts.list_artifacts("snapshots/weekly") == []
+
+
+def test_base_url_is_read_from_lowercase_streamlit_secret(monkeypatch):
+    """Streamlit Cloud does not mirror a lowercase secret into os.environ."""
+    import sys
+    import types
+
+    monkeypatch.delenv("TDD_ARTIFACT_BASE_URL", raising=False)
+    monkeypatch.delenv("tdd_artifact_base_url", raising=False)
+    fake = types.ModuleType("streamlit")
+    fake.secrets = {"tdd_artifact_base_url": "https://pub-x.r2.dev/"}
+    monkeypatch.setitem(sys.modules, "streamlit", fake)
+    assert artifacts._resolve_base_url() == "https://pub-x.r2.dev"

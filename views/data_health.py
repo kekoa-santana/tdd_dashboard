@@ -13,7 +13,7 @@ from config import (
     CURRENT_SEASON, PRIOR_SEASON, TRAIN_START, TRAIN_END,
     TRAINING_RANGE, AVAILABLE_SEASONS,
 )
-from services.artifacts import remote_enabled
+from services.artifacts import ARTIFACT_BASE_URL, artifact_path, remote_enabled
 from services.data_loader import load_update_metadata
 from components.metric_cards import metric_card
 
@@ -47,7 +47,7 @@ def _inventory_from_manifest() -> pd.DataFrame:
     """Build the artifact inventory from manifest.json, for remote artifacts."""
     from services.manifest import load_manifest
 
-    manifest = load_manifest(DASHBOARD_DIR)
+    manifest = load_manifest(artifact_path("manifest.json").parent)
     rows: list[dict] = []
     for artifact in manifest.get("artifacts", []) if manifest else []:
         generated = str(artifact.get("generated_at", ""))[:16].replace("T", " ")
@@ -117,6 +117,19 @@ def page_data_health() -> None:
     # ------------------------------------------------------------------
     st.markdown(
         '<div class="tdd-section-hdr">Update Status</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Where artifacts are read from. Local files win when present, so this
+    # reports which source is actually serving this app instance.
+    if (DASHBOARD_DIR / "hitter_projections.parquet").exists():
+        source = "Local files (data/dashboard)"
+    elif remote_enabled():
+        source = f"R2 bucket ({ARTIFACT_BASE_URL})"
+    else:
+        source = "None configured"
+    st.markdown(
+        f'<span class="tdd-meta">Artifact source: {source}</span>',
         unsafe_allow_html=True,
     )
 
