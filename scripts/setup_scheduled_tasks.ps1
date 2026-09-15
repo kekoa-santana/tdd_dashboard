@@ -15,6 +15,18 @@
 $ErrorActionPreference = 'Stop'
 $failures = 0
 
+# Some of the existing tasks were registered from an elevated shell, so
+# changing them needs admin rights. Relaunch elevated (one UAC prompt) and
+# keep that window open so the results can be read.
+$identity = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+if (-not $identity.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host 'Requesting administrator rights to update scheduled tasks...'
+    Start-Process powershell.exe -Verb RunAs -ArgumentList @(
+        '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`""
+    )
+    exit 0
+}
+
 function Invoke-Step([string]$label, [scriptblock]$body) {
     # Each step stands alone so one failure cannot block the rest.
     try { & $body; Write-Host "OK    $label" }
