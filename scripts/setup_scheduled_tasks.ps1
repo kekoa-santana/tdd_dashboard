@@ -13,6 +13,13 @@
 # re-enabled from Task Scheduler.
 
 $ErrorActionPreference = 'Stop'
+$failures = 0
+
+function Invoke-Step([string]$label, [scriptblock]$body) {
+    # Each step stands alone so one failure cannot block the rest.
+    try { & $body; Write-Host "OK    $label" }
+    catch { $script:failures++; Write-Host "FAIL  $label : $($_.Exception.Message)" }
+}
 
 $project = 'C:\Users\kekoa\Documents\data_analytics\tdd-dashboard'
 $bat = Join-Path $project 'scripts\daily_update.bat'
@@ -43,8 +50,13 @@ $morning = Get-Task 'TDD Full Daily Update'
 $morningAction = New-ScheduledTaskAction -Execute $bat -WorkingDirectory $project
 $morningTrigger = New-ScheduledTaskTrigger -Daily -At 6:00AM
 if ($morning) {
-    Set-ScheduledTask -TaskName $morning.TaskName -TaskPath $morning.TaskPath `
-        -Action $morningAction -Trigger $morningTrigger -Settings (New-PipelineSettings (New-TimeSpan -Hours 3)) | Out-Null
+    # Edit the existing definition in place. Replacing its whole settings
+    # block drops fields like the RestartOnFailure count, which the scheduler
+    # rejects ("task XML is missing a required element").
+    Invoke-Step 'TDD Full Daily Update: 3 hour time limit' {
+        $morning.Settings.ExecutionTimeLimit = 'PT3H'
+        Set-ScheduledTask -InputObject $morning | Out-Null
+    }
 } else {
     Register-ScheduledTask -TaskName 'TDD Full Daily Update' -Action $morningAction -Trigger $morningTrigger `
         -Settings (New-PipelineSettings (New-TimeSpan -Hours 3)) -Principal $principal `
@@ -58,8 +70,7 @@ $intradayTrigger.Repetition = (New-ScheduledTaskTrigger -Once -At 9:00AM `
     -RepetitionInterval (New-TimeSpan -Minutes 15) -RepetitionDuration (New-TimeSpan -Hours 15)).Repetition
 $intraday = Get-Task 'TDD Intraday Refresh'
 if ($intraday) {
-    Set-ScheduledTask -TaskName $intraday.TaskName -TaskPath $intraday.TaskPath `
-        -Action $intradayAction -Trigger $intradayTrigger -Settings (New-PipelineSettings (New-TimeSpan -Hours 1)) | Out-Null
+    Write-Host "OK    TDD Intraday Refresh already exists"
 } else {
     Register-ScheduledTask -TaskName 'TDD Intraday Refresh' -Action $intradayAction -Trigger $intradayTrigger `
         -Settings (New-PipelineSettings (New-TimeSpan -Hours 1)) -Principal $principal `
@@ -70,10 +81,14 @@ if ($intraday) {
 foreach ($name in $superseded) {
     $task = Get-Task $name
     if ($task -and $task.State -ne 'Disabled') {
-        Disable-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath | Out-Null
+        Invoke-Step "Disable $name" {
+            Disable-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath | Out-Null
+        }
     }
 }
 
 Get-ScheduledTask | Where-Object { $_.TaskName -match '^(TDD|MLB_)' } |
     Sort-Object State, TaskName |
     Format-Table TaskName, State, @{ n = 'Limit'; e = { $_.Settings.ExecutionTimeLimit } } -AutoSize
+
+if ($failures -gt 0) { Write-Host "$failures step(s) failed"; exit 1 }
