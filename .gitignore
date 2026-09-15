@@ -51,3 +51,5 @@ data/dashboard/history/
 
 # Exploratory notebooks -- kept local, they carry large output cells
 notebooks/
+# Pipeline artifacts: published to the R2 bucket, not committed
+data/dashboard/
