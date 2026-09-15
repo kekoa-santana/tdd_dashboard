@@ -175,7 +175,11 @@ def main() -> int:
     args = parser.parse_args()
 
     files = collect()
-    index = {"artifacts": [key_for(p) for p in files]}
+    index = {
+        "artifacts": [key_for(p) for p in files],
+        # Object storage has no cheap stat, so sizes ride along for Data Health.
+        "sizes": {key_for(p): p.stat().st_size for p in files},
+    }
     total_mb = sum(p.stat().st_size for p in files) / 1048576
     print(f"{len(files)} artifacts selected ({total_mb:.1f} MB)")
 

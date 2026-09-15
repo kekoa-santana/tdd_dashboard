@@ -13,7 +13,7 @@ from config import (
     CURRENT_SEASON, PRIOR_SEASON, TRAIN_START, TRAIN_END,
     TRAINING_RANGE, AVAILABLE_SEASONS,
 )
-from services.artifacts import ARTIFACT_BASE_URL, artifact_path, remote_enabled
+from services.artifacts import ARTIFACT_BASE_URL, artifact_path, load_index, remote_enabled
 from services.data_loader import load_update_metadata
 from components.metric_cards import metric_card
 
@@ -48,17 +48,50 @@ def _inventory_from_manifest() -> pd.DataFrame:
     from services.manifest import load_manifest
 
     manifest = load_manifest(artifact_path("manifest.json").parent)
+    # The manifest has no sizes; the publish step records them in index.json.
+    sizes = load_index().get("sizes", {})
     rows: list[dict] = []
     for artifact in manifest.get("artifacts", []) if manifest else []:
+        name = artifact.get("artifact_name", "")
         generated = str(artifact.get("generated_at", ""))[:16].replace("T", " ")
+        size_bytes = sizes.get(name)
         rows.append({
-            "filename": artifact.get("artifact_name", ""),
-            "size": "-",          # object size is not recorded in the manifest
-            "size_bytes": 0,
+            "filename": name,
+            "size": _human_size(size_bytes) if size_bytes is not None else "-",
+            "size_bytes": size_bytes or 0,
             "last_modified": generated,
             "rows": artifact.get("row_count"),
         })
     return pd.DataFrame(rows)
+
+
+def _render_remote_manifest_summary() -> None:
+    """Summarize the published manifest without re-validating every artifact.
+
+    Full validation reads each artifact's schema and row count, which remotely
+    means downloading the whole bucket. The pipeline already fails manifest
+    generation on any unreadable artifact before publishing, so the published
+    manifest's own status is reported instead.
+    """
+    from services.manifest import load_manifest
+
+    manifest = load_manifest(artifact_path("manifest.json").parent)
+    if not manifest:
+        tdd_warn("No manifest published to the R2 bucket.")
+        return
+
+    status = str(manifest.get("validation_status", "unknown"))
+    color = "var(--tdd-sage)" if status == "validated" else "var(--tdd-gold)"
+    generated = str(manifest.get("generated_at", ""))[:16].replace("T", " ")
+    st.markdown(
+        f'<div class="insight-card">'
+        f'<span style="color:{color}; font-weight:700;">{status.upper()}</span>'
+        f'<span style="color:var(--tdd-cream);"> -- '
+        f'{len(manifest.get("artifacts", []))} artifacts, generated {generated} UTC '
+        f'by the pipeline before publishing.</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _scan_artifacts(directory: str) -> pd.DataFrame:
@@ -209,15 +242,17 @@ def page_data_health() -> None:
     # there is nothing to stat. Fall back to the manifest, which already records
     # per-artifact row counts and generation times. Downloading every artifact
     # just to inventory it would defeat the point of remote storage.
+    location = "data/dashboard/"
     if df_main.empty and remote_enabled():
         df_main = _inventory_from_manifest()
+        location = "the R2 bucket"
 
     if df_main.empty:
         tdd_info("No artifacts found in data/dashboard/.")
     else:
         st.markdown(
             f'<span class="tdd-meta">'
-            f'{len(df_main)} files in data/dashboard/ '
+            f'{len(df_main)} files in {location} '
             f'({_human_size(df_main["size_bytes"].sum())} total)'
             f'</span>',
             unsafe_allow_html=True,
@@ -250,7 +285,9 @@ def page_data_health() -> None:
         from services.manifest import validate_manifest
 
         manifest_path = DASHBOARD_DIR / "manifest.json"
-        if not manifest_path.exists():
+        if not manifest_path.exists() and remote_enabled():
+            _render_remote_manifest_summary()
+        elif not manifest_path.exists():
             tdd_info(
                 "No manifest found. Run update pipeline to generate one."
             )
