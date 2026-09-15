@@ -160,7 +160,7 @@ def render_player_sim_from_props(
 
     `rows` is a DataFrame slice with one row per stat for a single player.
     The PMF is reconstructed from the p_over half-integer columns so the
-    chart matches what Props Lab shows (same source of truth).
+    chart matches what Player Projections shows (same source of truth).
     """
     import plotly.graph_objects as go
 

@@ -412,11 +412,11 @@ def _render_quick_rail(data: dict) -> str:
             </a>
         ''')
 
-    # Props tile -- link only, no edge advice while WIP
+    # Player projections tile
     tiles.append(f'''
-        <a href="{_nav_url("Props Lab")}" target="_self" class="home-rail-tile">
-            <div class="home-rail-l">Props</div>
-            <div class="home-rail-t">Props Lab</div>
+        <a href="{_nav_url("Player Projections")}" target="_self" class="home-rail-tile">
+            <div class="home-rail-l">Projections</div>
+            <div class="home-rail-t">Player Projections</div>
             <div class="home-rail-v">Explore &rarr;</div>
         </a>
     ''')
@@ -686,14 +686,14 @@ def page_home() -> None:
         f'</div></div>'
     )
 
-    # Props Lab -- WIP notice
+    # Player Projections notice
     parts.append(
         f'<div class="home-section">'
         f'<div class="home-wip-box">'
-        f'<div class="home-wip-label">Props Lab</div>'
+        f'<div class="home-wip-label">Player Projections</div>'
         f'<div class="home-wip-note">'
-        f'Game-level player projections with model probabilities and confidence tiers. '
-        f'Visit <a href="{_nav_url("Props Lab")}" target="_self">Props Lab</a> '
+        f'Projected stat lines for every starter and lineup, and how past projections landed. '
+        f'Visit <a href="{_nav_url("Player Projections")}" target="_self">Player Projections</a> '
         f'to explore the full model output.'
         f'</div>'
         f'</div></div>'

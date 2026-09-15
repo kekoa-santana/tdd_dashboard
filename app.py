@@ -36,7 +36,7 @@ from views.model_performance import page_model_performance  # noqa: E402
 from views.news import page_news  # noqa: E402
 from views.player_profile import page_player_profile  # noqa: E402
 from views.player_rankings import page_player_rankings  # noqa: E402
-from views.projected_performers import page_projected_performers  # noqa: E402
+from views.player_projections import page_player_projections  # noqa: E402
 from views.projections import page_projections  # noqa: E402
 
 # Page imports
@@ -343,19 +343,21 @@ PAGES = {
     "Lineup Creator": page_lineup_creator,
     "Model Performance": page_model_performance,
     "Data Health": page_data_health,
-    "Props Lab": page_projected_performers,
+    "Player Projections": page_player_projections,
     "Methodology": page_methodology,
     "Game Analysis": page_game,
 }
 
 PAGE_URL_MAP = {name.lower().replace(" ", "_"): name for name in PAGES}
+# Old slugs kept so existing links still land on the renamed page.
+PAGE_URL_MAP["props_lab"] = "Player Projections"
 
 # Nav structure: standalone items + dropdown groups
 _NAV = [
     ("Home", None),
     # "News" is intentionally unlisted while in private trial: routable via
     # ?page=news (key-gated in views/news.py) but absent from the nav.
-    ("Games", ["Schedule", "Game Analysis", "Daily Preview", "Props Lab"]),
+    ("Games", ["Schedule", "Game Analysis", "Daily Preview", "Player Projections"]),
     (
         "Players",
         [
