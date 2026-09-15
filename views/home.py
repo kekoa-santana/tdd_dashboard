@@ -14,7 +14,6 @@ from services.data_loader import (
     load_todays_games,
     load_update_metadata,
     load_backtest,
-    load_dk_props,
 )
 from utils.team_names import team_short
 
@@ -34,16 +33,6 @@ def _nav_url(page_name: str) -> str:
     return f"?page={slug}"
 
 
-def _format_odds(odds: str | float | None) -> str:
-    if odds is None or (isinstance(odds, float) and pd.isna(odds)):
-        return ""
-    s = str(odds)
-    # Ensure leading + for positive
-    if s and s[0].isdigit():
-        s = "+" + s
-    return s
-
-
 # ---------------------------------------------------------------------------
 # Data assembly
 # ---------------------------------------------------------------------------
@@ -53,7 +42,6 @@ def _assemble_home_data() -> dict:
     """Pull together all data needed for the home page from existing loaders."""
     meta = load_update_metadata()
     games = load_todays_games()
-    dk = load_dk_props()
     batter_sims = load_todays_batter_sims()
     standouts = load_hitters_daily_standouts()
 
@@ -185,15 +173,6 @@ def _assemble_home_data() -> dict:
             data_feeds.append({"name": "Projections", "age": age_str, "status": "ok" if age < timedelta(hours=24) else "warn"})
         except Exception:
             data_feeds.append({"name": "Projections", "age": "-", "status": "warn"})
-
-    # DK props freshness
-    if not dk.empty and "game_date" in dk.columns:
-        has_today = (dk["game_date"] == game_date).any()
-        data_feeds.append({
-            "name": "Market",
-            "age": "today" if has_today else "stale",
-            "status": "ok" if has_today else "warn",
-        })
 
     return {
         "game_date": game_date,
@@ -711,12 +690,11 @@ def page_home() -> None:
     parts.append(
         f'<div class="home-section">'
         f'<div class="home-wip-box">'
-        f'<div class="home-wip-label">Props Lab Edges</div>'
+        f'<div class="home-wip-label">Props Lab</div>'
         f'<div class="home-wip-note">'
-        f'Game odds and prop edges are a work in progress. '
-        f'We are still validating edge accuracy against market lines before surfacing recommendations. '
+        f'Game-level player projections with model probabilities and confidence tiers. '
         f'Visit <a href="{_nav_url("Props Lab")}" target="_self">Props Lab</a> '
-        f'to explore the raw model output.'
+        f'to explore the full model output.'
         f'</div>'
         f'</div></div>'
     )

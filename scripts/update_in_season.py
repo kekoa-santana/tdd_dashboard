@@ -3,8 +3,7 @@
 Dashboard post-update script.
 
 Handles dashboard-specific bookkeeping: weekly snapshots, update
-metadata, artifact manifest, prediction archiving, roster export,
-and game odds collection.
+metadata, artifact manifest, prediction archiving, and roster export.
 
 All model work (DB queries, conjugate updating, K samples, matchup
 simulation, game sims) lives in the player_profiles repo.  This script
@@ -18,8 +17,8 @@ Usage
     python scripts/update_in_season.py --skip-schedule    # skip API calls
     python scripts/update_in_season.py --skip-engine      # skip projection engine, just do bookkeeping
     python scripts/update_in_season.py --snapshot          # force a weekly snapshot
-    python scripts/update_in_season.py --schedule-only    # roster moves + odds only (10-min mode)
-    python scripts/update_in_season.py --post-sims        # post-sim bookkeeping (game preds reshape + odds + metadata)
+    python scripts/update_in_season.py --schedule-only    # roster moves only (intraday mode)
+    python scripts/update_in_season.py --post-sims        # post-sim bookkeeping (game preds reshape + metadata)
 """
 from __future__ import annotations
 
@@ -315,10 +314,6 @@ def _build_game_predictions(game_date: str) -> None:
         logger.warning("Failed to append to sim_predictions_archive: %s", e)
 
 
-# ---------------------------------------------------------------------------
-# Game odds collection
-# ---------------------------------------------------------------------------
-
 def _run_game_accuracy_report() -> None:
     """Run game prediction accuracy report if enough data exists."""
     log_path = DASHBOARD_DIR / "game_prediction_log.parquet"
@@ -336,18 +331,6 @@ def _run_game_accuracy_report() -> None:
         print_accuracy_report(df)
     except Exception as e:
         logger.warning("Game accuracy report failed: %s", e)
-
-
-def collect_game_odds_snapshot(game_date: str) -> None:
-    """Fetch game-level odds (ML, spread, total) from DK/Bovada; append history + daily wide."""
-    try:
-        from scripts.collect_game_odds import persist_game_odds
-
-        odds = persist_game_odds(game_date)
-        if odds.empty:
-            logger.info("No game odds collected for %s", game_date)
-    except Exception as e:
-        logger.warning("Game odds collection failed: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -736,11 +719,11 @@ def main() -> None:
     parser.add_argument("--snapshot", action="store_true",
                         help="Force saving a weekly projection snapshot.")
     parser.add_argument("--schedule-only", action="store_true",
-                        help="Roster moves + odds only (10-min mode). "
+                        help="Roster moves only (intraday mode). "
                              "Sims are handled by confident_picks.")
     parser.add_argument("--post-sims", action="store_true",
                         help="Post-sim bookkeeping: game predictions reshape, "
-                             "odds collection, metadata update.")
+                             "metadata update.")
     args = parser.parse_args()
 
     game_date = args.date or date.today().isoformat()
@@ -748,12 +731,11 @@ def main() -> None:
     logger.info("Dashboard update for %s (season %d)", game_date, SEASON)
     logger.info("=" * 60)
 
-    # --schedule-only: lightweight 10-min mode (roster moves + odds)
-    # Sims are now handled by confident_picks in daily_update.bat Step 3.
+    # --schedule-only: lightweight intraday mode (roster moves)
+    # Sims are handled by confident_picks in daily_update.bat Step 3.
     if args.schedule_only:
-        logger.info("Mode: schedule-only (roster moves + odds)")
+        logger.info("Mode: schedule-only (roster moves)")
         check_roster_moves(game_date)
-        collect_game_odds_snapshot(game_date)
 
         meta_path = DASHBOARD_DIR / "update_metadata.json"
         if meta_path.exists():
@@ -772,9 +754,8 @@ def main() -> None:
 
     # --post-sims: runs after confident_picks to do dashboard bookkeeping
     if args.post_sims:
-        logger.info("Mode: post-sims (game predictions + odds + metadata)")
+        logger.info("Mode: post-sims (game predictions + metadata)")
         _build_game_predictions(game_date)
-        collect_game_odds_snapshot(game_date)
         _save_metadata(game_date, {"last_sims_refresh": datetime.now().isoformat()})
 
         # Generate artifact manifest

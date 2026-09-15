@@ -5094,7 +5094,7 @@ hr {
   display: grid;
   grid-template-columns:
     72px minmax(220px, 1.3fr) minmax(150px, 0.9fr)
-    72px 140px 80px;
+    72px 80px;
   gap: 0.6rem; align-items: center;
   padding: 0.7rem 0.9rem;
   border-bottom: 1px solid var(--tdd-dark-border);
@@ -5109,7 +5109,7 @@ hr {
   display: grid;
   grid-template-columns:
     72px minmax(220px, 1.3fr) minmax(150px, 0.9fr)
-    72px 140px 80px;
+    72px 80px;
   gap: 0.6rem; align-items: center;
   padding: 0.85rem 0.9rem;
   border-bottom: 1px solid var(--tdd-dark-border-faint);
@@ -5192,13 +5192,6 @@ hr {
   color: var(--tdd-slate); margin-top: 0.1rem;
 }
 
-/* Edge cell */
-.pl-cell-edge { display: flex; align-items: center; gap: 0.5rem; }
-.pl-edge-num {
-  font-family: var(--tdd-font-heading); font-weight: 700;
-  font-size: 0.85rem; font-variant-numeric: tabular-nums;
-}
-
 /* Distribution cell */
 .pl-cell-dist { display: flex; justify-content: center; }
 
@@ -5272,7 +5265,7 @@ hr {
 /* Responsive */
 @media (max-width: 1180px) {
   .pl-thead, .pl-row {
-    grid-template-columns: 64px minmax(180px, 1.3fr) minmax(140px, 0.8fr) 64px 120px;
+    grid-template-columns: 64px minmax(180px, 1.3fr) minmax(140px, 0.8fr) 64px;
   }
   .pl-cell-dist { display: none; }
 }
@@ -5283,15 +5276,13 @@ hr {
     grid-template-columns: 64px 1fr auto;
     grid-template-areas:
       "tier player prob"
-      "tier pick   pick"
-      "edge edge   edge";
+      "tier pick   pick";
     gap: 0.5rem; padding: 0.85rem;
   }
   .pl-cell-rank   { grid-area: tier; align-self: start; }
   .pl-cell-player { grid-area: player; }
   .pl-cell-pick   { grid-area: pick; }
   .pl-cell-prob   { grid-area: prob; text-align: right; }
-  .pl-cell-edge   { grid-area: edge; }
   .pl-cell-dist   { display: none; }
   .pl-why-grid    { grid-template-columns: 1fr; }
 }

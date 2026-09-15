@@ -6,13 +6,12 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import streamlit as st
 
-from config import GOLD, SAGE, EMBER, SLATE, CREAM
+from config import GOLD, SAGE, EMBER, SLATE
 from utils.alerts import tdd_info, tdd_warn
 from services.data_loader import (
-    load_projections, load_game_props, load_dk_props, load_pp_props,
+    load_projections, load_game_props,
     load_todays_games,
     load_stat_tier_thresholds, load_prop_attribution,
-    dedupe_pp_against_dk,
 )
 from components.attribution import build_attribution_panel
 from components.headshot import headshot_html
@@ -82,19 +81,6 @@ def _lookup_p_over(row: pd.Series, line: float) -> float | None:
     return None
 
 
-def _american_to_implied(american) -> float | None:
-    if american is None or (isinstance(american, float) and pd.isna(american)):
-        return None
-    try:
-        cleaned = str(american).replace("\u2212", "-").replace("\u2013", "-")
-        odds = int(cleaned)
-    except (ValueError, TypeError):
-        return None
-    if odds > 0:
-        return 100.0 / (odds + 100.0)
-    return abs(odds) / (abs(odds) + 100.0)
-
-
 def _confidence_tier(
     thresholds: dict, player_type: str, stat: str, model_p: float,
 ) -> str:
@@ -117,14 +103,6 @@ def _cal_label(trust: float) -> tuple[str, str]:
     return "Soft", "ember"
 
 
-def _edge_color(edge_pp: float) -> str:
-    if abs(edge_pp) >= 12:
-        return SAGE
-    if abs(edge_pp) >= 6:
-        return GOLD
-    return SLATE
-
-
 def _avatar_html(name: str, team: str, size: int = 30) -> str:
     initials = "".join(w[0] for w in name.split()[:2])
     bg = _TEAM_COLORS.get(team, "#2A2E3A")
@@ -135,49 +113,12 @@ def _avatar_html(name: str, team: str, size: int = 30) -> str:
     )
 
 
-def _edge_bar_svg(model_p: float, market_p: float | None, w: int = 88, h: int = 20) -> str:
-    """Inline SVG edge bar showing model vs market probability."""
-    lo, hi = 0.30, 0.85
-    def norm(p: float) -> float:
-        return max(0, min(1, (p - lo) / (hi - lo)))
-
-    mx = norm(model_p) * (w - 4) + 2
-    cy = h / 2
-
-    edge = (model_p - market_p) * 100 if market_p is not None else None
-    ec = _edge_color(edge) if edge is not None else SLATE
-
-    parts = [
-        f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}">',
-        f'<line x1="2" x2="{w-2}" y1="{cy}" y2="{cy}" stroke="var(--tdd-dark-border)" stroke-width="1"/>',
-    ]
-
-    if market_p is not None:
-        kx = norm(market_p) * (w - 4) + 2
-        parts.append(
-            f'<line x1="{kx:.1f}" x2="{kx:.1f}" y1="{cy-5}" y2="{cy+5}" '
-            f'stroke="var(--tdd-slate)" stroke-width="1"/>'
-            f'<line x1="{kx:.1f}" x2="{mx:.1f}" y1="{cy}" y2="{cy}" '
-            f'stroke="{ec}" stroke-width="2"/>'
-        )
-
-    parts.append(
-        f'<circle cx="{mx:.1f}" cy="{cy}" r="3.2" fill="{ec}" '
-        f'stroke="var(--tdd-dark)" stroke-width="1"/>'
-    )
-    parts.append('</svg>')
-    return "".join(parts)
-
-
 # ---------------------------------------------------------------------------
 # Data assembly
 # ---------------------------------------------------------------------------
 
 def _build_flat_picks(props: pd.DataFrame) -> pd.DataFrame:
     """Build a flat pick list -- one row per (player, stat, line, direction)."""
-    dk = load_dk_props()
-    pp = load_pp_props()
-    pp = dedupe_pp_against_dk(dk, pp)
     thresholds = load_stat_tier_thresholds()
 
     # Game time lookup
@@ -196,41 +137,18 @@ def _build_flat_picks(props: pd.DataFrame) -> pd.DataFrame:
         stat = row["stat"]
         ptype = row.get("player_type", "")
 
-        # Collect available lines
-        lines_seen: list[tuple[float, float | None]] = []
+        # The model's own line for this projection.
+        default_line = row.get("line")
+        if default_line is None or pd.isna(default_line):
+            continue
 
-        dk_match = dk[
-            (dk["player_id"] == pid) & (dk["stat"] == stat)
-        ] if not dk.empty else pd.DataFrame()
-        for _, dl in dk_match.iterrows():
-            imp = _american_to_implied(dl.get("over_odds"))
-            lines_seen.append((float(dl["line"]), imp))
-
-        pp_match = pp[
-            (pp["player_id"] == pid) & (pp["stat"] == stat)
-        ] if not pp.empty else pd.DataFrame()
-        for _, pl in pp_match.iterrows():
-            pp_line = float(pl["line"])
-            if not any(abs(l[0] - pp_line) < 0.01 for l in lines_seen):
-                lines_seen.append((pp_line, None))
-
-        if not lines_seen:
-            default_line = row.get("line")
-            if pd.isna(default_line):
-                continue
-            lines_seen.append((float(default_line), None))
-
-        for book_line, dk_implied in lines_seen:
+        for book_line in (float(default_line),):
             model_p = _lookup_p_over(row, book_line)
-            if model_p is None and book_line == row.get("line"):
+            if model_p is None:
                 model_p = row.get("p_over")
             if model_p is None or pd.isna(model_p):
                 continue
             model_p = float(model_p)
-
-            edge_pp = None
-            if dk_implied is not None and not pd.isna(dk_implied):
-                edge_pp = (model_p - dk_implied) * 100
 
             # Determine direction
             direction = "over" if model_p >= 0.5 else "under"
@@ -239,7 +157,7 @@ def _build_flat_picks(props: pd.DataFrame) -> pd.DataFrame:
             conf_tier = _confidence_tier(thresholds, ptype, stat, model_p)
 
             # Skip Pass tier by default
-            if conf_tier == "Pass" and (edge_pp is None or abs(edge_pp) < 5):
+            if conf_tier == "Pass":
                 continue
 
             game_pk = row.get("game_pk")
@@ -266,8 +184,6 @@ def _build_flat_picks(props: pd.DataFrame) -> pd.DataFrame:
                 "line_val": book_line,
                 "model_p": model_p,
                 "display_p": display_p,
-                "market_p": dk_implied,
-                "edge_pp": edge_pp,
                 "conf_tier": conf_tier,
                 "game_pk": game_pk,
                 "game_time": game_time,
@@ -278,7 +194,7 @@ def _build_flat_picks(props: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = pd.DataFrame(picks)
-    # Dedupe: keep best edge per (player, stat, line)
+    # Dedupe: one row per (player, stat, line, direction)
     df = df.drop_duplicates(
         subset=["player_id", "stat", "line_val", "direction"],
         keep="first",
@@ -395,11 +311,6 @@ def _render_filter_summary(picks: pd.DataFrame) -> str:
     n = len(picks)
     locks = len(picks[picks["conf_tier"] == "Lock"]) if not picks.empty else 0
     strong = len(picks[picks["conf_tier"] == "Strong"]) if not picks.empty else 0
-    avg_edge = 0.0
-    if not picks.empty and "edge_pp" in picks.columns:
-        edges = picks["edge_pp"].dropna()
-        if len(edges) > 0:
-            avg_edge = edges.mean()
 
     # Best stat = stat with most Lock+Strong picks
     best_stat = ""
@@ -418,8 +329,6 @@ def _render_filter_summary(picks: pd.DataFrame) -> str:
         f'<span class="dot">&middot;</span>'
         f'<span><span class="num pl-tier-tag tier-Lock">{locks} Lock</span></span>'
         f'<span><span class="num pl-tier-tag tier-Strong">{strong} Strong</span></span>'
-        f'<span class="dot">&middot;</span>'
-        f'<span>Avg edge <span class="num">{avg_edge:+.1f}pp</span></span>'
         + (f'<span class="dot">&middot;</span>'
            f'<span>Strongest: <span class="pl-stat-tag">{best_stat}</span></span>'
            if best_stat else "")
@@ -437,8 +346,6 @@ def _render_pick_row(row: pd.Series, show_why: bool = False) -> str:
     line = row["line"]
     model_p = row["model_p"]
     display_p = row["display_p"]
-    market_p = row.get("market_p")
-    edge_pp = row.get("edge_pp")
     tier = row["conf_tier"]
     game_time = row.get("game_time", "")
     proj = row.get("proj", "")
@@ -451,17 +358,6 @@ def _render_pick_row(row: pd.Series, show_why: bool = False) -> str:
 
     # Model % display
     pct = round(display_p * 100)
-
-    # Edge display
-    edge_str = "--"
-    edge_color = SLATE
-    edge_svg = ""
-    if edge_pp is not None and not pd.isna(edge_pp):
-        # Flip edge for unders
-        display_edge = edge_pp if direction == "over" else -edge_pp
-        edge_str = f"{display_edge:+.0f}pp"
-        edge_color = _edge_color(abs(display_edge))
-        edge_svg = _edge_bar_svg(model_p, market_p if not pd.isna(market_p) else None)
 
     # Avatar
     avatar = _avatar_html(name, team, 32)
@@ -501,11 +397,6 @@ def _render_pick_row(row: pd.Series, show_why: bool = False) -> str:
         f'<div class="pl-prob-num">{pct}<span class="pct">%</span></div>'
         f'<div class="pl-prob-label">model</div>'
         f'</div>'
-        # Edge
-        f'<div class="pl-cell pl-cell-edge">'
-        f'{edge_svg}'
-        f'<div class="pl-edge-num" style="color:{edge_color}">{edge_str}</div>'
-        f'</div>'
         # Dist placeholder
         f'<div class="pl-cell pl-cell-dist">'
         f'<span style="color:var(--tdd-slate);font-size:0.65rem">--</span>'
@@ -523,7 +414,6 @@ def _render_table_header() -> str:
         '<div class="pl-th pl-cell-player">Player &middot; Matchup</div>'
         '<div class="pl-th pl-cell-pick">Pick &middot; Line</div>'
         '<div class="pl-th pl-cell-prob">Model</div>'
-        '<div class="pl-th pl-cell-edge">Edge vs market</div>'
         '<div class="pl-th pl-cell-dist">Dist</div>'
         '</div>'
     )
@@ -545,7 +435,7 @@ def page_projected_performers() -> None:
         '<h1 class="pl-page-title">Props Lab</h1>'
         '<p class="pl-page-sub">'
         'One row per pick, sortable across the universe. Every pick carries its '
-        'model probability, edge vs market, and confidence tier.'
+        'model probability and confidence tier.'
         '</p>'
         '</div>'
         '</header>',
@@ -653,12 +543,6 @@ def page_projected_performers() -> None:
             key="pl_search", label_visibility="collapsed",
         )
 
-    # Edge slider
-    min_edge = st.slider(
-        "Min edge (pp)", 0, 20, 0, key="pl_edge",
-        label_visibility="collapsed",
-    )
-
     # Apply filters
     filtered = all_picks.copy()
     if type_filter == "Hitters":
@@ -677,11 +561,6 @@ def page_projected_performers() -> None:
     elif dir_filter == "Under":
         filtered = filtered[filtered["direction"] == "under"]
 
-    if min_edge > 0:
-        filtered = filtered[
-            filtered["edge_pp"].notna() & (filtered["edge_pp"].abs() >= min_edge)
-        ]
-
     if search:
         q = search.lower()
         filtered = filtered[
@@ -692,19 +571,14 @@ def page_projected_performers() -> None:
 
     # ── Sort ───────────────────────────────────────────────────────
     sort_col = st.selectbox(
-        "Sort", ["Tier", "Edge", "Model %", "Stat"],
+        "Sort", ["Tier", "Model %", "Stat"],
         key="pl_sort", label_visibility="collapsed",
     )
     tier_rank = {t: i for i, t in enumerate(_CONFIDENCE_TIER_ORDER)}
 
     if not filtered.empty:
         filtered = filtered.assign(_tier_rank=filtered["conf_tier"].map(tier_rank).fillna(99))
-        if sort_col == "Edge":
-            filtered = filtered.sort_values(
-                ["_tier_rank", "edge_pp"], ascending=[True, False],
-                na_position="last",
-            )
-        elif sort_col == "Model %":
+        if sort_col == "Model %":
             filtered = filtered.sort_values(
                 ["_tier_rank", "display_p"], ascending=[True, False],
             )

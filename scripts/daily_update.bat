@@ -5,18 +5,21 @@ REM  TDD Dashboard -- Update Runner
 REM  Called by Windows Task Scheduler.
 REM
 REM  Modes:
-REM    daily_update.bat                 -- full update ^(ETL + projections + sims + publish^)
-REM    daily_update.bat --skip-etl      -- skip ETL, projections + sims + publish
-REM    daily_update.bat --schedule-only -- roster moves + sims + publish ^(single run^)
+REM    daily_update.bat              -- morning run: ETL, precompute, projections,
+REM                                     full game sims, publish
+REM    daily_update.bat --skip-etl   -- morning run without the ETL step
+REM    daily_update.bat --intraday   -- re-sim only games whose starters, umpire,
+REM                                     or lineups changed; live standouts; publish
+REM                                     ^(--schedule-only is accepted as an alias^)
 REM
 REM  Artifacts publish to the R2 bucket, not to git, so a data refresh never
 REM  redeploys the Streamlit app. Requires requirements-pipeline.txt installed
 REM  and R2_* credentials in .env.
 REM
 REM  Task Scheduler setup:
-REM    1. Full daily:   6:00 AM  -> daily_update.bat
-REM    2. Game window:  every 10 min (8 AM-4 PM) -> daily_update.bat --schedule-only
-REM                     Task Scheduler handles repetition; each invocation runs once.
+REM    1. TDD Full Daily Update:  6:00 AM             -> daily_update.bat
+REM    2. TDD Intraday Refresh:   every 15 min, 9 AM to midnight
+REM                                                   -> daily_update.bat --intraday
 REM ----------------------------------------------------------------
 
 set PROJECT_DIR=C:\Users\kekoa\Documents\data_analytics\tdd-dashboard
@@ -27,11 +30,17 @@ set PROFILES_PYTHON=%PROFILES_DIR%\myenv\Scripts\python.exe
 set PYTHON=C:\Users\kekoa\AppData\Local\Programs\Python\Python311\python.exe
 set LOG_DIR=%PROJECT_DIR%\logs
 set LOG_FILE=%LOG_DIR%\update_%date:~-4,4%-%date:~-10,2%-%date:~-7,2%.log
-set IS_SCHEDULE_ONLY=0
-echo %* | findstr /i "schedule-only" >nul
-if %ERRORLEVEL% EQU 0 set IS_SCHEDULE_ONLY=1
+REM Sim runner entry point. Its INFO log names the games each run re-simulates.
+set PICKS=import sys, logging; logging.basicConfig(level=logging.WARNING); logging.getLogger('precompute.confident_picks').setLevel(logging.INFO); sys.path.insert(0, 'scripts/precompute'); sys.path.insert(0, 'scripts'); from confident_picks import run
 
-REM Create logs directory if needed
+REM Precompute groups that change with each day's games. Excludes the MCMC
+REM model refit and preseason snapshots.
+set DAILY_PRECOMPUTE_GROUPS=team,rankings,game_data,traditional,profiles
+
+set IS_INTRADAY=0
+echo %* | findstr /i "intraday schedule-only" >nul
+if %ERRORLEVEL% EQU 0 set IS_INTRADAY=1
+
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
 REM -- Single-instance lock: overlapping task firings skip instead of colliding --
@@ -44,21 +53,26 @@ if exist "%LOCK_FILE%" (
 )
 echo locked > "%LOCK_FILE%"
 
-if "%IS_SCHEDULE_ONLY%"=="1" (
-    echo [%date% %time%] Starting schedule-only refresh... >> "%LOG_FILE%" 2>&1
-) else (
-    echo [%date% %time%] Starting full update... >> "%LOG_FILE%" 2>&1
-)
-
-REM -- Compute yesterday's date (for ETL) --
 for /f %%i in ('powershell -NoProfile -Command "(Get-Date).AddDays(-1).ToString('yyyy-MM-dd')"') do set YESTERDAY=%%i
+for /f %%i in ('powershell -NoProfile -Command "(Get-Date).ToString('yyyy-MM-dd')"') do set TODAY=%%i
 
-call :run_once %*
+if "%IS_INTRADAY%"=="1" (
+    echo [%date% %time%] Starting intraday refresh... >> "%LOG_FILE%" 2>&1
+    call :intraday
+) else (
+    echo [%date% %time%] Starting morning update... >> "%LOG_FILE%" 2>&1
+    call :morning %*
+)
 goto end
 
-:run_once
-REM -- Step 1: ETL -- skip for --schedule-only or --skip-etl --
-echo %* | findstr /i "schedule-only skip-etl" >nul
+
+REM ================================================================
+REM  Morning run
+REM ================================================================
+:morning
+
+REM -- Step 1: ETL for yesterday, then the upcoming schedule --
+echo %* | findstr /i "skip-etl" >nul
 if %ERRORLEVEL% EQU 0 (
     echo [%date% %time%] Skipping ETL step >> "%LOG_FILE%" 2>&1
 ) else (
@@ -66,102 +80,107 @@ if %ERRORLEVEL% EQU 0 (
     cd /d "%ETL_DIR%"
     "%ETL_PYTHON%" "%ETL_DIR%\full_pipeline.py" --start-date %YESTERDAY% --end-date %YESTERDAY% >> "%LOG_FILE%" 2>&1
     if !ERRORLEVEL! NEQ 0 (
-        echo [%date% %time%] ETL FAILED with exit code !ERRORLEVEL! >> "%LOG_FILE%" 2>&1
-        echo [%date% %time%] Continuing with dashboard update using existing data... >> "%LOG_FILE%" 2>&1
+        echo [%date% %time%] ETL FAILED with exit code !ERRORLEVEL! -- continuing with existing data >> "%LOG_FILE%" 2>&1
     ) else (
         echo [%date% %time%] ETL completed successfully >> "%LOG_FILE%" 2>&1
     )
+    "%ETL_PYTHON%" "%ETL_DIR%\ingestion\ingest_schedule_lookahead.py" --start-date %TODAY% --days 7 >> "%LOG_FILE%" 2>&1
+    if !ERRORLEVEL! NEQ 0 echo [%date% %time%] Schedule lookahead FAILED -- continuing >> "%LOG_FILE%" 2>&1
 )
 
-REM -- Step 1b: Precompute -- SKIPPED during season (preseason data is static) --
-REM   Rankings and team profiles update weekly via --weekly flag on update_in_season.py.
-REM   To re-run preseason precompute manually:
-REM     cd /d "%PROFILES_DIR%" && "%PROFILES_PYTHON%" scripts\precompute_dashboard_data.py --include team,rankings,game_data,traditional,profiles,game_sim,health
+REM -- Step 1b: Daily news feed + email digest --
+echo [%date% %time%] Building daily news feed... >> "%LOG_FILE%" 2>&1
+cd /d "%PROFILES_DIR%"
+"%PROFILES_PYTHON%" -c "import sys; sys.path.insert(0, 'scripts/precompute'); sys.path.insert(0, 'scripts'); from news import run; run()" >> "%LOG_FILE%" 2>&1
+if !ERRORLEVEL! NEQ 0 echo [%date% %time%] News feed FAILED -- continuing >> "%LOG_FILE%" 2>&1
 
-REM -- Step 1c: Daily news feed + email digest --
-REM   External RSS (MLB.com/MiLB.com) + DB-generated stories -> news_feed.parquet
-REM   plus the morning email digest (needs GMAIL_* in player_profiles\.env).
-if "%IS_SCHEDULE_ONLY%"=="0" (
-    echo [%date% %time%] Building daily news feed... >> "%LOG_FILE%" 2>&1
-    cd /d "%PROFILES_DIR%"
-    "%PROFILES_PYTHON%" -c "import sys; sys.path.insert(0, 'scripts/precompute'); sys.path.insert(0, 'scripts'); from news import run; run()" >> "%LOG_FILE%" 2>&1
-    if !ERRORLEVEL! NEQ 0 (
-        echo [%date% %time%] News feed FAILED -- continuing >> "%LOG_FILE%" 2>&1
-    ) else (
-        echo [%date% %time%] News feed generated successfully >> "%LOG_FILE%" 2>&1
-    )
-)
-
-REM -- Step 2: Dashboard update (projections + bookkeeping, NO sims) --
-if "%IS_SCHEDULE_ONLY%"=="1" (
-    echo [%date% %time%] Running dashboard schedule-only ^(roster moves + odds^)... >> "%LOG_FILE%" 2>&1
-    "%PYTHON%" "%PROJECT_DIR%\scripts\update_in_season.py" --schedule-only >> "%LOG_FILE%" 2>&1
+REM -- Step 1c: Precompute the artifacts that move with each day's games --
+REM   Rankings, team ELO/profiles, traditional stats, game-data priors, profiles.
+echo [%date% %time%] Running precompute ^(%DAILY_PRECOMPUTE_GROUPS%^)... >> "%LOG_FILE%" 2>&1
+cd /d "%PROFILES_DIR%"
+"%PROFILES_PYTHON%" "%PROFILES_DIR%\scripts\precompute_dashboard_data.py" --include %DAILY_PRECOMPUTE_GROUPS% >> "%LOG_FILE%" 2>&1
+if !ERRORLEVEL! NEQ 0 (
+    echo [%date% %time%] Precompute FAILED -- continuing with existing artifacts >> "%LOG_FILE%" 2>&1
 ) else (
-    set DASH_ARGS=%*
-    if defined DASH_ARGS (
-        set DASH_ARGS=!DASH_ARGS:--skip-etl=!
-    )
-    echo [%date% %time%] Running dashboard update ^(projections + bookkeeping^)... >> "%LOG_FILE%" 2>&1
-    "%PYTHON%" "%PROJECT_DIR%\scripts\update_in_season.py" !DASH_ARGS! >> "%LOG_FILE%" 2>&1
+    echo [%date% %time%] Precompute completed successfully >> "%LOG_FILE%" 2>&1
 )
 
-if %ERRORLEVEL% NEQ 0 (
-    echo [%date% %time%] Dashboard update FAILED with exit code %ERRORLEVEL% >> "%LOG_FILE%" 2>&1
-    echo [%date% %time%] Continuing to sims... >> "%LOG_FILE%" 2>&1
+REM -- Step 2: Projections + bookkeeping --
+set DASH_ARGS=%*
+if defined DASH_ARGS set DASH_ARGS=!DASH_ARGS:--skip-etl=!
+echo [%date% %time%] Running dashboard update ^(projections + bookkeeping^)... >> "%LOG_FILE%" 2>&1
+"%PYTHON%" "%PROJECT_DIR%\scripts\update_in_season.py" !DASH_ARGS! >> "%LOG_FILE%" 2>&1
+if !ERRORLEVEL! NEQ 0 (
+    echo [%date% %time%] Dashboard update FAILED with exit code !ERRORLEVEL! >> "%LOG_FILE%" 2>&1
 ) else (
     echo [%date% %time%] Dashboard update completed successfully >> "%LOG_FILE%" 2>&1
 )
 
-REM -- Step 3: Run game sims via confident_picks (sole sim runner) --
-REM   Fetches schedule + lineups from MLB API, runs pitcher + batter sims,
-REM   produces: game_props.parquet, todays_games.parquet,
-REM   todays_lineups.parquet, todays_batter_sims.parquet, game_predictions.parquet.
-echo [%date% %time%] Running game sims ^(confident_picks^)... >> "%LOG_FILE%" 2>&1
+REM -- Step 3: Full game sims for today and tomorrow --
+REM   Team-run scoring must cover the slate first, or the sim's run anchor
+REM   silently falls back to the raw simulation.
+echo [%date% %time%] Scoring team runs for scheduled games... >> "%LOG_FILE%" 2>&1
 cd /d "%PROFILES_DIR%"
-"%PROFILES_PYTHON%" -c "import sys; sys.path.insert(0, 'scripts/precompute'); sys.path.insert(0, 'scripts'); from confident_picks import run; run()" >> "%LOG_FILE%" 2>&1
+"%PROFILES_PYTHON%" "%PROFILES_DIR%\scripts\predict_team_runs_scheduled.py" >> "%LOG_FILE%" 2>&1
+if !ERRORLEVEL! NEQ 0 echo [%date% %time%] Team run scoring FAILED -- sims will run without the run anchor >> "%LOG_FILE%" 2>&1
 
-if %ERRORLEVEL% NEQ 0 (
+echo [%date% %time%] Running game sims ^(all games^)... >> "%LOG_FILE%" 2>&1
+"%PROFILES_PYTHON%" -c "%PICKS%; run()" >> "%LOG_FILE%" 2>&1
+if !ERRORLEVEL! NEQ 0 (
     echo [%date% %time%] Game sims FAILED >> "%LOG_FILE%" 2>&1
 ) else (
     echo [%date% %time%] Game sims completed successfully >> "%LOG_FILE%" 2>&1
 )
 
-REM -- Step 3b: Live daily standouts + 14-day heat check --
-REM   Fetches completed-game boxscores from MLB API and rebuilds
-REM   daily standout + weekly form parquets with today's results.
-if "%IS_SCHEDULE_ONLY%"=="1" (
-    echo [%date% %time%] Generating live standouts... >> "%LOG_FILE%" 2>&1
-    cd /d "%PROFILES_DIR%"
-    "%PROFILES_PYTHON%" -c "import sys; sys.path.insert(0, 'scripts/precompute'); sys.path.insert(0, 'scripts'); from rankings import run_live_standouts; run_live_standouts()" >> "%LOG_FILE%" 2>&1
-    if !ERRORLEVEL! NEQ 0 (
-        echo [%date% %time%] Live standouts FAILED >> "%LOG_FILE%" 2>&1
-    ) else (
-        echo [%date% %time%] Live standouts generated successfully >> "%LOG_FILE%" 2>&1
-    )
-)
+call :post_sims
+call :publish
+exit /b 0
 
-REM -- Step 3c: Post-sim bookkeeping, game predictions reshape + odds + metadata --
+
+REM ================================================================
+REM  Intraday refresh
+REM ================================================================
+:intraday
+
+REM -- Step 1: Roster moves --
+"%PYTHON%" "%PROJECT_DIR%\scripts\update_in_season.py" --schedule-only >> "%LOG_FILE%" 2>&1
+if !ERRORLEVEL! NEQ 0 echo [%date% %time%] Roster move check FAILED -- continuing >> "%LOG_FILE%" 2>&1
+
+REM -- Step 2: Re-sim only games whose inputs changed --
+REM   Exit code 3 means nothing changed and no sim artifacts were touched.
+cd /d "%PROFILES_DIR%"
+"%PROFILES_PYTHON%" -c "%PICKS%; sys.exit(0 if run(incremental=True) else 3)" >> "%LOG_FILE%" 2>&1
+set SIM_RESULT=!ERRORLEVEL!
+if "!SIM_RESULT!"=="0" echo [%date% %time%] Changed games re-simulated >> "%LOG_FILE%" 2>&1
+if "!SIM_RESULT!"=="3" echo [%date% %time%] No lineup, starter, or umpire changes >> "%LOG_FILE%" 2>&1
+if not "!SIM_RESULT!"=="0" if not "!SIM_RESULT!"=="3" echo [%date% %time%] Game sims FAILED with exit code !SIM_RESULT! >> "%LOG_FILE%" 2>&1
+
+REM -- Step 3: Live daily standouts + 14-day heat check from boxscores --
+"%PROFILES_PYTHON%" -c "import sys; sys.path.insert(0, 'scripts/precompute'); sys.path.insert(0, 'scripts'); from rankings import run_live_standouts; run_live_standouts()" >> "%LOG_FILE%" 2>&1
+if !ERRORLEVEL! NEQ 0 echo [%date% %time%] Live standouts FAILED >> "%LOG_FILE%" 2>&1
+
+if "!SIM_RESULT!"=="0" call :post_sims
+call :publish
+exit /b 0
+
+
+REM ================================================================
+REM  Shared steps
+REM ================================================================
+:post_sims
 echo [%date% %time%] Running post-sim bookkeeping... >> "%LOG_FILE%" 2>&1
 "%PYTHON%" "%PROJECT_DIR%\scripts\update_in_season.py" --post-sims >> "%LOG_FILE%" 2>&1
-
-if %ERRORLEVEL% NEQ 0 (
+if !ERRORLEVEL! NEQ 0 (
     echo [%date% %time%] Post-sim bookkeeping FAILED >> "%LOG_FILE%" 2>&1
 ) else (
     echo [%date% %time%] Post-sim bookkeeping completed >> "%LOG_FILE%" 2>&1
 )
+exit /b 0
 
-REM -- Step 4: Publish artifacts to the R2 bucket the dashboard reads --
-REM   Artifacts no longer live in git. Publishing to object storage does not
-REM   touch the repo, so Streamlit never redeploys on a data refresh; the app
-REM   picks up new artifacts on its own cache timer instead. Only changed
-REM   objects upload, and only the set the dashboard actually reads.
-REM
-REM   Credentials come from .env (gitignored): R2_ACCOUNT_ID,
-REM   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY. Needs requirements-pipeline.txt
-REM   installed for boto3.
-echo [%date% %time%] Publishing artifacts to R2... >> "%LOG_FILE%" 2>&1
+:publish
+REM   Only changed objects upload, and only the set the dashboard reads.
+REM   Credentials come from .env ^(gitignored^).
 cd /d "%PROJECT_DIR%"
-
 "%PYTHON%" "%PROJECT_DIR%\scripts\publish_artifacts.py" --prune >> "%LOG_FILE%" 2>&1
 if !ERRORLEVEL! NEQ 0 (
     echo [%date% %time%] Artifact publish FAILED with exit code !ERRORLEVEL! >> "%LOG_FILE%" 2>&1
