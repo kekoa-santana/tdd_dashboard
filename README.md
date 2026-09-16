@@ -12,6 +12,8 @@ Every projection on the site carries a range, and every finished game is graded 
 
 ## What makes this different from a stat site
 
+**It grades itself in public.** The Preseason Scorecard takes projections frozen before Opening Day and names names: of 34 hitters projected as stars, 22 delivered; Juan Soto was called within 2 points of wRC+, Vladimir Guerrero Jr. was missed by 40. It also reports what does not work, including a projected ERA with almost no ranking power and the run-conversion bug behind it.
+
 **It publishes its own error.** The accuracy strip compares how often outcomes landed in range against how often the model *expected* them to. Counting stats are whole numbers, so a 10th-to-90th percentile range holds more than 80% of the simulated mass; quoting only the hit rate would flatter the model. Comparing observed coverage against the model's own expected coverage is the honest version, and it currently shows batter stats well calibrated and pitcher ranges slightly too wide.
 
 **Projections are distributions, not point estimates.** Each player carries 1,000 posterior draws per rate stat. The game simulator resolves a full lineup one plate appearance at a time, so the output is a joint distribution over K, BB, H, HR, TB and outs rather than an independent guess per stat.
@@ -63,6 +65,7 @@ Artifacts publish to Cloudflare R2, not to git. A data refresh therefore never r
 | **Game Analysis** | What shapes this specific matchup: game plans, bullpens, park, umpire, season series, per-pitcher distributions |
 | **Player Profile** | One player's projections, percentiles, scouting report, zone charts and season trends |
 | **Projections** | Full-season leaderboards from the frozen preseason snapshot, rate and counting |
+| **Preseason Scorecard** | Which projected stars delivered and which duds stayed duds, player by player, plus how the breakout calls landed |
 | **Model Performance** | Predicted vs actual, calibration curves, backtests, biggest hits and misses |
 | **Team Overview / Rankings** | Team identity, strengths and weaknesses against the league, depth |
 | **Data Health** | Artifact freshness, inventory and contract validation |

@@ -8,6 +8,7 @@ import streamlit as st
 from config import CURRENT_SEASON
 from services.data_loader import (
     calibrated_breakout_prob,
+    load_player_teams,
     load_advanced_stats,
     load_breakout_calibration,
     load_preseason_breakout_candidates,
@@ -23,6 +24,13 @@ from utils.html import esc
 MIN_PA = 200
 MIN_BF = 300
 GROUP_SIZE = 50
+
+# wRC+ and FIP lines that separate a star call from an ordinary one. 100 is
+# league average by construction, so 120 is a clear step above it.
+STAR_WRC = 120
+DUD_WRC = 85
+ACE_FIP = 3.60
+WEAK_FIP = 4.60
 
 _HITTER_STATS = [
     ("AVG", "avg", "rate3"),
@@ -46,6 +54,10 @@ def _fmt(value: float, kind: str) -> str:
         return text[1:] if text.startswith("0.") else text
     if kind == "rate3_signed":
         return f"{value:+.3f}"
+    if kind == "dec0":
+        return f"{value:.0f}"
+    if kind == "dec0_signed":
+        return f"{value:+.0f}"
     if kind == "dec2":
         return f"{value:.2f}"
     if kind == "dec2_signed":
@@ -72,6 +84,48 @@ def _metrics(projected: pd.Series, actual: pd.Series, lo=None, hi=None) -> dict:
         "coverage": coverage,
         "n": len(projected),
     }
+
+
+def _team_lookup() -> dict[int, str]:
+    teams = load_player_teams()
+    if teams.empty or "player_id" not in teams.columns:
+        return {}
+    return dict(zip(teams["player_id"].astype(int), teams["team_abbr"]))
+
+
+def _hitter_verdict(projected: float, actual: float) -> tuple[str, str]:
+    """Label a star or dud call by where the player actually finished.
+
+    Compares the rounded values so a line reading 120 is never described as
+    falling short of 120.
+    """
+    projected, actual = round(projected), round(actual)
+    if projected >= STAR_WRC:
+        if actual >= STAR_WRC:
+            return "delivered", "hit"
+        if actual >= 100:
+            return "above average, short of the call", "soft"
+        return "bust", "miss"
+    if actual <= DUD_WRC:
+        return "as projected", "hit"
+    if actual >= 110:
+        return "we were wrong", "miss"
+    return "better than projected", "soft"
+
+
+def _pitcher_verdict(projected: float, actual: float) -> tuple[str, str]:
+    projected, actual = round(projected, 2), round(actual, 2)
+    if projected <= ACE_FIP:
+        if actual <= ACE_FIP:
+            return "delivered", "hit"
+        if actual <= 4.20:
+            return "useful, short of the call", "soft"
+        return "bust", "miss"
+    if actual >= WEAK_FIP:
+        return "as projected", "hit"
+    if actual <= 3.90:
+        return "we were wrong", "miss"
+    return "better than projected", "soft"
 
 
 # ---------------------------------------------------------------------------
@@ -148,8 +202,41 @@ def _hitter_scorecard() -> dict:
                 act = act / 100.0
             rates.append({"label": label, **_metrics(rate_merged[proj_col], act)})
 
+    # Player level: who the model called a star or a dud, and what happened.
+    advanced_all = load_advanced_stats("hitter")
+    players: dict[str, list[dict]] = {"stars": [], "duds": [], "over": [], "under": []}
+    if not advanced_all.empty:
+        wrc = advanced_all[advanced_all["pa"] >= MIN_PA][["batter_id", "pa", "wrc_plus"]]
+        named = sim.merge(wrc, on="batter_id")
+        teams = _team_lookup()
+        named = named.assign(
+            projected=named["projected_wrc_plus_mean"].astype(float),
+            actual=named["wrc_plus"].astype(float),
+        )
+        named["delta"] = named["actual"] - named["projected"]
+        named["team"] = named["batter_id"].astype(int).map(teams).fillna("")
+
+        def _rows(frame: pd.DataFrame) -> list[dict]:
+            out = []
+            for _, row in frame.iterrows():
+                verdict, kind = _hitter_verdict(row["projected"], row["actual"])
+                out.append({
+                    "name": row["batter_name"], "team": row["team"],
+                    "playing_time": int(row["pa"]),
+                    "projected": row["projected"], "actual": row["actual"],
+                    "delta": row["delta"], "verdict": verdict, "kind": kind,
+                })
+            return out
+
+        stars = named[named["projected"] >= STAR_WRC].sort_values("projected", ascending=False)
+        duds = named[named["projected"] <= DUD_WRC].sort_values("projected")
+        players["stars"] = _rows(stars)
+        players["duds"] = _rows(duds)
+        players["over"] = _rows(named.nsmallest(8, "delta"))
+        players["under"] = _rows(named.nlargest(8, "delta"))
+
     return {"stats": rows, "groups": groups, "survival": survival, "rates": rates,
-            "n": len(merged), "games": int(actual["games"].max())}
+            "players": players, "n": len(merged), "games": int(actual["games"].max())}
 
 
 @st.cache_data(ttl=600)
@@ -202,7 +289,39 @@ def _pitcher_scorecard() -> dict:
             "runs9_act": float(merged["era"].mean()),
         }
 
-    return {"stats": rows, "rates": rates, "diagnosis": diagnosis, "n": len(merged)}
+    players: dict[str, list[dict]] = {"stars": [], "duds": [], "over": [], "under": []}
+    if "projected_fip_era_mean" in merged.columns and "fip" in merged.columns:
+        teams = _team_lookup()
+        named = merged.assign(
+            projected=merged["projected_fip_era_mean"].astype(float),
+            actual=merged["fip"].astype(float),
+        )
+        # For pitchers a negative delta is an improvement, so flip the sign
+        # to keep "delta" meaning "better than projected" everywhere.
+        named["delta"] = named["projected"] - named["actual"]
+        named["team"] = named["pitcher_id"].astype(int).map(teams).fillna("")
+
+        def _rows(frame: pd.DataFrame) -> list[dict]:
+            out = []
+            for _, row in frame.iterrows():
+                verdict, kind = _pitcher_verdict(row["projected"], row["actual"])
+                out.append({
+                    "name": row["pitcher_name"], "team": row["team"],
+                    "playing_time": float(row["ip"]),
+                    "projected": row["projected"], "actual": row["actual"],
+                    "delta": row["delta"], "verdict": verdict, "kind": kind,
+                })
+            return out
+
+        aces = named[named["projected"] <= ACE_FIP].sort_values("projected")
+        weak = named[named["projected"] >= WEAK_FIP].sort_values("projected", ascending=False)
+        players["stars"] = _rows(aces)
+        players["duds"] = _rows(weak)
+        players["over"] = _rows(named.nsmallest(8, "delta"))
+        players["under"] = _rows(named.nlargest(8, "delta"))
+
+    return {"stats": rows, "rates": rates, "diagnosis": diagnosis,
+            "players": players, "n": len(merged)}
 
 
 @st.cache_data(ttl=600)
@@ -329,6 +448,83 @@ def _rate_table(rows: list[dict]) -> str:
     return f"<div class='sc-wrap'><table class='sc-table'>{head}{body}</table></div>"
 
 
+_VERDICT_CLASS = {"hit": "sc-hit", "miss": "sc-miss", "soft": "sc-muted"}
+
+
+def _player_table(rows: list[dict], metric: str, unit: str, fmt: str,
+                  limit: int = 12) -> str:
+    """Name-by-name table of projected vs actual with a verdict."""
+    if not rows:
+        return "<div class='sc-note'>Nothing to show yet.</div>"
+    head = (f"<tr><th class='sc-left'>Player</th><th>{esc(unit)}</th>"
+            f"<th>Projected {esc(metric)}</th><th>Actual</th><th>Diff</th>"
+            f"<th class='sc-left'>Verdict</th></tr>")
+    body = ""
+    for row in rows[:limit]:
+        team = f" <span class='sc-muted'>{esc(row['team'])}</span>" if row["team"] else ""
+        playing = (f"{row['playing_time']:.0f}" if unit == "PA"
+                   else f"{row['playing_time']:.0f}")
+        body += (
+            f"<tr><td class='sc-left'>{esc(str(row['name']))}{team}</td>"
+            f"<td class='sc-muted'>{playing}</td>"
+            f"<td>{_fmt(row['projected'], fmt)}</td>"
+            f"<td class='sc-strong'>{_fmt(row['actual'], fmt)}</td>"
+            f"<td class='{_VERDICT_CLASS.get(row['kind'], '')}'>"
+            f"{_fmt(row['delta'], fmt + '_signed')}</td>"
+            f"<td class='sc-left {_VERDICT_CLASS.get(row['kind'], '')}'>"
+            f"{esc(row['verdict'])}</td></tr>"
+        )
+    return f"<div class='sc-wrap'><table class='sc-table'>{head}{body}</table></div>"
+
+
+def _call_summary(rows: list[dict], noun: str) -> str:
+    if not rows:
+        return ""
+    hits = sum(1 for row in rows if row["kind"] == "hit")
+    return (f"<div class='sc-note'><b class='sc-strong'>{hits} of {len(rows)}</b> "
+            f"{esc(noun)} landed.</div>")
+
+
+def _render_player_sections(players: dict, metric: str, unit: str, fmt: str,
+                            star_label: str, dud_label: str, star_noun: str) -> None:
+    st.markdown(f'<div class="tdd-section-hdr">{esc(star_label)}</div>',
+                unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sc-note">Diff is how the player finished against the projection: '
+        'positive means better than projected.</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(_call_summary(players.get("stars", []), star_noun), unsafe_allow_html=True)
+    st.markdown(_player_table(players.get("stars", []), metric, unit, fmt),
+                unsafe_allow_html=True)
+    if len(players.get("stars", [])) > 12:
+        with st.expander(f"All {len(players['stars'])}", expanded=False):
+            st.markdown(_player_table(players["stars"], metric, unit, fmt, limit=999),
+                        unsafe_allow_html=True)
+
+    st.markdown(f'<div class="tdd-section-hdr">{esc(dud_label)}</div>',
+                unsafe_allow_html=True)
+    st.markdown(_call_summary(players.get("duds", []), "low calls"), unsafe_allow_html=True)
+    st.markdown(_player_table(players.get("duds", []), metric, unit, fmt),
+                unsafe_allow_html=True)
+    if len(players.get("duds", [])) > 12:
+        with st.expander(f"All {len(players['duds'])}", expanded=False):
+            st.markdown(_player_table(players["duds"], metric, unit, fmt, limit=999),
+                        unsafe_allow_html=True)
+
+    st.markdown('<div class="tdd-section-hdr">The worst calls in both directions</div>',
+                unsafe_allow_html=True)
+    left, right = st.columns(2)
+    with left:
+        st.markdown("<div class='sc-note'>Projected far too high</div>", unsafe_allow_html=True)
+        st.markdown(_player_table(players.get("over", []), metric, unit, fmt, limit=8),
+                    unsafe_allow_html=True)
+    with right:
+        st.markdown("<div class='sc-note'>Projected far too low</div>", unsafe_allow_html=True)
+        st.markdown(_player_table(players.get("under", []), metric, unit, fmt, limit=8),
+                    unsafe_allow_html=True)
+
+
 def _render_hitters() -> None:
     data = _hitter_scorecard()
     if not data:
@@ -340,6 +536,15 @@ def _render_hitters() -> None:
         f'scored through {data["games"]} team games.</div>',
         unsafe_allow_html=True,
     )
+    _render_player_sections(
+        data.get("players", {}), "wRC+", "PA", "dec0",
+        f"Projected stars (wRC+ {STAR_WRC}+)",
+        f"Projected duds (wRC+ {DUD_WRC} or below)",
+        "star calls",
+    )
+
+    st.markdown('<div class="tdd-section-hdr">Accuracy across the board</div>',
+                unsafe_allow_html=True)
     st.markdown(_accuracy_table(data["stats"], "rate3_signed"), unsafe_allow_html=True)
     st.markdown(_rate_table(data["rates"]), unsafe_allow_html=True)
     st.markdown(
@@ -390,6 +595,20 @@ def _render_pitchers() -> None:
         f'<div class="sc-note">{data["n"]} pitchers with {MIN_BF}+ batters faced.</div>',
         unsafe_allow_html=True,
     )
+    _render_player_sections(
+        data.get("players", {}), "FIP", "IP", "dec2",
+        f"Projected aces (FIP {ACE_FIP:.2f} or better)",
+        f"Projected weak arms (FIP {WEAK_FIP:.2f}+)",
+        "ace calls",
+    )
+    st.markdown(
+        '<div class="sc-note">Judged on FIP rather than ERA: the ERA projection is '
+        'the one metric here that does not work, for the reason below.</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="tdd-section-hdr">Accuracy across the board</div>',
+                unsafe_allow_html=True)
     st.markdown(_accuracy_table(data["stats"], "dec2_signed"), unsafe_allow_html=True)
     st.markdown(_rate_table(data["rates"]), unsafe_allow_html=True)
 
