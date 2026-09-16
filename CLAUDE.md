@@ -1,172 +1,119 @@
 # CLAUDE.md — The Data Diamond Dashboard
 
 ## Project Overview
-Interactive Streamlit dashboard for MLB player analytics, powered by Bayesian projections from the `player_profiles` projection engine. Displays season-level projections, traditional stats, matchup analysis, game-level multi-stat predictions (K/BB/HR/H/Outs), and daily game coverage. Built by The Data Diamond (Koa).
+Streamlit dashboard for MLB player projections, powered by Bayesian models from the sibling `player_profiles` repo. Shows season-long projections, per-game simulated stat lines, matchup analysis, and model accuracy tracking.
 
-**This is the display/presentation layer.** All Bayesian model training, backtesting, and precomputation happens in the sibling `player_profiles` repo. This repo consumes pre-computed parquet/npz files and handles live updates + UI.
+**This is the presentation layer plus the daily pipeline.** Model training, backtesting and precompute live in `player_profiles`. This repo renders pre-computed artifacts and orchestrates the daily run that produces and publishes them.
 
-**⚠️ ARCHITECTURE NOTE:** The current implementation has drifted from the intended architecture. The dashboard's `update_in_season.py` currently performs projection updating that should be moved to `player_profiles`. See PLAN.md for the target architecture.
+See `README.md` for the public-facing description of the model and architecture.
 
 ## Related Repos
-- **Projection engine:** `C:/Users/kekoa/Documents/data_analytics/player_profiles/` — Bayesian models, backtesting, precompute
-- **Theme package:** `tdd_theme` — shared brand colors/utilities (pip-installed)
+- **Projection engine:** `C:/Users/kekoa/Documents/data_analytics/player_profiles/` — Bayesian models, game simulator, precompute
+- **ETL:** `C:/Users/kekoa/Documents/data_analytics/mlb_fantasy_ETL/` — Statcast + MLB API into PostgreSQL
+- **Theme package:** `tdd_theme` — shared brand colors (pip-installed)
 
 ## Tech Stack
 - **Language:** Python 3.11+
-- **UI:** Streamlit
-- **Data:** Pre-computed parquets + npz (no direct model training)
-- **Database:** PostgreSQL (`mlb_fantasy` on `localhost:5433`) — used by `update_in_season.py` for fetching observed 2026 totals and performing projection updates
-- **API:** MLB Stats API (schedule, lineups, probable pitchers)
-- **Visualization:** matplotlib, scipy (KDE plots)
-- **Computation:** numpy, pandas, scipy
+- **UI:** Streamlit (dark theme, custom CSS in `assets/styles.css`)
+- **Data:** Pre-computed parquet/npz/json artifacts. No model training, no DB calls in the app.
+- **Storage:** Cloudflare R2 (public bucket). Artifacts are NOT committed to git.
+- **Database:** PostgreSQL `mlb_fantasy` on `localhost:5433` — a Docker container (`mlb_postgres`), used only by pipeline scripts
+- **API:** MLB Stats API (schedule, lineups, boxscores, season series)
+- **Visualization:** plotly (primary), matplotlib (zone charts)
+
+## Where data comes from
+
+```
+data/dashboard/          local artifacts, gitignored, produced by the pipeline
+services/artifacts.py    resolves a name -> local file, else container cache, else R2
+services/data_loader.py  cached loaders; every read goes through artifact_path()
+```
+
+`artifact_path()` never raises. A missing artifact resolves to a path that does not
+exist, and callers degrade with `if not path.exists(): return pd.DataFrame()`.
+Local files always win, so development stays offline.
+
+**Never read `DASHBOARD_DIR / name` directly in app code** — use `artifact_path(name)`,
+or the deployed app (which has no local data) breaks.
 
 ## Project Structure
 ```
-tdd-dashboard/
-├── app.py                        # Main Streamlit dashboard (~383 lines, modularized)
-├── .streamlit/config.toml        # Dark theme config
-├── iconTransparent.png           # Brand icon
-├── SYNC_GUIDE.md                 # How to sync lib/ from projection engine
-├── lib/                          # Computation modules (synced from player_profiles)
-│   ├── __init__.py
-│   ├── constants.py              # Pitch maps, zone boundaries, league avgs
-│   ├── theme.py                  # TDD brand colors + watermark
-│   ├── matchup.py                # Pitch-type matchup scoring (log-odds)
-│   ├── bf_model.py               # Batters-faced distribution lookup
-│   ├── game_k_model.py           # DEPRECATED — legacy K-only game simulator
-│   ├── zone_charts.py            # Pitcher location + hitter zone heatmaps
-│   ├── rest_adjustment.py        # Days-rest K/BB/BF adjustments
-│   ├── in_season_updater.py      # Beta-Binomial conjugate updating
-│   ├── schedule.py               # MLB Stats API schedule/lineup fetcher
-│   └── db.py                     # SQLAlchemy read_sql helper
-├── pages/                        # Modular dashboard pages
-│   ├── schedule.py               # Today's Games (live refresh) + Game Browser
-│   ├── projections.py            # Projections + Stats (unified)
-│   ├── player_profile.py         # Full player analytics page
-│   ├── team_overview.py          # Team identity and roster analysis
-│   ├── matchup_explorer.py       # Pitcher vs batter matchup scoring
-│   ├── game_k_sim.py             # Interactive game prop simulator (K/BB/HR/H/Outs)
-│   ├── preseason_snapshot.py     # Preseason vs current comparison
-│   ├── prospects.py              # MiLB translated prospect stats
-│   ├── data_health.py            # Data freshness and manifest validation
-│   └── model_performance.py      # Model accuracy, backtest, hits/misses
-├── components/                   # Shared UI components
-│   ├── charts.py                 # Common chart utilities
-│   ├── tables.py                 # Data table components
-│   ├── metric_cards.py           # Stat card displays
-│   ├── scouting.py               # Scouting report visualizations
-│   └── backtest_charts.py        # Model performance charts
-├── services/                     # Data loading and validation
-│   ├── data_loader.py            # Cached parquet loaders
-│   └── manifest.py               # Artifact contract validation
-├── scripts/
-│   ├── update_in_season.py       # Daily update pipeline (CURRENTLY DOES PROJECTION WORK)
-│   └── sync_lib.py                # Scripted lib/ sync from player_profiles
-└── data/dashboard/               # Pre-computed data (~43 files)
-    ├── *_projections.parquet     # Rate projections (K%, BB%)
-    ├── *_counting.parquet        # Count projections (K, BB, HR)
-    ├── *_traditional*.parquet    # Observed stats (AVG, ERA, etc.)
-    ├── pitcher_k_samples.npz    # Posterior K% samples
-    ├── bf_priors.parquet         # BF distribution priors
-    ├── todays_*.parquet          # Daily schedule/sims/lineups
-    ├── update_metadata.json      # Last update timestamp
-    └── snapshots/                # Frozen preseason baselines
+app.py                  entry point: nav, routing, page registry (PAGES / PAGE_URL_MAP)
+config.py               seasons, colors, paths (values come from runtime.yaml)
+views/                  one module per page (19 pages)
+components/             shared renderers: projection_table, sim_chart, leaderboard,
+                        attribution, metric_cards, headshot, grades, team_logo
+services/               artifacts.py, data_loader.py, manifest.py
+lib/                    computation modules synced from player_profiles (see docs/SYNC_GUIDE.md)
+scripts/                daily_update.bat, update_in_season.py, publish_artifacts.py,
+                        setup_scheduled_tasks.ps1, validation scripts
+assets/styles.css       all CSS; app.py only injects :root color variables
+tests/                  91 tests
 ```
 
-## Dashboard Pages
-1. **Schedule** — Today's Games + historical Game Browser (unified)
-2. **Projections** — Hitter/pitcher rate + counting stat projections with search/filter (includes Stats)
-3. **Player Profile** — Full player page: projections, percentiles, scouting report, approach/efficiency, arsenal/vulnerability, zone charts, season trends
-4. **Team Overview** — Team identity, roster strengths, injury list
-5. **Matchup Explorer** — Pitcher vs batter matchup scoring with zone overlay
-6. **Game Simulator** — Interactive multi-stat prop simulator (K/BB/HR/H/Outs, lineup, umpire, weather controls)
-7. **Preseason Snapshot** — Compare current vs preseason projections
-8. **Prospects** — MiLB translated stats, MLB-equivalent projections by level
-9. **Data Health** — Data freshness, artifact inventory, manifest validation
-10. **Model Performance** — Predicted vs actual tracking, backtest results, biggest hits/misses, calibration curves
+## Pages
+Schedule, Game Analysis, Player Projections, Home, News, Player Profile, Player Rankings,
+Stats, The Diamond Daily, Projections, Breakout Candidates, Team Overview, Team Rankings,
+Division Standings, Compare Players, Lineup Creator, Model Performance, Data Health, Methodology.
 
-## Data Flow
+`PAGE_URL_MAP` keeps old slugs working (`?page=props_lab` resolves to Player Projections).
 
-**CURRENT IMPLEMENTATION (⚠️ ARCHITECTURE VIOLATION):**
-```
-tdd-dashboard/scripts/update_in_season.py
-  ├── Queries database directly for 2026 season totals
-  ├── Performs Beta-Binomial conjugate updating
-  ├── Updates projections and K% samples
-  ├── Fetches daily schedule/lineups from MLB API
-  ├── Runs game simulations
-  └── Writes all parquets + manifest
-         |
-         +---> data/dashboard/*.parquet
-                  |
-                  v
-              app.py (reads parquets, zero DB calls)
-```
+## Daily pipeline
+Two Windows scheduled tasks, both running `scripts/daily_update.bat`:
 
-**INTENDED ARCHITECTURE (see PLAN.md):**
-```
-player_profiles/                         tdd-dashboard/
-  precompute_dashboard_data.py             data/dashboard/*.parquet
-  update_in_season.py (model work)                  |
-         |                                          |
-         +---> writes parquets -------->            |
-                                              app.py (reads parquets, zero DB calls)
-                                              scripts/update_in_season.py (bookkeeping only)
-```
+| Task | When | Mode |
+|---|---|---|
+| TDD Full Daily Update | 6:00 AM | ETL, precompute, projections, team-run scoring, full sims, publish |
+| TDD Intraday Refresh | every 15 min, 9 AM to midnight | `--intraday`: re-sim changed games, live standouts, publish |
 
-### Three projection tiers:
-| Tier | Source | Frequency |
-|------|--------|-----------|
-| Preseason projections | `player_profiles` precompute | Once (frozen in snapshots/) |
-| Updated projections | `tdd-dashboard` conjugate updates (⚠️ should move to player_profiles) | Daily during season |
-| Daily game projections | Live simulator in app.py | On-demand per game |
-
-## lib/ — Synced Modules
-
-These files are copied from `player_profiles/src/` with `from src.` changed to `from lib.`. See `SYNC_GUIDE.md` for the full mapping.
-
-**When to sync:** Only when function signatures or behavior change in the projection engine. Model training changes (priors, covariates, MCMC structure) do NOT require syncing — they only affect the parquet outputs.
-
-**How to sync:**
-1. Copy the file from `player_profiles/src/...` to `tdd-dashboard/lib/`
-2. Replace `from src.` imports with `from lib.`
-3. Test: `python -c "from lib.<module> import <function>"`
-
-## Running the Dashboard
-
-```bash
-# First time: copy data from projection engine
-cp -r ../player_profiles/data/dashboard/* data/dashboard/
-
-# Run dashboard
-streamlit run app.py
-
-# Daily in-season update (currently does projection work + dashboard bookkeeping)
-python scripts/update_in_season.py
-python scripts/update_in_season.py --date 2026-04-15  # specific date
-python scripts/update_in_season.py --skip-schedule    # skip MLB API calls
-python scripts/update_in_season.py --snapshot          # force a weekly projection snapshot
-```
+- **Intraday is change-driven.** `confident_picks.run(incremental=True)` re-simulates only
+  pre-game games whose probable starters, HP umpire, or confirmed lineups changed.
+  Exit code 3 means nothing changed. Fingerprints live in `data/dashboard/history/sim_input_state.json`.
+- **Publishing goes to R2, never git.** `publish_artifacts.py` uploads only changed objects
+  and only the set the dashboard reads; it writes `index.json` so the app can enumerate.
+- **Step order matters.** Precompute must run BEFORE `update_in_season.py`: both write
+  `hitter_traditional.parquet` / `pitcher_traditional.parquet`, precompute with the last
+  completed season and the in-season step with the current one. The dashboard reads those
+  as current-season stats.
+- **The lock holds the owning PID.** A killed run is detected and cleared by the next run.
 
 ## Coding Standards
 - **Python 3.11+**, type hints on function signatures
-- **No database calls in app.py** — all data comes from pre-computed parquets
-- **Dark theme** — all matplotlib charts use `DARK` background, not the cream `apply_theme()`
-- **Standard chart size:** `figsize=(7, 3)` for dashboard matplotlib charts
-- **Colors from theme only** — import from `lib.theme`, never hardcode hex values
-- **Brand colors:** GOLD (#C8A96E), EMBER (#D4562A), SAGE (#6BA38E), SLATE (#7B8FA6), CREAM (#F5F2EE), DARK (#0F1117)
-
-## Database Context
-- **app.py has zero database calls** — purely reads parquets for instant load times
-- **update_in_season.py makes database calls** — queries 2026 season totals for projection updating (⚠️ should move to player_profiles)
-- **DB details:** See `player_profiles/CLAUDE.md` for `mlb_fantasy` on `localhost:5433`
+- **No database calls in app code** — pipeline scripts only
+- **No direct artifact paths in app code** — always `artifact_path()`
+- **Colors from CSS variables / `config`**, never hardcoded hex in views
+- **Brand colors:** GOLD `#C8A96E`, EMBER `#D4562A`, SAGE `#6BA38E`, SLATE `#7B8FA6`, CREAM `#F5F2EE`, DARK `#0F1117`
+- **No em dashes** anywhere in code, comments or UI text
+- **No betting language.** This site shows projections: expected values, ranges and
+  probabilities of outcomes. No lines, no over/under framing, no edges or picks.
+- Mobile matters: pages must not scroll horizontally at ~400px wide
 
 ## Key Design Decisions
-- **app.py has zero database calls** — purely reads parquets for instant load times
-- **Modular architecture** — app.py reduced to 383 lines, pages split into separate modules
-- **Conjugate updating** (Beta-Binomial) for in-season projection updates — instant vs re-running MCMC (currently in dashboard, should move to player_profiles)
-- **Preseason snapshots** frozen for honest before/after comparison as season progresses
-- **Season selector** on Player Profile, Projections, Stats pages — any season 2018-2025 + career + 2026 projection
-- **Pre-2022 batted ball warning** — Statcast coverage unreliable before 2022, affected stats are hidden
-- **Contract validation** — manifest.json validates artifact schemas and row counts on startup
-- **Automated testing** — 62 smoke tests ensure all pages render with fixture data
+- **Projections carry ranges.** Displayed ranges are the 10th-90th percentile of simulated
+  outcomes, taken from `p_over_{k}` columns in `game_props.parquet`, which is the single
+  source of truth for game-level distributions.
+- **Accuracy is reported honestly.** Because counting stats are integers, an inclusive
+  range holds more than 80% of the mass, so observed coverage is always shown next to the
+  model's own expected coverage.
+- **Preseason projections never see in-season data.** Full-season rate lines come from
+  `snapshots/*_counting_sim_{season}_preseason.parquet`, frozen before Opening Day.
+- **Conjugate updating** (Beta-Binomial) for in-season rate updates, instead of re-running MCMC.
+- **Contract validation** — `manifest.json` validates artifact schemas and row counts; the
+  pipeline fails manifest generation on an unreadable artifact.
+
+## Gotchas
+- `data/dashboard/` is gitignored. Do not commit artifacts.
+- Cumulative parquet files must be written atomically (temp file + `os.replace`); an
+  interrupted in-place write corrupts them and breaks manifest generation.
+- Pipeline metadata timestamps are UTC-aware; the deployed app runs in UTC.
+- `check_roster_moves` is a no-op (`fetch_recent_transactions` never existed).
+- Streamlit Cloud reruns the entry script on push but may keep already-imported modules
+  until the container restarts; module-level changes can take a few minutes to appear.
+
+## Running
+```bash
+streamlit run app.py                      # local, reads data/dashboard
+TDD_ARTIFACT_BASE_URL=https://pub-507219cfdcb94d45b71784dbf880db4e.r2.dev streamlit run app.py
+pytest -q                                 # 91 tests
+python scripts/publish_artifacts.py --dry-run
+```

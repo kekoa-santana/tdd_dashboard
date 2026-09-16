@@ -5071,7 +5071,7 @@ hr {
   font-family: var(--tdd-font-heading); font-weight: 700;
   color: var(--tdd-cream); font-variant-numeric: tabular-nums; line-height: 1.15;
 }
-.pp-sub, .pp-cell .pp-sub {
+.pp-cell .pp-sub {
   font-size: 0.66rem; color: var(--tdd-slate); font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }

@@ -23,7 +23,7 @@ trained on {TRAINING_RANGE} MLB data.
   age curves, park factors, and batted ball profiles
 - **Conjugate updating** — Beta-Binomial in-season updates for rate stats
   (K%, BB%, HR/BF) as new data arrives daily
-- **Posterior samples** — 4,000 Monte Carlo draws per player per stat,
+- **Posterior samples** — 1,000 posterior draws per player per stat,
   giving full uncertainty ranges (not just point estimates)
 
 ### Game Simulator
