@@ -6,7 +6,7 @@ Redesigned to match the ScrollVariant from the design handoff:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from textwrap import dedent
 
 import pandas as pd
@@ -123,9 +123,19 @@ def _render_masthead(
     weekly_h: pd.DataFrame,
     weekly_p: pd.DataFrame,
 ) -> str:
-    now = datetime.now(timezone.utc)
-    date_str = now.strftime("%A, %B %d, %Y").replace(" 0", " ")
-    edition = f"Vol. IV  No. {now.timetuple().tm_yday}"
+    # Date the edition by the games it summarizes, not by the server clock:
+    # a UTC clock rolls over mid-evening in the US and would print tomorrow.
+    edition_day = None
+    for frame in (hitters, pitchers):
+        if not frame.empty and "game_date" in frame.columns:
+            days = pd.to_datetime(frame["game_date"], errors="coerce").dropna()
+            if not days.empty:
+                edition_day = days.max().date()
+                break
+    if edition_day is None:
+        edition_day = (datetime.now(timezone.utc) - timedelta(hours=4)).date()
+    date_str = edition_day.strftime("%A, %B %d, %Y").replace(" 0", " ")
+    edition = f"Vol. IV  No. {edition_day.timetuple().tm_yday}"
 
     top_name, _ = _top_player(hitters, "daily_standout_score", "batter_name")
     top_hits = ""

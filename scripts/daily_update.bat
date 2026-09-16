@@ -114,6 +114,10 @@ if !ERRORLEVEL! NEQ 0 (
 )
 
 REM -- Step 2: Projections + bookkeeping --
+REM   Must follow the precompute: both steps write hitter_traditional.parquet
+REM   and pitcher_traditional.parquet, the precompute with the last completed
+REM   season and this step with the current one. The dashboard reads those as
+REM   current-season stats, so the in-season write has to land last.
 set DASH_ARGS=%*
 if defined DASH_ARGS set DASH_ARGS=!DASH_ARGS:--skip-etl=!
 echo [%date% %time%] Running dashboard update ^(projections + bookkeeping^)... >> "%LOG_FILE%" 2>&1
