@@ -28,7 +28,7 @@ import logging
 import shutil
 import subprocess
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -213,7 +213,7 @@ def _save_roster_state(
         json.dump(
             {
                 "game_date": game_date,
-                "last_check": datetime.now().isoformat(),
+                "last_check": datetime.now(timezone.utc).isoformat(),
                 "known_transaction_ids": sorted(known_ids),
             },
             f,
@@ -688,7 +688,7 @@ def _save_metadata(game_date: str, extra: dict | None = None) -> None:
     k_path = DASHBOARD_DIR / "pitcher_k_samples.npz"
 
     metadata = {
-        "last_updated": datetime.now().isoformat(),
+        "last_updated": datetime.now(timezone.utc).isoformat(),
         "game_date": game_date,
         "season": SEASON,
         "hitters_updated": len(pd.read_parquet(h_path)) if h_path.exists() else 0,
@@ -743,7 +743,7 @@ def main() -> None:
                 metadata = json.load(f)
         else:
             metadata = {}
-        metadata["last_schedule_refresh"] = datetime.now().isoformat()
+        metadata["last_schedule_refresh"] = datetime.now(timezone.utc).isoformat()
         metadata["game_date"] = game_date
         with open(meta_path, "w") as f:
             json.dump(metadata, f, indent=2)
@@ -756,7 +756,7 @@ def main() -> None:
     if args.post_sims:
         logger.info("Mode: post-sims (game predictions + metadata)")
         _build_game_predictions(game_date)
-        _save_metadata(game_date, {"last_sims_refresh": datetime.now().isoformat()})
+        _save_metadata(game_date, {"last_sims_refresh": datetime.now(timezone.utc).isoformat()})
 
         # Generate artifact manifest
         from services.manifest import generate_manifest, write_manifest

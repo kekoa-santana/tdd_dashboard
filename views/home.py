@@ -1,7 +1,7 @@
 """Home page -- daily dashboard overview with click-through sections."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from html import escape
 
 import pandas as pd
@@ -31,6 +31,22 @@ def _nav_link(page_name: str, text: str) -> str:
 def _nav_url(page_name: str) -> str:
     slug = page_name.lower().replace(" ", "_")
     return f"?page={slug}"
+
+
+def _age_since(stamp: str) -> timedelta | None:
+    """Age of an ISO timestamp, comparing in UTC.
+
+    The pipeline writes UTC, but older metadata files carry naive local
+    stamps; treating those as UTC keeps the badge from swinging by the
+    machine's offset when the app runs in a different timezone.
+    """
+    try:
+        parsed = datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - parsed
 
 
 # ---------------------------------------------------------------------------
@@ -168,22 +184,25 @@ def _assemble_home_data() -> dict:
     last_schedule = meta.get("last_schedule_refresh", "")
 
     data_feeds = []
-    if last_schedule:
-        try:
-            sched_dt = datetime.fromisoformat(last_schedule)
-            age = datetime.now() - sched_dt
-            age_str = f"{int(age.total_seconds() // 60)} min" if age < timedelta(hours=1) else f"{int(age.total_seconds() // 3600)} hr"
-            data_feeds.append({"name": "Lineups", "age": age_str, "status": "ok" if age < timedelta(hours=1) else "warn"})
-        except Exception:
-            data_feeds.append({"name": "Lineups", "age": "-", "status": "warn"})
-    if last_updated:
-        try:
-            upd_dt = datetime.fromisoformat(last_updated)
-            age = datetime.now() - upd_dt
-            age_str = f"{int(age.total_seconds() // 60)} min" if age < timedelta(hours=1) else f"{int(age.total_seconds() // 3600)} hr"
-            data_feeds.append({"name": "Projections", "age": age_str, "status": "ok" if age < timedelta(hours=24) else "warn"})
-        except Exception:
-            data_feeds.append({"name": "Projections", "age": "-", "status": "warn"})
+    for label, stamp, warn_after in (
+        ("Lineups", last_schedule, timedelta(hours=1)),
+        ("Projections", last_updated, timedelta(hours=24)),
+    ):
+        if not stamp:
+            continue
+        age = _age_since(stamp)
+        if age is None:
+            data_feeds.append({"name": label, "age": "-", "status": "warn"})
+            continue
+        age_str = (
+            f"{int(age.total_seconds() // 60)} min"
+            if age < timedelta(hours=1)
+            else f"{int(age.total_seconds() // 3600)} hr"
+        )
+        data_feeds.append({
+            "name": label, "age": age_str,
+            "status": "ok" if age < warn_after else "warn",
+        })
 
     return {
         "game_date": game_date,
