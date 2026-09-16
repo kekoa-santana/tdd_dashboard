@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from config import DASHBOARD_DIR, AVAILABLE_SEASONS, PROJECTION_LABEL
+from config import DASHBOARD_DIR, AVAILABLE_SEASONS, PROJECTION_LABEL, CURRENT_SEASON
 from services.artifacts import artifact_path, list_artifacts
 from utils.archetype_names import get_pitch_archetype_name
 
@@ -227,24 +227,19 @@ def load_counting(player_type: str) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_DATA_TTL)
-def load_counting_sim(player_type: str) -> pd.DataFrame:
-    """Load sim-based counting stat projections with confidence tiers.
+def load_preseason_counting_sim(player_type: str) -> pd.DataFrame:
+    """Load the frozen preseason season-long sim projections.
 
-    Parameters
-    ----------
-    player_type : str
-        ``"pitcher"`` or ``"hitter"``.
-
-    Returns
-    -------
-    pd.DataFrame
-        Sim projections including ``confidence_tier`` and
-        ``confidence_score`` columns (if available).
+    These were generated before Opening Day from 2018-2025 data only, so
+    they never see how a player is performing in the current season. The
+    live ``*_counting_sim.parquet`` files are conjugate-updated with
+    in-season results and are not interchangeable with these.
     """
-    path = artifact_path(f"{player_type}_counting_sim.parquet")
+    path = artifact_path(f"snapshots/{player_type}_counting_sim_{CURRENT_SEASON}_preseason.parquet")
     if not path.exists():
         return pd.DataFrame()
     return pd.read_parquet(path)
+
 
 def load_player_teams() -> pd.DataFrame:
     """Load player-to-team mapping.

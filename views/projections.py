@@ -4,12 +4,45 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from services.data_loader import load_counting_sim, load_roster
+from config import CURRENT_SEASON
+from services.data_loader import load_preseason_counting_sim, load_roster
 from components.leaderboard import render_card
 from utils.alerts import tdd_warn
 
 
 # ── Leaderboard definitions ───────────────────────────────────────────
+
+# Rate leaderboards need a full-season workload to be meaningful: a part
+# time bat can top a slash line on 150 projected plate appearances.
+_MIN_PROJECTED_PA = 400
+_MIN_PROJECTED_IP = 100
+
+
+def _qualified_batters(df: pd.DataFrame) -> pd.DataFrame:
+    if "total_pa_mean" not in df.columns:
+        return df
+    return df[df["total_pa_mean"] >= _MIN_PROJECTED_PA]
+
+
+def _qualified_starters(df: pd.DataFrame) -> pd.DataFrame:
+    work = df[df["role"] == "SP"] if "role" in df.columns else df
+    if "projected_ip_mean" not in work.columns:
+        return work
+    return work[work["projected_ip_mean"] >= _MIN_PROJECTED_IP]
+
+
+BATTER_RATE_LEADERBOARDS = [
+    ("Batting Average", "projected_avg", "rate3", True, _qualified_batters),
+    ("On-Base Percentage", "projected_obp", "rate3", True, _qualified_batters),
+    ("Slugging", "projected_slg", "rate3", True, _qualified_batters),
+    ("OPS", "projected_ops", "rate3", True, _qualified_batters),
+]
+
+PITCHER_RATE_LEADERBOARDS = [
+    ("ERA (lowest)", "projected_era", "dec2", False, _qualified_starters),
+    ("WHIP (lowest)", "projected_whip", "dec2", False, _qualified_starters),
+    ("FIP-ERA (lowest)", "projected_fip_era", "dec2", False, _qualified_starters),
+]
 
 BATTER_LEADERBOARDS = [
     ("wRC+", "projected_wrc_plus", "int", True, None),
@@ -22,7 +55,6 @@ BATTER_LEADERBOARDS = [
 ]
 
 PITCHER_LEADERBOARDS = [
-    ("FIP-ERA", "projected_fip_era", "dec2", False, lambda df: df[df["role"] == "SP"]),
     ("Strikeouts", "total_k", "int", True, lambda df: df[df["role"] == "SP"]),
     ("Innings Pitched", "projected_ip", "dec0", True, lambda df: df[df["role"] == "SP"]),
     ("Walks (fewest)", "total_bb", "int", False, lambda df: df[df["role"] == "SP"]),
@@ -58,6 +90,10 @@ def _fmt(val: float, fmt: str) -> str:
         return f"{val:.0f}"
     if fmt == "dec2":
         return f"{val:.2f}"
+    if fmt == "rate3":
+        # Baseball style: .315, but 1.063 keeps its leading digit.
+        text = f"{val:.3f}"
+        return text[1:] if text.startswith("0.") else text
     return str(val)
 
 
@@ -158,9 +194,11 @@ def page_projections() -> None:
     # ── Title ─────────────────────────────────────────────────────
     st.markdown(
         '<div class="tdd-page-header">'
-        '<div class="tdd-page-title">2026 PROJECTIONS</div>'
+        '<div class="tdd-page-title">{CURRENT_SEASON} SEASON PROJECTIONS</div>'
         '<div class="tdd-page-subtitle">'
-        'PA-by-PA game simulator with Bayesian hierarchical rate models'
+        'Full-season forecasts made before Opening Day, from a PA-by-PA game '
+        'simulator with Bayesian hierarchical rate models. No in-season results '
+        'are used, so these never know how a player is currently performing.'
         '</div>'
         '</div>',
         unsafe_allow_html=True,
@@ -201,9 +239,12 @@ def page_projections() -> None:
     pt_key = "hitter" if player_type == "Batter" else "pitcher"
 
     # ── Load data ─────────────────────────────────────────────────
-    df = load_counting_sim(pt_key)
+    df = load_preseason_counting_sim(pt_key)
     if df.empty:
-        tdd_warn("No sim projection data found. Run precompute first.")
+        tdd_warn(
+            f"No {CURRENT_SEASON} preseason projections found. "
+            "Run the preseason snapshot step in precompute."
+        )
         return
 
     id_col = "batter_id" if player_type == "Batter" else "pitcher_id"
@@ -229,25 +270,45 @@ def page_projections() -> None:
         df = df[df[id_col].isin(league_ids)]
 
     # ── Leaderboard cards ─────────────────────────────────────────
-    leaderboards = BATTER_LEADERBOARDS if player_type == "Batter" else PITCHER_LEADERBOARDS
     lt = "hitter" if player_type == "Batter" else "pitcher"
+    is_batter = player_type == "Batter"
 
-    for i in range(0, len(leaderboards), 3):
-        batch = leaderboards[i:i+3]
-        cols = st.columns(len(batch))
-        for col, (title, prefix, fmt, hib, role_fn) in zip(cols, batch):
-            with col:
-                _render_leaderboard(
-                    df, title, prefix, fmt, hib,
-                    teams_lookup, id_col, name_col,
-                    show_watch=show_watch, n_show=n_show,
-                    role_filter=role_fn, link_type=lt,
-                )
+    def _render_group(leaderboards: list, heading: str, note: str) -> None:
+        st.markdown(
+            f'<div class="tdd-section-hdr">{heading}</div>'
+            f'<div class="tdd-meta" style="margin-bottom:0.5rem;">{note}</div>',
+            unsafe_allow_html=True,
+        )
+        for i in range(0, len(leaderboards), 3):
+            batch = leaderboards[i:i + 3]
+            cols = st.columns(len(batch))
+            for col, (title, prefix, fmt, hib, role_fn) in zip(cols, batch):
+                with col:
+                    _render_leaderboard(
+                        df, title, prefix, fmt, hib,
+                        teams_lookup, id_col, name_col,
+                        show_watch=show_watch, n_show=n_show,
+                        role_filter=role_fn, link_type=lt,
+                    )
+
+    _render_group(
+        BATTER_RATE_LEADERBOARDS if is_batter else PITCHER_RATE_LEADERBOARDS,
+        "Rate Projections",
+        f"Qualified players only: {_MIN_PROJECTED_PA}+ projected plate appearances."
+        if is_batter
+        else f"Starters with {_MIN_PROJECTED_IP}+ projected innings.",
+    )
+    _render_group(
+        BATTER_LEADERBOARDS if is_batter else PITCHER_LEADERBOARDS,
+        "Counting Projections",
+        "Full-season totals across the simulated schedule.",
+    )
 
     # ── Footer ────────────────────────────────────────────────────
     st.markdown("---")
     st.caption(
-        "Projections from PA-by-PA game simulator with Bayesian hierarchical rate models. "
+        f"Frozen {CURRENT_SEASON} preseason projections from a PA-by-PA game simulator "
+        "with Bayesian hierarchical rate models, trained on 2018-2025 data. "
         "Ranges show 80% credible interval (p10-p90). "
         "Players to Watch have limited MLB track record — projections carry higher uncertainty. "
         f"{'wRC+ uses FanGraphs linear weights (100 = league average).' if player_type == 'Batter' else 'FIP-ERA strips out BABIP/sequencing noise — more predictive than traditional ERA.'}"
