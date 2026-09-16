@@ -22,8 +22,15 @@ from services.data_loader import (
 from utils.helpers import format_game_time
 from utils.html import esc, esc_attr
 from components.attribution import build_attribution_panel
+from components.projection_table import (
+    MODE_FINAL,
+    MODE_LIVE,
+    MODE_PROJECTION,
+    game_block,
+    lineup_tag,
+    with_outcome_ranges,
+)
 from components.diamond_rating import diamond_rating_html
-from components.expandable_card import EXPANDABLE_CARD_CSS, expandable_card_html
 from components.headshot import headshot_html
 
 
@@ -305,22 +312,36 @@ def _build_schedule_lookups() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Props Lab
+# Projected stat lines
 # ---------------------------------------------------------------------------
 
-_STAT_LABELS = {"TB": "Total Bases", "K": "Strikeouts", "H": "Hits", "HRR": "H+R+RBI", "Outs": "Outs Recorded"}
-_PITCHER_LABELS = {"K": "Pitcher Strikeouts", "H": "Hits Allowed", "HR": "HR Allowed", "BB": "Walks Issued", "Outs": "Outs Recorded"}
-_HITTER_LABELS = {"K": "Batter Strikeouts", "H": "Batter Hits", "HR": "Batter Home Runs", "BB": "Batter Walks", "TB": "Total Bases", "HRR": "H+R+RBI"}
-_LINE_LABELS = {"low": "Low", "mid": "Mid", "high": "High"}
+_STAT_TO_ACTUAL = {
+    "K": "actual_K", "H": "actual_H", "HR": "actual_HR",
+    "BB": "actual_BB", "TB": "actual_TB", "Outs": "actual_Outs",
+    "R": "actual_R", "RBI": "actual_RBI",
+}
 
 
-def _edge_color(p_over: float) -> str:
-    """Return CSS color based on how far P(over) is from 0.5."""
-    if p_over >= 0.60:
-        return "var(--tdd-sage)"
-    if p_over <= 0.40:
-        return "var(--tdd-ember)"
-    return "var(--tdd-slate)"
+def _overlay_live_actuals(game_df: pd.DataFrame, game_live: pd.DataFrame) -> pd.DataFrame:
+    """Fill in results from the live boxscore for a game in progress."""
+    if game_live.empty:
+        return game_df
+    live_lookup = {int(row["player_id"]): row for _, row in game_live.iterrows()}
+    for idx, row in game_df.iterrows():
+        live = live_lookup.get(int(row["player_id"]))
+        if live is None:
+            continue
+        stat = row["stat"]
+        if stat == "HRR":
+            parts = [live.get(c) for c in ("actual_H", "actual_R", "actual_RBI")]
+            if any(pd.notna(p) for p in parts):
+                game_df.at[idx, "actual"] = sum(float(p) for p in parts if pd.notna(p))
+        else:
+            column = _STAT_TO_ACTUAL.get(stat)
+            if column and column in live.index and pd.notna(live[column]):
+                game_df.at[idx, "actual"] = float(live[column])
+        game_df.at[idx, "game_status"] = live.get("game_status", row.get("game_status"))
+    return game_df
 
 
 def _render_props_section(
@@ -329,21 +350,18 @@ def _render_props_section(
     lineups_df: pd.DataFrame | None = None,
     live_stats_df: pd.DataFrame | None = None,
 ) -> None:
-    """Render projected performer edges for a single game.
+    """Render projected stat lines for a single game.
 
     When confirmed lineups are available, only shows players who are in
     the starting lineup (pitchers always included).  When lineups have
     not been released yet, shows all projected players with a warning
     banner.
     """
-    if props_df.empty:
-        st.markdown(
-            '<div class="tdd-meta">No projection data available for this game.</div>',
-            unsafe_allow_html=True,
-        )
-        return
-
-    game_df = props_df[props_df["game_pk"] == gpk].copy()
+    game_df = (
+        props_df[props_df["game_pk"] == gpk].copy()
+        if not props_df.empty
+        else pd.DataFrame()
+    )
     if game_df.empty:
         st.markdown(
             '<div class="tdd-meta">No projection data available for this game.</div>',
@@ -351,7 +369,6 @@ def _render_props_section(
         )
         return
 
-    # Check if confirmed lineups exist for this game
     game_lu = (
         lineups_df[lineups_df["game_pk"] == gpk]
         if lineups_df is not None and not lineups_df.empty
@@ -360,7 +377,6 @@ def _render_props_section(
     lineup_confirmed = not game_lu.empty
 
     if lineup_confirmed:
-        # Filter batters to only confirmed starters; keep all pitchers
         confirmed_pids = set(game_lu["batter_id"].astype(int))
         is_pitcher = game_df["player_type"] == "pitcher"
         is_in_lineup = game_df["player_id"].astype(int).isin(confirmed_pids)
@@ -380,9 +396,7 @@ def _render_props_section(
         )
         return
 
-    # Results: prefer backfilled actuals already in game_props,
-    # then overlay with live boxscore data for in-progress games.
-    for col in ("actual", "over_hit", "game_status"):
+    for col in ("actual", "game_status"):
         if col not in game_df.columns:
             game_df[col] = None
 
@@ -391,63 +405,31 @@ def _render_props_section(
         if live_stats_df is not None and not live_stats_df.empty
         else pd.DataFrame()
     )
-    if not game_live.empty:
-        _STAT_TO_ACTUAL = {
-            "K": "actual_K", "H": "actual_H", "HR": "actual_HR",
-            "BB": "actual_BB", "TB": "actual_TB", "Outs": "actual_Outs",
-        }
-        live_lookup: dict[int, pd.Series] = {}
-        for _, lr in game_live.iterrows():
-            live_lookup[int(lr["player_id"])] = lr
-        for idx, row in game_df.iterrows():
-            pid = int(row["player_id"])
-            if pid in live_lookup:
-                lr = live_lookup[pid]
-                stat = row["stat"]
-                if stat == "HRR":
-                    # Combined: Hits + Runs + RBIs
-                    h = float(lr.get("actual_H", 0)) if pd.notna(lr.get("actual_H")) else 0
-                    r = float(lr.get("actual_R", 0)) if pd.notna(lr.get("actual_R")) else 0
-                    rbi = float(lr.get("actual_RBI", 0)) if pd.notna(lr.get("actual_RBI")) else 0
-                    if any(c in lr.index for c in ("actual_H", "actual_R", "actual_RBI")):
-                        actual = h + r + rbi
-                        game_df.at[idx, "actual"] = actual
-                        game_df.at[idx, "over_hit"] = actual > row["line"]
-                else:
-                    actual_col = _STAT_TO_ACTUAL.get(stat)
-                    if actual_col and actual_col in lr.index and pd.notna(lr[actual_col]):
-                        game_df.at[idx, "actual"] = float(lr[actual_col])
-                        game_df.at[idx, "over_hit"] = float(lr[actual_col]) > row["line"]
-                game_df.at[idx, "game_status"] = lr.get("game_status", "")
+    game_df = _overlay_live_actuals(game_df, game_live)
 
-    # Compat: coalesce old (line_mid/p_over_mid) and new (line/p_over) columns
-    if "line_mid" in game_df.columns:
-        if "line" not in game_df.columns:
-            game_df.rename(columns={"line_mid": "line", "p_over_mid": "p_over"},
-                           inplace=True)
-        else:
-            game_df["line"] = game_df["line"].fillna(game_df["line_mid"])
-            game_df["p_over"] = game_df["p_over"].fillna(game_df["p_over_mid"])
-
-    # Over projections only -- P(over) >= 63%
-    pop_df = game_df[game_df["p_over"] >= 0.63].sort_values("p_over", ascending=False)
-
-    st.markdown(EXPANDABLE_CARD_CSS, unsafe_allow_html=True)
+    statuses = {str(s).lower() for s in game_df["game_status"].dropna()}
+    if any("final" in s or "game over" in s for s in statuses):
+        mode = MODE_FINAL
+    elif game_df["actual"].notna().any():
+        mode = MODE_LIVE
+    else:
+        mode = MODE_PROJECTION
 
     st.markdown(
-        '<div class="tdd-props-header">Over Projections</div>',
+        '<div class="tdd-props-header">Projected Stat Lines</div>',
         unsafe_allow_html=True,
     )
-    if pop_df.empty:
-        st.markdown(
-            '<div class="tdd-meta" style="margin-bottom:0.5rem;">No strong over projections for this game.</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        cards_html = ""
-        for _, row in pop_df.head(5).iterrows():
-            cards_html += _prop_card_html(row)
-        st.markdown(cards_html, unsafe_allow_html=True)
+    teams = [t for t in game_df["team"].dropna().unique()]
+    tag = lineup_tag(lineup_confirmed) if mode == MODE_PROJECTION else ""
+    st.markdown(
+        game_block(with_outcome_ranges(game_df), [(t, tag) for t in teams], mode),
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="tdd-meta">Each cell shows the projected average with the range '
+        'covering the middle 80% of simulated outcomes.</div>',
+        unsafe_allow_html=True,
+    )
 
     # "Why this number" -- K projection attribution for the game's starters
     _attr = load_prop_attribution()
@@ -473,86 +455,6 @@ def _render_props_section(
                 unsafe_allow_html=True,
             )
             st.markdown("".join(_panels), unsafe_allow_html=True)
-
-
-def _prop_card_html(row: pd.Series) -> str:
-    """Build an expandable card for a single prop edge."""
-    name = row["player_name"]
-    stat = row["stat"]
-    ptype = row.get("player_type", "")
-    if ptype == "pitcher":
-        stat_label = _PITCHER_LABELS.get(stat, _STAT_LABELS.get(stat, stat))
-    else:
-        stat_label = _HITTER_LABELS.get(stat, _STAT_LABELS.get(stat, stat))
-    stat_short = stat  # K, H, HR, TB, BB
-    team = row["team"]
-    opp = row["opponent"]
-    expected = row["expected"]
-    p_over = row["p_over"]
-    line = row["line"]
-    type_badge = "P" if ptype == "pitcher" else "H"
-
-    color = _edge_color(p_over)
-    pct = p_over * 100
-
-    # Format line as integer if whole number, else 1 decimal
-    line_str = f"{line:.0f}" if line == int(line) else f"{line:.1f}"
-
-    # Live result
-    actual = row.get("actual")
-    game_status = str(row.get("game_status", ""))
-    is_final = "final" in game_status.lower() or "game over" in game_status.lower()
-    result_html = ""
-    if pd.notna(actual) and actual is not None:
-        actual_val = float(actual)
-        over_hit = actual_val > line
-        if over_hit:
-            result_html = (
-                f'<span style="color:var(--tdd-sage); font-size:0.8rem; '
-                f'font-weight:700; flex-shrink:0;">'
-                f'\u2705 {actual_val:.0f} {stat_short}</span>'
-            )
-        elif is_final:
-            result_html = (
-                f'<span style="color:var(--tdd-ember); font-size:0.8rem; '
-                f'flex-shrink:0; opacity:0.7;">'
-                f'\u274c {actual_val:.0f} {stat_short}</span>'
-            )
-        else:
-            result_html = (
-                f'<span style="color:var(--tdd-slate); font-size:0.75rem; '
-                f'flex-shrink:0;">'
-                f'{actual_val:.0f} {stat_short}</span>'
-            )
-
-    # Summary: Name | Stat Expected | P(Over > line) = X% | result
-    summary = (
-        f'<span style="display:flex; align-items:center; gap:0.5rem; width:100%;">'
-        # Type badge
-        f'<span style="font-size:0.65rem; color:var(--tdd-slate); '
-        f'border:1px solid var(--tdd-dark-border); border-radius:3px; '
-        f'padding:0 0.25rem; flex-shrink:0;">{type_badge}</span>'
-        # Name + team
-        f'<span class="tdd-player-name" style="min-width:0; flex:1;">{esc(name)}'
-        f'<span class="tdd-stat-label" style="margin-left:0.3rem;">{esc(team)} vs {esc(opp)}</span></span>'
-        # Stat + expected
-        f'<span style="color:var(--tdd-cream); font-size:0.8rem; flex-shrink:0;">'
-        f'{stat_label} {expected:.2f}</span>'
-        # P(Over > line) = X%
-        f'<span style="color:{color}; font-size:0.75rem; font-weight:600; '
-        f'flex-shrink:0; white-space:nowrap;">'
-        f'P(Over &gt; {line_str}) = {pct:.0f}%</span>'
-        # Live result
-        f'{result_html}'
-        f'</span>'
-    )
-
-    detail = (
-        f'<div class="tdd-meta" style="margin-top:0.3rem;">'
-        f'Expected: {expected:.2f} | Std Dev: {row["std"]:.2f}</div>'
-    )
-
-    return expandable_card_html(summary, detail)
 
 
 # ---------------------------------------------------------------------------
@@ -627,7 +529,7 @@ def _parse_wind_category(wind_str: object) -> str:
 
 
 def _schedule_masthead_html(
-    selected_date, n_games: int, n_hitters: int, n_edges: int = 0,
+    selected_date, n_games: int, n_hitters: int, n_starters: int = 0,
 ) -> str:
     """Redesigned masthead using .tdd-sched-masthead classes."""
     d = selected_date
@@ -637,7 +539,7 @@ def _schedule_masthead_html(
     stats = [
         (str(n_games), "Games"),
         (str(n_hitters), "Hitters"),
-        (str(n_edges), "Edges"),
+        (str(n_starters), "Starters"),
     ]
     stats_html = "".join(
         f'<div class="stat"><div class="v">{esc(v)}</div>'
@@ -716,11 +618,11 @@ def _yesterday_performers_html(hitters: pd.DataFrame, pitchers: pd.DataFrame) ->
             f'<div class="tier">{esc(item["badge"])}</div>'
             f'<div class="nm">{esc(item["name"])}</div>'
             f'<div class="line">{esc(item["team"])}</div>'
-            f'<div class="edge-v over">{esc(item["stat"])}</div>'
+            f'<div class="stat-v">{esc(item["stat"])}</div>'
             '</div>'
         )
 
-    return f'{header}<div class="tdd-top-edges" style="border-top:none;">{tiles}</div>'
+    return f'{header}<div class="tdd-top-performers" style="border-top:none;">{tiles}</div>'
 
 
 def _game_row_html(
@@ -728,7 +630,7 @@ def _game_row_html(
     gpk: int,
     pitcher_line_lookup: dict[tuple[int, int], str],
     game_proj: dict[int, dict],
-    game_edges: dict[int, dict],
+    game_highlights: dict[int, dict],
     is_open: bool,
 ) -> str:
     """Render a single game as a .tdd-sg 5-column grid row."""
@@ -798,21 +700,19 @@ def _game_row_html(
         '</div>'
     )
 
-    # Col 4: Edges
-    edges = game_edges.get(gpk, {})
-    edge_count = edges.get("count", 0)
-    best_tier = edges.get("tier", "")
-    if edge_count > 0:
-        tier_html = f'<div class="tier-pill {esc(best_tier)}">{esc(best_tier)}</div>' if best_tier else ""
-        count_html = f'<div class="count"><b>{edge_count}</b> edges</div>'
+    # Col 4: top projected batter
+    highlight = game_highlights.get(gpk, {})
+    if highlight:
+        top_html = (
+            f'<div class="nm">{esc(highlight["name"])}</div>'
+            f'<div class="count"><b>{highlight["value"]:.1f}</b> {esc(highlight["stat"])} projected</div>'
+        )
     else:
-        tier_html = ""
-        count_html = '<div class="count zero">0 edges</div>'
+        top_html = '<div class="count zero">No projections</div>'
 
-    col_edges = (
-        '<div class="col-edges">'
-        f'{tier_html}'
-        f'{count_html}'
+    col_top = (
+        '<div class="col-top">'
+        f'{top_html}'
         '</div>'
     )
 
@@ -826,7 +726,7 @@ def _game_row_html(
 
     return (
         f'<div class="tdd-sg{expanded_cls}">'
-        f'{col_time}{col_teams}{col_proj}{col_edges}{col_cta}'
+        f'{col_time}{col_teams}{col_proj}{col_top}{col_cta}'
         '</div>'
     )
 
@@ -874,25 +774,25 @@ def _build_game_projections(sims: pd.DataFrame) -> dict[int, dict]:
 
 
 @st.cache_data(ttl=300)
-def _build_game_edges(sims: pd.DataFrame) -> dict[int, dict]:
-    """Compute per-game edge summary from game_props."""
+def _build_game_highlights(sims: pd.DataFrame) -> dict[int, dict]:
+    """The highest projected batter in each game, by total bases."""
     result: dict[int, dict] = {}
     if sims.empty or "game_pk" not in sims.columns:
         return result
 
-    for gpk, grp in sims.groupby("game_pk"):
+    batters = sims[(sims.get("player_type") == "batter") & (sims.get("stat") == "TB")]
+    for gpk, grp in batters.groupby("game_pk"):
         gpk = int(gpk)
-        if "p_over" not in grp.columns or "expected" not in grp.columns or "line" not in grp.columns:
-            result[gpk] = {"count": 0, "tier": ""}
+        grp = grp[grp["expected"].notna()]
+        if grp.empty:
+            result[gpk] = {}
             continue
-        edges = grp[(grp["p_over"] >= 0.63) | (grp["p_over"] <= 0.37)]
-        count = len(edges)
-        if count == 0:
-            result[gpk] = {"count": 0, "tier": ""}
-        else:
-            max_edge = (edges["expected"] - edges["line"]).abs().max()
-            tier = "Lock" if max_edge > 1.5 else "Strong" if max_edge > 0.8 else "Lean"
-            result[gpk] = {"count": count, "tier": tier}
+        best = grp.loc[grp["expected"].idxmax()]
+        result[gpk] = {
+            "name": str(best.get("player_name", "")),
+            "value": float(best["expected"]),
+            "stat": "TB",
+        }
     return result
 
 
@@ -921,21 +821,32 @@ def _render_layout_a(
     selected_date,
     batter_sims: pd.DataFrame,
 ) -> None:
-    """List-view layout with 5-column game rows, top edges rail, and drilldown."""
+    """List-view layout with 5-column game rows, top performers rail, and drilldown."""
     n_games = len(schedule)
-    n_hitters = len(batter_sims) if not batter_sims.empty else 0
+    # game_props and the batter sims both cover today and tomorrow, so the
+    # slate counts have to be scoped to the games actually on screen.
+    slate_pks = set(schedule["game_pk"]) if "game_pk" in schedule.columns else set()
+    n_hitters = (
+        batter_sims[batter_sims["game_pk"].isin(slate_pks)]["batter_id"].nunique()
+        if not batter_sims.empty and slate_pks
+        else 0
+    )
 
-    # Pre-compute game projections and edges from sims
+    # Pre-compute game projections and per-game highlights from sims
     game_proj = _build_game_projections(sims)
-    game_edges = _build_game_edges(sims)
-    n_edges = sum(e.get("count", 0) for e in game_edges.values())
+    game_highlights = _build_game_highlights(sims)
+    n_starters = (
+        sims[(sims["player_type"] == "pitcher") & sims["game_pk"].isin(slate_pks)]["player_id"].nunique()
+        if not sims.empty and "player_type" in sims.columns and slate_pks
+        else 0
+    )
 
     # Lookups
     _lookups = _build_schedule_lookups()
 
     # Masthead
     st.markdown(
-        _schedule_masthead_html(selected_date, n_games, n_hitters, n_edges),
+        _schedule_masthead_html(selected_date, n_games, n_hitters, n_starters),
         unsafe_allow_html=True,
     )
 
@@ -1038,7 +949,7 @@ def _render_layout_a(
 
         # Game row
         st.markdown(
-            _game_row_html(game, gpk, _pitcher_line_lookup, game_proj, game_edges, is_open),
+            _game_row_html(game, gpk, _pitcher_line_lookup, game_proj, game_highlights, is_open),
             unsafe_allow_html=True,
         )
 

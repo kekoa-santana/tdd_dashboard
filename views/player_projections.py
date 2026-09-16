@@ -3,11 +3,18 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 
 from components.attribution import build_attribution_panel
+from components.projection_table import (
+    MODE_FINAL,
+    MODE_LIVE,
+    MODE_PROJECTION,
+    game_block,
+    lineup_tag,
+    with_outcome_ranges,
+)
 from services.data_loader import (
     load_game_props,
     load_prop_attribution,
@@ -20,9 +27,6 @@ from utils.html import esc
 # Constants
 # ---------------------------------------------------------------------------
 
-_PITCHER_STATS = ["K", "Outs", "H", "BB", "HR"]
-_BATTER_STATS = ["H", "TB", "R", "RBI", "BB", "K"]
-
 # Stats summarized in the recent-accuracy strip: (player_type, stat, label).
 _ACCURACY_STATS = [
     ("pitcher", "K", "Pitcher K"),
@@ -31,12 +35,6 @@ _ACCURACY_STATS = [
     ("batter", "TB", "Batter TB"),
 ]
 _ACCURACY_DAYS = 7
-
-# The displayed range spans the 10th to 90th percentile of simulated outcomes.
-_RANGE_LOW_Q = 0.10
-_RANGE_HIGH_Q = 0.90
-_P_OVER_COLS = [f"p_over_{k + 0.5:.1f}" for k in range(25)]
-
 
 # ---------------------------------------------------------------------------
 # Dates
@@ -54,48 +52,6 @@ def _iso(day: datetime) -> str:
 # Data assembly
 # ---------------------------------------------------------------------------
 
-def _with_ranges(props: pd.DataFrame) -> pd.DataFrame:
-    """Add the 10th-90th percentile outcome range to each projection row.
-
-    ``p_over_{k+0.5}`` is P(X > k), so the q-quantile is the smallest k with
-    P(X > k) <= 1 - q. Rows without distribution columns get no range.
-
-    Outcomes are whole numbers, so the inclusive range usually holds more
-    than 80% of the simulated mass. ``range_prob`` records how much, which
-    is the coverage the model itself expects.
-    """
-    frame = props.copy()
-    cols = [c for c in _P_OVER_COLS if c in frame.columns]
-    if not cols:
-        frame["range_lo"] = np.nan
-        frame["range_hi"] = np.nan
-        frame["range_prob"] = np.nan
-        return frame
-    survival = frame[cols].to_numpy(dtype=float)
-    has_dist = ~np.isnan(survival).all(axis=1)
-    survival = np.nan_to_num(survival, nan=0.0)
-
-    def first_at_or_below(threshold: float) -> np.ndarray:
-        hit = survival <= threshold
-        index = hit.argmax(axis=1).astype(float)
-        index[~hit.any(axis=1)] = len(cols)
-        return index
-
-    lo = first_at_or_below(1 - _RANGE_LOW_Q)
-    hi = first_at_or_below(1 - _RANGE_HIGH_Q)
-
-    # P(lo <= X <= hi) = P(X > lo - 1) - P(X > hi), with P(X > -1) = 1 and
-    # P(X > k) = 0 beyond the last tabulated line.
-    padded = np.hstack([np.ones((len(frame), 1)), survival, np.zeros((len(frame), 1))])
-    rows = np.arange(len(frame))
-    range_prob = padded[rows, lo.astype(int)] - padded[rows, hi.astype(int) + 1]
-
-    frame["range_lo"] = np.where(has_dist, lo, np.nan)
-    frame["range_hi"] = np.where(has_dist, hi, np.nan)
-    frame["range_prob"] = np.where(has_dist, range_prob, np.nan)
-    return frame
-
-
 @st.cache_data(ttl=300)
 def _day_projections(game_date: str) -> pd.DataFrame:
     """Projection rows for one date, with outcome ranges."""
@@ -105,7 +61,7 @@ def _day_projections(game_date: str) -> pd.DataFrame:
     day = props[props["game_date"] == game_date]
     if day.empty:
         return pd.DataFrame()
-    return _with_ranges(day)
+    return with_outcome_ranges(day)
 
 
 @st.cache_data(ttl=300)
@@ -124,7 +80,7 @@ def _recent_accuracy(end_date: str) -> list[dict]:
     ]
     if window.empty:
         return []
-    window = _with_ranges(window)
+    window = with_outcome_ranges(window)
     summary: list[dict] = []
     for player_type, stat, label in _ACCURACY_STATS:
         rows = window[(window["player_type"] == player_type) & (window["stat"] == stat)]
@@ -211,92 +167,6 @@ def _lineup_confirmed(game_pk: int, team: str) -> bool | None:
 # Rendering
 # ---------------------------------------------------------------------------
 
-def _number(value: float) -> str:
-    return f"{value:.1f}"
-
-
-def _cell(row: pd.Series | None, final: bool) -> str:
-    """One stat cell: projection over range, or actual over projection."""
-    if row is None or pd.isna(row.get("expected")):
-        return '<td class="pp-cell"><div class="pp-v pp-muted">-</div></td>'
-    expected = float(row["expected"])
-    lo, hi = row.get("range_lo"), row.get("range_hi")
-    has_range = pd.notna(lo) and pd.notna(hi)
-    actual = row.get("actual")
-    if final and pd.notna(actual):
-        actual = float(actual)
-        verdict = ""
-        if has_range:
-            verdict = " pp-in" if lo <= actual <= hi else " pp-out"
-        return (
-            f'<td class="pp-cell">'
-            f'<div class="pp-v{verdict}">{actual:.0f}</div>'
-            f'<div class="pp-sub">{_number(expected)}</div>'
-            f'</td>'
-        )
-    range_label = f"{lo:.0f}-{hi:.0f}" if has_range else ""
-    return (
-        f'<td class="pp-cell">'
-        f'<div class="pp-v">{_number(expected)}</div>'
-        f'<div class="pp-sub">{range_label}</div>'
-        f'</td>'
-    )
-
-
-def _player_rows(rows: pd.DataFrame, stats: list[str], final: bool, order_label: bool) -> str:
-    html = ""
-    for player_id, player in rows.groupby("player_id", sort=False):
-        by_stat = {row["stat"]: row for _, row in player.iterrows()}
-        first = player.iloc[0]
-        order = first.get("batting_order")
-        slot = f'<span class="pp-slot">{int(order)}</span>' if order_label and pd.notna(order) else ""
-        html += (
-            f'<tr><td class="pp-name">{slot}{esc(str(first.get("player_name", player_id)))}</td>'
-            + "".join(_cell(by_stat.get(stat), final) for stat in stats)
-            + "</tr>"
-        )
-    return html
-
-
-def _table(title: str, stats: list[str], body: str) -> str:
-    head = "".join(f"<th>{esc(stat)}</th>" for stat in stats)
-    return (
-        f'<div class="pp-table-wrap"><table class="pp-table">'
-        f'<thead><tr><th class="pp-name">{esc(title)}</th>{head}</tr></thead>'
-        f'<tbody>{body}</tbody></table></div>'
-    )
-
-
-def _team_block(day: pd.DataFrame, game: dict, team: str, final: bool) -> str:
-    rows = day[(day["game_pk"] == game["game_pk"]) & (day["team"] == team)]
-    pitchers = rows[rows["player_type"] == "pitcher"]
-    batters = rows[(rows["player_type"] == "batter") & (rows["batting_order"].between(1, 9))]
-    batters = batters.sort_values("batting_order")
-
-    tag = ""
-    if not final:
-        confirmed = _lineup_confirmed(game["game_pk"], team)
-        if confirmed is not None:
-            tag = (
-                '<span class="pp-tag pp-tag-confirmed">Confirmed lineup</span>'
-                if confirmed
-                else '<span class="pp-tag">Projected lineup</span>'
-            )
-
-    parts = [f'<div class="pp-team"><div class="pp-team-head">'
-             f'<span class="pp-team-abbr">{esc(team)}</span>{tag}</div>']
-    if not pitchers.empty:
-        parts.append(_table("Starter", _PITCHER_STATS,
-                            _player_rows(pitchers, _PITCHER_STATS, final, order_label=False)))
-    if not batters.empty:
-        parts.append(_table("Lineup", _BATTER_STATS,
-                            _player_rows(batters, _BATTER_STATS, final, order_label=True)))
-    if pitchers.empty and batters.empty:
-        parts.append('<div class="pp-empty-team">No projections for this team.</div>')
-    parts.append("</div>")
-    return "".join(parts)
-
-
 def _accuracy_strip(summary: list[dict]) -> str:
     if not summary:
         return ""
@@ -379,19 +249,22 @@ def page_player_projections() -> None:
         games = [g for g in games if team_filter in (g["away"], g["home"])]
 
     for game in games:
-        final = game["status"] == "final"
+        mode = {
+            "final": MODE_FINAL,
+            "in_progress": MODE_LIVE,
+        }.get(game["status"], MODE_PROJECTION)
         label = f'{game["away"]} {game["separator"]} {game["home"]}'
         details = [part for part in (game["time"], _status_label(game["status"])) if part]
         if details:
             label += "  ·  " + "  ·  ".join(details)
         with st.expander(label, expanded=team_filter != "All teams" or len(games) == 1):
-            st.markdown(
-                '<div class="pp-game">'
-                + _team_block(day, game, game["away"], final)
-                + _team_block(day, game, game["home"], final)
-                + "</div>",
-                unsafe_allow_html=True,
-            )
+            rows = day[day["game_pk"] == game["game_pk"]]
+            teams = [
+                (team, lineup_tag(_lineup_confirmed(game["game_pk"], team))
+                       if mode == MODE_PROJECTION else "")
+                for team in (game["away"], game["home"])
+            ]
+            st.markdown(game_block(rows, teams, mode), unsafe_allow_html=True)
 
     _render_k_explainer(day)
 
