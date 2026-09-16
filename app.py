@@ -500,7 +500,7 @@ def main() -> None:
 
     # Site-wide disclaimer
     st.markdown(
-        '<div class="tdd-footer-disclaimer">For entertainment and research purposes. Not financial advice.</div>',
+        '<div class="tdd-footer-disclaimer">Model projections for research and analysis. Not affiliated with MLB.</div>',
         unsafe_allow_html=True,
     )
 

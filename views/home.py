@@ -47,6 +47,17 @@ def _assemble_home_data() -> dict:
 
     game_date = meta.get("game_date", datetime.now().strftime("%Y-%m-%d"))
 
+    # The schedule and sim parquets carry today and tomorrow so the sims can
+    # look ahead. Home is a view of today, so everything below is scoped to
+    # the current game date; otherwise the slate count doubles and tomorrow's
+    # games can surface as today's featured matchups.
+    if not games.empty and "game_date" in games.columns:
+        today_games = games[games["game_date"].astype(str) == str(game_date)]
+        if not today_games.empty:
+            games = today_games
+    if not games.empty and not batter_sims.empty and "game_pk" in batter_sims.columns:
+        batter_sims = batter_sims[batter_sims["game_pk"].isin(set(games["game_pk"]))]
+
     # --- Schedule (games only, no predictions) ---
     schedule = []
     if not games.empty:
@@ -628,7 +639,7 @@ def _render_data_health(feeds: list[dict]) -> str:
     return f'''
     <div class="home-data-health">
         <div class="home-feeds">{"".join(feed_html)}</div>
-        <div class="home-disclaimer">For entertainment &amp; research purposes. Not financial advice.</div>
+        <div class="home-disclaimer">Model projections for research and analysis. Not affiliated with MLB.</div>
     </div>
     '''
 
@@ -689,9 +700,9 @@ def page_home() -> None:
     # Player Projections notice
     parts.append(
         f'<div class="home-section">'
-        f'<div class="home-wip-box">'
-        f'<div class="home-wip-label">Player Projections</div>'
-        f'<div class="home-wip-note">'
+        f'<div class="home-note-box">'
+        f'<div class="home-note-label">Player Projections</div>'
+        f'<div class="home-note-text">'
         f'Projected stat lines for every starter and lineup, and how past projections landed. '
         f'Visit <a href="{_nav_url("Player Projections")}" target="_self">Player Projections</a> '
         f'to explore the full model output.'

@@ -44,14 +44,22 @@ if %ERRORLEVEL% EQU 0 set IS_INTRADAY=1
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
 REM -- Single-instance lock: overlapping task firings skip instead of colliding --
-REM   A lock older than 2 hours is treated as stale and removed.
+REM   The lock records the owning cmd.exe PID. A run killed mid-flight (the
+REM   scheduler time limit, a reboot, Ctrl-C) leaves a lock whose process is
+REM   gone; the next run sees that and clears it. Waiting out a fixed timeout
+REM   instead used to stall every refresh for hours.
 set LOCK_FILE=%LOG_DIR%\update.lock
-if exist "%LOCK_FILE%" powershell -NoProfile -Command "if ((Get-Item '%LOCK_FILE%').LastWriteTime -lt (Get-Date).AddHours(-2)) { Remove-Item -Force '%LOCK_FILE%' }" >nul 2>&1
+for /f %%i in ('powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter ('ProcessId=' + $PID)).ParentProcessId"') do set SELF_PID=%%i
 if exist "%LOCK_FILE%" (
-    echo [%date% %time%] Skipping run, another update holds the lock >> "%LOG_FILE%" 2>&1
-    goto skip_locked
+    for /f "usebackq delims=" %%s in (`powershell -NoProfile -Command "$p = (Get-Content '%LOCK_FILE%' -TotalCount 1).Trim(); $alive = $false; if ($p -match '^[0-9]+$') { $proc = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $p) -ErrorAction SilentlyContinue; if ($proc -and $proc.CommandLine -match 'daily_update') { $alive = $true } }; if ($alive -and (Get-Item '%LOCK_FILE%').LastWriteTime -gt (Get-Date).AddHours(-3)) { 'live' } else { 'stale' }"`) do set LOCK_STATE=%%s
+    if "!LOCK_STATE!"=="live" (
+        echo [%date% %time%] Skipping run, another update holds the lock >> "%LOG_FILE%" 2>&1
+        goto skip_locked
+    )
+    echo [%date% %time%] Clearing stale lock left by a run that did not finish >> "%LOG_FILE%" 2>&1
+    del "%LOCK_FILE%" >nul 2>&1
 )
-echo locked > "%LOCK_FILE%"
+echo !SELF_PID!> "%LOCK_FILE%"
 
 for /f %%i in ('powershell -NoProfile -Command "(Get-Date).AddDays(-1).ToString('yyyy-MM-dd')"') do set YESTERDAY=%%i
 for /f %%i in ('powershell -NoProfile -Command "(Get-Date).ToString('yyyy-MM-dd')"') do set TODAY=%%i

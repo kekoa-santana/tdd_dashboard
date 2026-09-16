@@ -312,8 +312,8 @@ def _render_sw_list(items: list[dict], kind: str) -> str:
             f'<span class="lg">{esc(it["metric"])} &middot; {esc(it["lg"])}</span>'
             f'</div>'
             f'<div class="delta">{esc(it["delta"])}</div>'
-            f'<div class="rk">#{it["rank"]}</div>'
-            f'</div>'
+            + (f'<div class="rk">#{it["rank"]}</div>' if it.get("rank") else '<div class="rk"></div>')
+            + '</div>'
         )
     return (
         f'<div class="to-card-block">'
@@ -610,12 +610,18 @@ def _build_scores(
     return scores
 
 
-def _build_strengths_weaknesses(tr: pd.Series) -> tuple[list[dict], list[dict]]:
-    """Build strengths and weaknesses lists from team_rankings data."""
+def _build_strengths_weaknesses(
+    tr: pd.Series, all_tr: pd.DataFrame | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """Build strengths and weaknesses lists from team_rankings data.
+
+    League averages and ranks are computed across the full team table so
+    the numbers move with the season instead of being pinned to constants.
+    """
     strengths = []
     weaknesses = []
 
-    # Define metrics: (field, label, format, lg_avg, higher_is_better)
+    # Define metrics: (field, label, format, fallback_lg_avg, higher_is_better)
     metrics = [
         ("rpg", "Run scoring", "{:.2f} R/G", 4.5, True),
         ("hr_per_game", "Power", "{:.2f} HR/G", 1.12, True),
@@ -625,11 +631,27 @@ def _build_strengths_weaknesses(tr: pd.Series) -> tuple[list[dict], list[dict]]:
         ("avg_age", "Roster age", "{:.1f} yrs", 28.4, False),
     ]
 
-    for field, label, fmt, lg_avg, higher_better in metrics:
+    league = all_tr if all_tr is not None else pd.DataFrame()
+    team_abbr = tr.get("abbreviation")
+
+    for field, label, fmt, fallback_avg, higher_better in metrics:
         val = _safe(tr.get(field))
         if val is None:
             continue
         val = float(val)
+
+        lg_avg = fallback_avg
+        rank = None
+        if not league.empty and field in league.columns:
+            column = pd.to_numeric(league[field], errors="coerce")
+            if column.notna().any():
+                lg_avg = float(column.mean())
+                if team_abbr is not None and "abbreviation" in league.columns:
+                    ranked = column.rank(ascending=not higher_better, method="min")
+                    match = league.index[league["abbreviation"] == team_abbr]
+                    if len(match) > 0 and pd.notna(ranked.loc[match[0]]):
+                        rank = int(ranked.loc[match[0]])
+
         diff = val - lg_avg
         if not higher_better:
             diff = -diff
@@ -644,9 +666,9 @@ def _build_strengths_weaknesses(tr: pd.Series) -> tuple[list[dict], list[dict]]:
         entry = {
             "label": label,
             "metric": fmt.format(val),
-            "lg": f"{lg_avg} lg",
+            "lg": f"{fmt.format(lg_avg)} lg",
             "delta": delta_str,
-            "rank": 15,  # placeholder
+            "rank": rank,
         }
 
         if diff > 0:
@@ -999,7 +1021,7 @@ def page_team_overview() -> None:
     # ── Section 02: Strengths & Weaknesses ─────────────────────────
     html_parts.append(_section("02", "Strengths & Weaknesses", "vs MLB average"))
 
-    strengths, weaknesses = _build_strengths_weaknesses(tr)
+    strengths, weaknesses = _build_strengths_weaknesses(tr, rankings)
     html_parts.append(
         f'<div class="to-row-sw">'
         f'{_render_sw_list(strengths, "up")}'

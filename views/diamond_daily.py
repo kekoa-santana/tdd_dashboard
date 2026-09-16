@@ -443,7 +443,7 @@ def _render_footer() -> str:
         '</span>'
         '</div>'
         '<div class="dd-foot-disc">'
-        'For entertainment and research purposes. Not financial advice.'
+        'Model projections for research and analysis. Not affiliated with MLB.'
         '</div>'
         '</div>'
     )

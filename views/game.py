@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from config import GOLD, EMBER, SAGE, SLATE, CREAM, DASHBOARD_DIR
+from config import GOLD, EMBER, SAGE, SLATE, CREAM, DASHBOARD_DIR, CURRENT_SEASON
 from services.data_loader import (
     load_todays_games, load_todays_lineups, load_todays_batter_sims,
     load_update_metadata, load_pitcher_arsenal,
@@ -359,6 +359,94 @@ def _render_umpire_html(game: pd.Series) -> str:
         f'<div style="color:var(--tdd-cream);font-family:var(--tdd-font-heading);font-weight:700;font-size:0.85rem">{esc(ump_name)}</div>'
         f'<div style="color:var(--tdd-slate);font-size:0.72rem;margin-bottom:0.4rem">{games} career games</div>'
         f'<div class="pd-vitals">{items}</div>'
+        '</div>'
+    )
+
+
+@st.cache_data(ttl=3600)
+def _season_series(home_id: int, away_id: int, season: int) -> dict | None:
+    """Head-to-head record between two teams this season, from the MLB API.
+
+    Returns None when the API is unreachable or the teams have not met, so
+    the caller can drop the card rather than show an empty one.
+    """
+    import json
+    import urllib.request
+
+    url = (
+        "https://statsapi.mlb.com/api/v1/schedule"
+        f"?sportId=1&season={season}&gameType=R"
+        f"&teamId={home_id}&opponentId={away_id}"
+    )
+    try:
+        with urllib.request.urlopen(url, timeout=10) as response:
+            payload = json.loads(response.read().decode())
+    except Exception:
+        return None
+
+    home_wins = away_wins = 0
+    home_runs = away_runs = 0
+    for date_block in payload.get("dates", []):
+        for game in date_block.get("games", []):
+            if game.get("status", {}).get("abstractGameState") != "Final":
+                continue
+            teams = game.get("teams", {})
+            h, a = teams.get("home", {}), teams.get("away", {})
+            h_score, a_score = h.get("score"), a.get("score")
+            if h_score is None or a_score is None:
+                continue
+            # The requested team is not always the home side of past meetings.
+            h_is_home_team = h.get("team", {}).get("id") == home_id
+            first, second = (h_score, a_score) if h_is_home_team else (a_score, h_score)
+            home_runs += first
+            away_runs += second
+            if first > second:
+                home_wins += 1
+            elif second > first:
+                away_wins += 1
+    if home_wins + away_wins == 0:
+        return None
+    return {
+        "home_wins": home_wins, "away_wins": away_wins,
+        "home_runs": home_runs, "away_runs": away_runs,
+    }
+
+
+def _render_series_html(game: pd.Series) -> str:
+    """Season series card: record and runs scored between these two teams."""
+    home_id, away_id = game.get("home_team_id"), game.get("away_team_id")
+    if pd.isna(home_id) or pd.isna(away_id):
+        return ""
+    season = CURRENT_SEASON
+    game_date = str(game.get("game_date", ""))[:4]
+    if game_date.isdigit():
+        season = int(game_date)
+    series = _season_series(int(home_id), int(away_id), season)
+    if not series:
+        return ""
+
+    home_abbr = game.get("home_abbr", "?")
+    away_abbr = game.get("away_abbr", "?")
+    leader, trailer, lead_w, trail_w = (
+        (home_abbr, away_abbr, series["home_wins"], series["away_wins"])
+        if series["home_wins"] >= series["away_wins"]
+        else (away_abbr, home_abbr, series["away_wins"], series["home_wins"])
+    )
+    headline = (
+        f'{esc(leader)} leads {lead_w}-{trail_w}'
+        if lead_w != trail_w
+        else f'Series tied {lead_w}-{trail_w}'
+    )
+    return (
+        '<div style="background:var(--tdd-dark-card);border:1px solid var(--tdd-dark-border);'
+        'padding:0.8rem 1rem">'
+        f'<div class="gsec-head">{season} Season Series</div>'
+        f'<div style="color:var(--tdd-cream);font-size:1.05rem;font-weight:700;'
+        f'margin:0.3rem 0 0.35rem;">{headline}</div>'
+        f'<div style="color:var(--tdd-slate);font-size:0.72rem;">'
+        f'{esc(home_abbr)} {series["home_runs"]} runs &middot; '
+        f'{esc(away_abbr)} {series["away_runs"]} runs'
+        f'</div>'
         '</div>'
     )
 
@@ -896,14 +984,23 @@ def page_game() -> None:
         '</div>'
     )
 
-    # Row 4: Bullpen + H2H (grid 4+4+4)
-    parts.append(
-        '<div class="section grid12">'
-        f'<div class="col-4">{_render_bullpen_html(game, "away")}</div>'
-        f'<div class="col-4">{_render_bullpen_html(game, "home")}</div>'
-        f'<div class="col-4">{_stub_section("H2H Record")}</div>'
-        '</div>'
-    )
+    # Row 4: Bullpens, plus the season series when these teams have met.
+    _series_html = _render_series_html(game)
+    if _series_html:
+        parts.append(
+            '<div class="section grid12">'
+            f'<div class="col-4">{_render_bullpen_html(game, "away")}</div>'
+            f'<div class="col-4">{_render_bullpen_html(game, "home")}</div>'
+            f'<div class="col-4">{_series_html}</div>'
+            '</div>'
+        )
+    else:
+        parts.append(
+            '<div class="section grid12">'
+            f'<div class="col-6">{_render_bullpen_html(game, "away")}</div>'
+            f'<div class="col-6">{_render_bullpen_html(game, "home")}</div>'
+            '</div>'
+        )
 
     parts.append('</div>')  # close .tdd-game
 

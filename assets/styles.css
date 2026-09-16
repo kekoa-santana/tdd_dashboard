@@ -2735,13 +2735,13 @@ hr {
 }
 
 /* --- WIP placeholder box --- */
-.home-wip-box {
-    border: 1px dashed var(--tdd-dark-border);
+.home-note-box {
+    border: 1px solid var(--tdd-dark-border);
     border-radius: 6px;
     padding: 1.2rem 1.4rem;
     background: rgba(255,255,255,0.015);
 }
-.home-wip-label {
+.home-note-label {
     color: var(--tdd-gold);
     font-family: var(--tdd-font-heading);
     font-size: 0.8rem;
@@ -2750,16 +2750,16 @@ hr {
     text-transform: uppercase;
     margin-bottom: 0.5rem;
 }
-.home-wip-note {
+.home-note-text {
     color: var(--tdd-slate);
     font-size: 0.82rem;
     line-height: 1.6;
 }
-.home-wip-note a {
+.home-note-text a {
     color: var(--tdd-gold) !important;
     text-decoration: none !important;
 }
-.home-wip-note a:hover { text-decoration: underline !important; }
+.home-note-text a:hover { text-decoration: underline !important; }
 
 /* --- Model explainer --- */
 .home-model-explainer {

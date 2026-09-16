@@ -142,6 +142,19 @@ def page_compare() -> None:
                         default_selections.append(dname)
                         break
 
+    if not default_selections:
+        # Land on a real comparison instead of an empty page: the two
+        # highest-ranked players of this type that we have projections for.
+        ranked = load_rankings("pitchers" if player_type == "Pitcher" else "hitters")
+        if not ranked.empty and "overall_rank" in ranked.columns:
+            by_id = {pid: dname for dname, pid in display_map.items()}
+            for _, rank_row in ranked.sort_values("overall_rank").iterrows():
+                dname = by_id.get(int(rank_row[id_col]))
+                if dname:
+                    default_selections.append(dname)
+                if len(default_selections) == 2:
+                    break
+
     selected = st.multiselect(
         "Select 2-3 players to compare",
         sorted_names,

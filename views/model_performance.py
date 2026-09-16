@@ -306,16 +306,13 @@ def _render_backtest_top10_tab() -> None:
     if "variant" in bip_df.columns:
         bip_df = bip_df.drop_duplicates(subset=["batter_id", "test_season"], keep="first")
 
-    # Player type toggle
-    player_type = st.radio(
-        "Player type", ["Batter", "Pitcher"],
-        horizontal=True, key="bt_type",
-        label_visibility="collapsed",
+    # Batter only: the player-level backtest artifact carries batter rows.
+    # Pitcher accuracy lives in the Game Sim Backtests tab.
+    st.markdown(
+        '<div class="tdd-meta">Batter leaderboards. Pitcher accuracy is in the '
+        'Game Sim Backtests tab.</div>',
+        unsafe_allow_html=True,
     )
-
-    if player_type == "Pitcher":
-        tdd_info("Pitcher-level backtest leaderboards coming soon. Use the Game Sim Backtests tab for pitcher accuracy.")
-        return
 
     # Stat selector based on player type
     # (label, pred_col, actual_col, higher_is_better_for_batter)
