@@ -37,6 +37,7 @@ from views.news import page_news  # noqa: E402
 from views.player_profile import page_player_profile  # noqa: E402
 from views.player_rankings import page_player_rankings  # noqa: E402
 from views.player_projections import page_player_projections  # noqa: E402
+from views.preseason_scorecard import page_preseason_scorecard  # noqa: E402
 from views.projections import page_projections  # noqa: E402
 
 # Page imports
@@ -342,6 +343,7 @@ PAGES = {
     "Compare Players": page_compare,
     "Lineup Creator": page_lineup_creator,
     "Model Performance": page_model_performance,
+    "Preseason Scorecard": page_preseason_scorecard,
     "Data Health": page_data_health,
     "Player Projections": page_player_projections,
     "Methodology": page_methodology,
@@ -371,7 +373,7 @@ _NAV = [
     ),
     ("Teams", ["Team Overview", "Team Rankings", "Division Standings"]),
     ("Tools", ["Compare Players", "Lineup Creator"]),
-    ("About", ["Methodology", "Model Performance", "Data Health"]),
+    ("About", ["Methodology", "Model Performance", "Preseason Scorecard", "Data Health"]),
 ]
 
 

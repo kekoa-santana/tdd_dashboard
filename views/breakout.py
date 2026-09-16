@@ -10,6 +10,7 @@ from services.data_loader import (
     load_hitter_breakout_candidates,
     load_pitcher_breakout_candidates,
     load_player_teams,
+    calibrated_breakout_prob,
 )
 from components.headshot import headshot_html
 from components.diamond_rating import diamond_rating_html
@@ -257,12 +258,14 @@ def _build_compact_card_html(
 # ── Section renderers ────────────────────────────────────────────────────
 
 _HITTER_DETAIL_STATS = [
+    ("Breakout chance", "calibrated_prob", "pct"),
     ("wOBA", "woba", ".000"), ("xwOBA", "xwoba", ".000"),
     ("K%", "k_pct", "pct"), ("BB%", "bb_pct", "pct"),
     ("Brl%", "barrel_pct", "pct"), ("Sprint", "sprint_speed", "dec1"),
 ]
 
 _PITCHER_DETAIL_STATS = [
+    ("Breakout chance", "calibrated_prob", "pct"),
     ("K%", "k_pct", "pct"), ("BB%", "bb_pct", "pct"),
     ("SwStr%", "swstr_pct", "pct"), ("Velo", "avg_velo", "dec1"),
     ("ERA", "era", "0.00"), ("FIP", "fip", "0.00"),
@@ -377,6 +380,10 @@ def _render_pitcher_table(df: pd.DataFrame, role_label: str, teams_lookup: dict[
 def _render_hitters() -> None:
     """Render hitter breakout section."""
     df = load_hitter_breakout_candidates()
+    if not df.empty and "breakout_prob" in df.columns:
+        # Raw model probabilities run about twice observed rates; the fitted
+        # calibration puts them on the same scale as real breakout rates.
+        df["calibrated_prob"] = calibrated_breakout_prob(df["breakout_prob"], "hitter")
     if df.empty:
         tdd_warn("No hitter breakout data. Run `precompute_dashboard_data.py`.")
         return
@@ -400,6 +407,8 @@ def _render_hitters() -> None:
 def _render_pitchers(is_starter: bool) -> None:
     """Render pitcher breakout section (SP or RP)."""
     df = load_pitcher_breakout_candidates()
+    if not df.empty and "breakout_prob" in df.columns:
+        df["calibrated_prob"] = calibrated_breakout_prob(df["breakout_prob"], "pitcher")
     if df.empty:
         tdd_warn("No pitcher breakout data. Run `precompute_dashboard_data.py`.")
         return

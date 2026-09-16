@@ -6506,3 +6506,73 @@ hr {
     margin-bottom: 0;
   }
 }
+
+
+/* ================================================================
+   Preseason Scorecard
+   ================================================================ */
+
+.sc-head { border-bottom: 1px solid var(--tdd-dark-border); padding-bottom: 0.9rem; margin-bottom: 1rem; }
+.sc-eyebrow {
+  font-family: var(--tdd-font-heading); font-size: 0.62rem;
+  letter-spacing: 2px; text-transform: uppercase; color: var(--tdd-gold);
+}
+.sc-title {
+  font-family: var(--tdd-font-heading); font-weight: 700;
+  font-size: 1.9rem; color: var(--tdd-cream); margin: 0.2rem 0 0.4rem;
+}
+.sc-lede {
+  font-family: var(--tdd-font-body); font-size: 0.86rem; color: var(--tdd-slate);
+  line-height: 1.55; max-width: 62rem; margin: 0;
+}
+.sc-note {
+  font-family: var(--tdd-font-body); font-size: 0.74rem;
+  color: var(--tdd-slate); margin: 0.5rem 0 0.6rem; max-width: 62rem; line-height: 1.5;
+}
+
+.sc-wrap { overflow-x: auto; margin: 0.4rem 0 0.9rem; max-width: 56rem; }
+.sc-table {
+  width: 100%; border-collapse: collapse;
+  font-family: var(--tdd-font-body); font-size: 0.8rem;
+}
+.sc-table th {
+  font-family: var(--tdd-font-heading); font-size: 0.6rem;
+  letter-spacing: 1px; text-transform: uppercase; font-weight: 600;
+  color: var(--tdd-slate); text-align: right; padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--tdd-dark-border); white-space: nowrap;
+}
+.sc-table td {
+  padding: 0.35rem 0.5rem; text-align: right; color: var(--tdd-cream);
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--tdd-dark-border-faint); white-space: nowrap;
+}
+.sc-table tr:last-child td { border-bottom: 0; }
+.sc-table .sc-left { text-align: left; }
+.sc-strong { color: var(--tdd-cream); font-weight: 700; }
+.sc-muted { color: var(--tdd-slate); }
+.sc-hit { color: var(--tdd-sage); font-weight: 700; }
+.sc-miss { color: var(--tdd-ember); }
+
+.sc-callout {
+  background: var(--tdd-dark-card); border: 1px solid var(--tdd-dark-border);
+  border-left: 2px solid var(--tdd-gold);
+  border-radius: var(--tdd-radius-md); padding: 0.85rem 1rem; margin: 0.8rem 0;
+  max-width: 56rem;
+}
+.sc-callout.sc-warn { border-left-color: var(--tdd-ember); }
+.sc-callout-head {
+  font-family: var(--tdd-font-heading); font-size: 0.68rem; font-weight: 700;
+  letter-spacing: 1px; text-transform: uppercase; color: var(--tdd-cream);
+  margin-bottom: 0.35rem;
+}
+.sc-callout-body {
+  font-family: var(--tdd-font-body); font-size: 0.8rem;
+  color: var(--tdd-slate); line-height: 1.55;
+}
+.sc-callout-body b { color: var(--tdd-cream); }
+
+@media (max-width: 520px) {
+  .sc-title { font-size: 1.5rem; }
+  .sc-table { font-size: 0.74rem; }
+  .sc-table th, .sc-table td { padding: 0.3rem 0.35rem; }
+}

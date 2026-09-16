@@ -227,6 +227,62 @@ def load_counting(player_type: str) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_DATA_TTL)
+def load_preseason_projections(player_type: str) -> pd.DataFrame:
+    """Frozen preseason rate projections (K%, BB%, HR rate)."""
+    path = artifact_path(
+        f"snapshots/{player_type}_projections_{CURRENT_SEASON}_preseason.parquet"
+    )
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_preseason_breakout_candidates(player_type: str) -> pd.DataFrame:
+    """Frozen preseason breakout candidate list, as called before Opening Day."""
+    path = artifact_path(
+        f"snapshots/{player_type}_breakout_candidates_{CURRENT_SEASON}_preseason.parquet"
+    )
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
+def load_breakout_calibration() -> dict:
+    """Platt scaling that maps raw breakout probabilities onto observed rates.
+
+    Written by scripts/calibrate_breakouts.py. Empty dict when absent, in
+    which case callers should show the raw score rather than a probability.
+    """
+    path = artifact_path("breakout_calibration.json")
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def calibrated_breakout_prob(probs, player_type: str, calibration: dict | None = None):
+    """Apply the fitted calibration to raw breakout probabilities.
+
+    Returns the input unchanged when no calibration has been fitted, so the
+    page degrades to the model's own numbers instead of failing.
+    """
+    calibration = calibration if calibration is not None else load_breakout_calibration()
+    params = calibration.get(player_type, {}) if calibration else {}
+    a, b = params.get("platt_a"), params.get("platt_b")
+    values = pd.to_numeric(pd.Series(probs), errors="coerce")
+    if a is None or b is None:
+        return values
+    clipped = values.clip(1e-6, 1 - 1e-6)
+    logit = np.log(clipped / (1 - clipped))
+    return 1.0 / (1.0 + np.exp(-(a * logit + b)))
+
+
+@st.cache_data(ttl=_DATA_TTL)
 def load_preseason_counting_sim(player_type: str) -> pd.DataFrame:
     """Load the frozen preseason season-long sim projections.
 
