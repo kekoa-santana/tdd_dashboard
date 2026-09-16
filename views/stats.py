@@ -7,8 +7,12 @@ import streamlit as st
 
 from utils.alerts import tdd_info, tdd_warn
 from config import (
-    AVAILABLE_SEASONS, UNRELIABLE_BB_SEASONS, PRIOR_SEASON,
+    AVAILABLE_SEASONS, UNRELIABLE_BB_SEASONS, CURRENT_SEASON,
 )
+
+# AVAILABLE_SEASONS is the completed training range; the current season is
+# still in progress and comes from the in-season stats artifact instead.
+SEASON_OPTIONS = [CURRENT_SEASON] + list(AVAILABLE_SEASONS)
 from services.data_loader import (
     load_player_teams, load_traditional_stats, load_traditional_stats_all,
 )
@@ -132,7 +136,7 @@ def _render_stat_leaderboard(
 def page_stats() -> None:
     """Traditional stat leaderboards for any season."""
     # ── Title ─────────────────────────────────────────────────────
-    season_display = st.session_state.get("stats_season", PRIOR_SEASON)
+    season_display = st.session_state.get("stats_season", CURRENT_SEASON)
     st.markdown(
         f'<div class="tdd-page-header">'
         f'<div class="tdd-page-title">{season_display} STATS</div>'
@@ -154,7 +158,7 @@ def page_stats() -> None:
     with fc2:
         season = st.selectbox(
             "Season",
-            AVAILABLE_SEASONS,
+            SEASON_OPTIONS,
             key="stats_season",
             label_visibility="collapsed",
         )
@@ -198,11 +202,13 @@ def page_stats() -> None:
 
     # ── Load data ─────────────────────────────────────────────────
     pt_key = player_type.lower()
-    df = load_traditional_stats_all(pt_key)
+    if season == CURRENT_SEASON:
+        # The all-seasons artifact only covers completed seasons.
+        df = load_traditional_stats(pt_key)
+    else:
+        df = load_traditional_stats_all(pt_key)
     if not df.empty and "season" in df.columns:
         df = df[df["season"] == season].copy()
-    else:
-        df = load_traditional_stats(pt_key)
 
     if df.empty:
         tdd_info(f"No {season} stats data found.")
@@ -214,6 +220,15 @@ def page_stats() -> None:
     else:
         id_col, name_col = "pitcher_id", "pitcher_name"
         df = df[df["ip"] >= min_qual]
+
+    if df.empty:
+        # Short seasons (2020) and early-season views clear the usual bar.
+        unit = "PA" if player_type == "Hitter" else "IP"
+        tdd_info(
+            f"No {pt_key}s reached {min_qual} {unit} in {season}. "
+            f"Lower the minimum to see the leaders."
+        )
+        return
 
     # Team lookup + league filter
     teams_df = load_player_teams()
@@ -245,7 +260,12 @@ def page_stats() -> None:
 
     # ── Footer ────────────────────────────────────────────────────
     st.markdown("---")
-    notes = [f"{season} regular season"]
+    games_played = int(df["games"].max()) if not df.empty and "games" in df.columns else 0
+    notes = [
+        f"{season} regular season, in progress ({games_played} team games played)"
+        if season == CURRENT_SEASON
+        else f"{season} regular season"
+    ]
     if season == 2020:
         notes.append("60-game shortened season")
     if season in UNRELIABLE_BB_SEASONS:
