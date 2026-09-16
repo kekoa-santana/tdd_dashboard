@@ -20,6 +20,7 @@ from config import (
 from utils.alerts import tdd_info, tdd_warn
 from services.data_loader import (
     load_projections, load_counting, load_player_teams, load_rankings,
+    load_preseason_counting_sim,
     load_k_samples, load_traditional_stats, load_traditional_stats_all,
     load_pitcher_arsenal, load_pitcher_arsenal_all,
     load_hitter_vulnerability, load_hitter_vulnerability_all,
@@ -947,6 +948,64 @@ def _editorial_hero_html(
     )
 
 
+# Preseason rate lines: value formatting and the columns each type shows.
+_PRESEASON_HITTER_RATES = [
+    ("projected_avg", "AVG", "rate3", "Batting average"),
+    ("projected_obp", "OBP", "rate3", "On-base percentage"),
+    ("projected_slg", "SLG", "rate3", "Slugging percentage"),
+    ("projected_ops", "OPS", "rate3", "On-base plus slugging"),
+]
+_PRESEASON_PITCHER_RATES = [
+    ("projected_era", "ERA", "dec2", "Earned run average"),
+    ("projected_whip", "WHIP", "dec2", "Walks plus hits per inning pitched"),
+    ("projected_fip_era", "FIP-ERA", "dec2",
+     "Fielding independent pitching, on the ERA scale"),
+]
+
+
+def _fmt_preseason(value: float, fmt: str) -> str:
+    if fmt == "rate3":
+        text = f"{value:.3f}"
+        return text[1:] if text.startswith("0.") else text
+    return f"{value:.2f}"
+
+
+def _preseason_rate_chips(player_id: int, is_hitter: bool) -> list[str]:
+    """Chips for the frozen preseason season rate projection, if any.
+
+    These come from the preseason snapshot, which is built from prior
+    seasons only, so they never reflect current-year performance.
+    """
+    frame = load_preseason_counting_sim("hitter" if is_hitter else "pitcher")
+    if frame.empty:
+        return []
+    id_col = "batter_id" if is_hitter else "pitcher_id"
+    if id_col not in frame.columns:
+        return []
+    rows = frame[frame[id_col] == player_id]
+    if rows.empty:
+        return []
+    row = rows.iloc[0]
+
+    chips: list[str] = []
+    for prefix, label, fmt, desc in (
+        _PRESEASON_HITTER_RATES if is_hitter else _PRESEASON_PITCHER_RATES
+    ):
+        mean = row.get(f"{prefix}_mean")
+        if pd.isna(mean):
+            continue
+        lo, hi = row.get(f"{prefix}_p10"), row.get(f"{prefix}_p90")
+        range_tip = ""
+        if pd.notna(lo) and pd.notna(hi):
+            range_tip = (
+                f" (80% range: {_fmt_preseason(lo, fmt)} to {_fmt_preseason(hi, fmt)})"
+            )
+        chips.append(stat_chip(
+            _fmt_preseason(mean, fmt), label, f"{desc}{range_tip}", GOLD,
+        ))
+    return chips
+
+
 def _section_head(title: str, sub: str = "") -> str:
     """Return a self-contained profile section header."""
     sub_html = f'<span class="p-shead-sub">{esc(sub)}</span>' if sub else ""
@@ -1462,6 +1521,24 @@ def page_player_profile() -> None:
 
     # ── SEASON STATS ────────────────────────────────────────────────
     st.markdown(_section_head("Season Stats", "Observed rates and counting stats"), unsafe_allow_html=True)
+
+    # The preseason projection covers the whole current season, so it sits
+    # above the season picker rather than inside a single season's view.
+    _pre_chips = _preseason_rate_chips(player_id, player_type in ("Hitter", "Two-Way"))
+    if _pre_chips:
+        st.markdown(
+            f'<div style="text-align:center; color:{SLATE}; font-size:0.75rem; '
+            f'font-weight:600; margin:8px 0 2px; letter-spacing:1px;">'
+            f'{CURRENT_SEASON} PRESEASON PROJECTION</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(stat_chip_row(_pre_chips, margin="0 0 2px"), unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="text-align:center; color:{SLATE}; font-size:0.65rem; '
+            f'margin:0 0 10px;">Full-season forecast made before Opening Day, with no '
+            f'in-season results. Hover for the 80% range.</div>',
+            unsafe_allow_html=True,
+        )
     _player_seasons: list[int] = []
     if not trad_all_df.empty:
         _ps = trad_all_df[trad_all_df[id_col] == player_id]["season"].dropna().unique()
