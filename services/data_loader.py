@@ -283,6 +283,17 @@ def calibrated_breakout_prob(probs, player_type: str, calibration: dict | None =
 
 
 @st.cache_data(ttl=_DATA_TTL)
+def load_preseason_counting(player_type: str) -> pd.DataFrame:
+    """Frozen preseason counting projections (rate x volume, SIERA-based ERA)."""
+    path = artifact_path(
+        f"snapshots/{player_type}_counting_{CURRENT_SEASON}_preseason.parquet"
+    )
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(path)
+
+
+@st.cache_data(ttl=_DATA_TTL)
 def load_preseason_counting_sim(player_type: str) -> pd.DataFrame:
     """Load the frozen preseason season-long sim projections.
 

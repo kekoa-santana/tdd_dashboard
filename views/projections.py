@@ -38,10 +38,12 @@ BATTER_RATE_LEADERBOARDS = [
     ("OPS", "projected_ops", "rate3", True, _qualified_batters),
 ]
 
+# ERA is left off deliberately: it depends on sequencing and defense, so it
+# is a weak target for any projection, and our own run conversion carries a
+# level bias on top of that. See the Preseason Scorecard.
 PITCHER_RATE_LEADERBOARDS = [
-    ("ERA (lowest)", "projected_era", "dec2", False, _qualified_starters),
+    ("FIP (lowest)", "projected_fip_era", "dec2", False, _qualified_starters),
     ("WHIP (lowest)", "projected_whip", "dec2", False, _qualified_starters),
-    ("FIP-ERA (lowest)", "projected_fip_era", "dec2", False, _qualified_starters),
 ]
 
 BATTER_LEADERBOARDS = [
@@ -311,5 +313,5 @@ def page_projections() -> None:
         "with Bayesian hierarchical rate models, trained on 2018-2025 data. "
         "Ranges show 80% credible interval (p10-p90). "
         "Players to Watch have limited MLB track record — projections carry higher uncertainty. "
-        f"{'wRC+ uses FanGraphs linear weights (100 = league average).' if player_type == 'Batter' else 'FIP-ERA strips out BABIP/sequencing noise — more predictive than traditional ERA.'}"
+        f"{'wRC+ uses FanGraphs linear weights (100 = league average).' if player_type == 'Batter' else 'Pitchers are ranked on FIP, which strips out sequencing and defense and predicts future run prevention better than ERA does.'}"
     )

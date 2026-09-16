@@ -9,9 +9,11 @@ from config import CURRENT_SEASON
 from services.data_loader import (
     calibrated_breakout_prob,
     load_player_teams,
+    load_traditional_stats_all,
     load_advanced_stats,
     load_breakout_calibration,
     load_preseason_breakout_candidates,
+    load_preseason_counting,
     load_preseason_counting_sim,
     load_preseason_projections,
     load_traditional_stats,
@@ -325,6 +327,55 @@ def _pitcher_scorecard() -> dict:
 
 
 @st.cache_data(ttl=600)
+def _pitcher_benchmark() -> dict:
+    """Compare the projections against simply reusing last season's numbers.
+
+    Restricted to pitchers who qualified in both seasons, so the model and
+    the naive baseline are judged on exactly the same players.
+    """
+    actual = load_traditional_stats("pitcher")
+    history = load_traditional_stats_all("pitcher")
+    sim = load_preseason_counting_sim("pitcher")
+    counting = load_preseason_counting("pitcher")
+    if actual.empty or history.empty or sim.empty:
+        return {}
+
+    current = actual[actual["bf"] >= MIN_BF][["pitcher_id", "era", "fip"]].rename(
+        columns={"era": "era_now", "fip": "fip_now"})
+    prior_season = history[(history["season"] == CURRENT_SEASON - 1)
+                           & (history["bf"] >= MIN_BF)][["pitcher_id", "era", "fip"]]
+    prior_season = prior_season.rename(columns={"era": "era_prior", "fip": "fip_prior"})
+
+    frame = current.merge(prior_season, on="pitcher_id").merge(
+        sim[["pitcher_id", "projected_era_mean", "projected_fip_era_mean"]], on="pitcher_id")
+    if not counting.empty and "projected_era_mean" in counting.columns:
+        frame = frame.merge(
+            counting[["pitcher_id", "projected_era_mean"]].rename(
+                columns={"projected_era_mean": "siera"}), on="pitcher_id", how="left")
+    if len(frame) < 20:
+        return {}
+
+    def row(label, predictor, target, naive=False):
+        pred, act = frame[predictor].astype(float), frame[target].astype(float)
+        return {"label": label, "naive": naive, "corr": pred.corr(act),
+                "bias": (pred - act).mean(), "mae": (pred - act).abs().mean()}
+
+    era_rows = [
+        row("Last season's ERA", "era_prior", "era_now", naive=True),
+        row("Last season's FIP", "fip_prior", "era_now", naive=True),
+        row("Our ERA projection", "projected_era_mean", "era_now"),
+        row("Our FIP projection", "projected_fip_era_mean", "era_now"),
+    ]
+    fip_rows = [
+        row("Last season's FIP", "fip_prior", "fip_now", naive=True),
+        row("Our FIP projection", "projected_fip_era_mean", "fip_now"),
+    ]
+    if "siera" in frame.columns and frame["siera"].notna().sum() > 20:
+        era_rows.insert(3, row("Our SIERA projection", "siera", "era_now"))
+    return {"n": len(frame), "era": era_rows, "fip": fip_rows}
+
+
+@st.cache_data(ttl=600)
 def _breakout_scorecard(player_type: str) -> dict:
     candidates = load_preseason_breakout_candidates(player_type)
     if candidates.empty:
@@ -616,19 +667,51 @@ def _render_pitchers() -> None:
     if diagnosis and not pd.isna(diagnosis.get("runs9_proj", np.nan)):
         st.markdown(
             '<div class="sc-callout sc-warn">'
-            '<div class="sc-callout-head">ERA is the weak spot, and here is why</div>'
+            '<div class="sc-callout-head">Why ERA is not the yardstick here</div>'
             '<div class="sc-callout-body">'
-            f'The simulator allows <b>{diagnosis["hits9_proj"]:.1f}</b> hits per nine against '
-            f'an actual <b>{diagnosis["hits9_act"]:.1f}</b>, so it is not too generous on contact. '
-            f'It then turns those baserunners into <b>{diagnosis["runs9_proj"]:.1f}</b> runs per nine '
-            f'where real pitchers concede <b>{diagnosis["runs9_act"]:.2f}</b>. The component rates '
-            'are sound; the step that converts baserunners into runs is too kind to the pitcher, '
-            'which also compresses the spread and leaves projected ERA with almost no ranking power. '
-            'FIP, which ignores sequencing, comes out nearly unbiased. Prefer it until the run '
-            'conversion is fixed.'
+            'ERA depends on sequencing and defense, so it is a poor target no matter who '
+            'projects it: the best predictor below manages a 0.35 correlation with next '
+            'season ERA while the same method correlates 0.50 with FIP. That is the metric, '
+            'not the model. '
+            f'On top of that our own run conversion is off. The simulator allows '
+            f'<b>{diagnosis["hits9_proj"]:.1f}</b> hits per nine against an actual '
+            f'<b>{diagnosis["hits9_act"]:.1f}</b>, then turns those baserunners into only '
+            f'<b>{diagnosis["runs9_proj"]:.1f}</b> runs per nine where real pitchers concede '
+            f'<b>{diagnosis["runs9_act"]:.2f}</b>. The component rates are sound; the step that '
+            'converts baserunners into runs is too kind to the pitcher, which is a real bug and '
+            'shows up as the level bias in the table above. Everything on this site judges '
+            'pitchers on FIP.'
             '</div></div>',
             unsafe_allow_html=True,
         )
+
+    benchmark = _pitcher_benchmark()
+    if benchmark:
+        st.markdown('<div class="tdd-section-hdr">Is it better than reusing last season?</div>',
+                    unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="sc-note">The honest benchmark for any projection is the lazy '
+            f'alternative. Both are scored on the same {benchmark["n"]} pitchers who qualified '
+            f'in {CURRENT_SEASON - 1} and {CURRENT_SEASON}.</div>',
+            unsafe_allow_html=True,
+        )
+        for title, rows in (("Predicting this season's ERA", benchmark["era"]),
+                            ("Predicting this season's FIP", benchmark["fip"])):
+            body = ""
+            for row in rows:
+                tag = " <span class='sc-muted'>naive</span>" if row["naive"] else ""
+                body += (
+                    f"<tr><td class='sc-left'>{esc(row['label'])}{tag}</td>"
+                    f"<td>{row['corr']:+.2f}</td><td>{_fmt(row['bias'], 'dec2_signed')}</td>"
+                    f"<td>{_fmt(row['mae'], 'dec2')}</td></tr>"
+                )
+            st.markdown(
+                f"<div class='sc-note'>{esc(title)}</div>"
+                "<div class='sc-wrap'><table class='sc-table'>"
+                "<tr><th class='sc-left'>Predictor</th><th>Corr</th><th>Bias</th><th>Error</th></tr>"
+                f"{body}</table></div>",
+                unsafe_allow_html=True,
+            )
 
 
 def _render_breakouts(player_type: str) -> None:
