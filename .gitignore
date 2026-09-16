@@ -53,3 +53,6 @@ data/dashboard/history/
 notebooks/
 # Pipeline artifacts: published to the R2 bucket, not committed
 data/dashboard/
+
+# Browser automation session artifacts
+.playwright-mcp/
