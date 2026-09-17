@@ -10,6 +10,8 @@ Run:
 
 from __future__ import annotations
 
+import importlib
+import logging
 import sys
 from pathlib import Path
 
@@ -18,33 +20,14 @@ import streamlit as st
 # ---------------------------------------------------------------------------
 # Project setup
 # ---------------------------------------------------------------------------
+logger = logging.getLogger(__name__)
+
 PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from components.charts import apply_dark_mpl  # noqa: E402
 from utils.helpers import check_data_exists  # noqa: E402
-from views.breakout import page_breakout  # noqa: E402
-from views.compare import page_compare  # noqa: E402
-from views.data_health import page_data_health  # noqa: E402
-from views.diamond_daily import page_diamond_daily  # noqa: E402
-from views.division_standings import page_division_standings  # noqa: E402
-from views.game import page_game  # noqa: E402
-from views.home import page_home  # noqa: E402
-from views.lineup_creator import page_lineup_creator  # noqa: E402
-from views.methodology import page_methodology  # noqa: E402
-from views.model_performance import page_model_performance  # noqa: E402
-from views.news import page_news  # noqa: E402
-from views.player_profile import page_player_profile  # noqa: E402
-from views.player_rankings import page_player_rankings  # noqa: E402
-from views.player_projections import page_player_projections  # noqa: E402
-from views.preseason_scorecard import page_preseason_scorecard  # noqa: E402
-from views.projections import page_projections  # noqa: E402
 
-# Page imports
-from views.schedule import page_schedule  # noqa: E402
-from views.stats import page_stats  # noqa: E402
-from views.team_overview import page_team_overview  # noqa: E402
-from views.team_rankings import page_team_rankings  # noqa: E402
 
 from config import (  # noqa: E402
     CREAM,
@@ -327,27 +310,30 @@ if _palette_name != "Original (Gold & Cream)" or _font_name != "Inter + IBM Plex
 # ---------------------------------------------------------------------------
 # Page registry
 # ---------------------------------------------------------------------------
-PAGES = {
-    "Home": page_home,
-    "News": page_news,
-    "Schedule": page_schedule,
-    "Player Profile": page_player_profile,
-    "Player Rankings": page_player_rankings,
-    "Stats": page_stats,
-    "The Diamond Daily": page_diamond_daily,
-    "Projections": page_projections,
-    "Breakout Candidates": page_breakout,
-    "Team Overview": page_team_overview,
-    "Team Rankings": page_team_rankings,
-    "Division Standings": page_division_standings,
-    "Compare Players": page_compare,
-    "Lineup Creator": page_lineup_creator,
-    "Model Performance": page_model_performance,
-    "Preseason Scorecard": page_preseason_scorecard,
-    "Data Health": page_data_health,
-    "Player Projections": page_player_projections,
-    "Methodology": page_methodology,
-    "Game Analysis": page_game,
+# Pages are imported on demand rather than at startup. That keeps a broken
+# page from taking down the whole site, and means a cold start only pays for
+# the page actually being viewed.
+PAGES: dict[str, tuple[str, str]] = {
+    "Home": ("views.home", "page_home"),
+    "News": ("views.news", "page_news"),
+    "Schedule": ("views.schedule", "page_schedule"),
+    "Player Profile": ("views.player_profile", "page_player_profile"),
+    "Player Rankings": ("views.player_rankings", "page_player_rankings"),
+    "Stats": ("views.stats", "page_stats"),
+    "The Diamond Daily": ("views.diamond_daily", "page_diamond_daily"),
+    "Projections": ("views.projections", "page_projections"),
+    "Breakout Candidates": ("views.breakout", "page_breakout"),
+    "Team Overview": ("views.team_overview", "page_team_overview"),
+    "Team Rankings": ("views.team_rankings", "page_team_rankings"),
+    "Division Standings": ("views.division_standings", "page_division_standings"),
+    "Compare Players": ("views.compare", "page_compare"),
+    "Lineup Creator": ("views.lineup_creator", "page_lineup_creator"),
+    "Model Performance": ("views.model_performance", "page_model_performance"),
+    "Preseason Scorecard": ("views.preseason_scorecard", "page_preseason_scorecard"),
+    "Data Health": ("views.data_health", "page_data_health"),
+    "Player Projections": ("views.player_projections", "page_player_projections"),
+    "Methodology": ("views.methodology", "page_methodology"),
+    "Game Analysis": ("views.game", "page_game"),
 }
 
 PAGE_URL_MAP = {name.lower().replace(" ", "_"): name for name in PAGES}
@@ -375,6 +361,24 @@ _NAV = [
     ("Tools", ["Compare Players", "Lineup Creator"]),
     ("About", ["Methodology", "Model Performance", "Preseason Scorecard", "Data Health"]),
 ]
+
+
+
+def _render_page(name: str) -> None:
+    """Import and run one page, keeping a failure local to that page."""
+    module_path, attribute = PAGES[name]
+    try:
+        module = importlib.import_module(module_path)
+        renderer = getattr(module, attribute)
+    except Exception as exc:  # noqa: BLE001 - one page must not kill the app
+        logger.exception("Page %s failed to load", name)
+        st.error(f"The {name} page could not load: {exc}")
+        st.caption(
+            "Every other page still works. If this started after a deploy, the "
+            "app may be part way through picking up new code."
+        )
+        return
+    renderer()
 
 
 # ---------------------------------------------------------------------------
@@ -498,7 +502,7 @@ def main() -> None:
     # the URL bar; unconditionally setting the param forces replaceState.)
     _slug = page.lower().replace(" ", "_")
     st.query_params["page"] = _slug
-    PAGES[page]()
+    _render_page(page)
 
     # Site-wide disclaimer
     st.markdown(
