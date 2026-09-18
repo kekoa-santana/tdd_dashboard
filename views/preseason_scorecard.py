@@ -190,8 +190,13 @@ def _hitter_scorecard() -> dict:
         })
 
     rates = []
+    rate_stamp = ""
     projections = load_preseason_projections("hitter")
     advanced = load_advanced_stats("hitter")
+    if not projections.empty and "snapshot_date" in projections.columns:
+        stamps = projections["snapshot_date"].dropna().astype(str)
+        if not stamps.empty:
+            rate_stamp = stamps.max()
     if not projections.empty and not advanced.empty:
         adv = advanced[advanced["pa"] >= MIN_PA][["batter_id", "k_pct", "bb_pct"]]
         rate_merged = projections.drop_duplicates("batter_id").merge(adv, on="batter_id")
@@ -238,6 +243,7 @@ def _hitter_scorecard() -> dict:
         players["under"] = _rows(named.nlargest(8, "delta"))
 
     return {"stats": rows, "groups": groups, "survival": survival, "rates": rates,
+            "rate_stamp": rate_stamp,
             "players": players, "n": len(merged), "games": int(actual["games"].max())}
 
 
@@ -598,11 +604,17 @@ def _render_hitters() -> None:
                 unsafe_allow_html=True)
     st.markdown(_accuracy_table(data["stats"], "rate3_signed"), unsafe_allow_html=True)
     st.markdown(_rate_table(data["rates"]), unsafe_allow_html=True)
-    st.markdown(
-        '<div class="sc-note">Rate stats are modeled directly and hold up best. '
-        'Slash lines inherit batted-ball luck on top of those rates.</div>',
-        unsafe_allow_html=True,
-    )
+    note = ('Rate stats are modeled directly and hold up best. '
+            'Slash lines inherit batted-ball luck on top of those rates.')
+    if data.get("rate_stamp"):
+        # The K%/BB% rows come from the rate-projection file, which a full
+        # precompute rewrites. It is still trained through the prior season
+        # only and carries no in-season updates, but it is not the Opening
+        # Day artifact the counting lines use, so it is labelled separately.
+        note += (f' The K% and BB% rows above are rebuilt from the same '
+                 f'2018-{CURRENT_SEASON - 1} fit rather than read from the Opening Day '
+                 f'snapshot; this copy was written {esc(data["rate_stamp"])}.')
+    st.markdown(f'<div class="sc-note">{note}</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="tdd-section-hdr">Best vs worst projected</div>',
                 unsafe_allow_html=True)
@@ -805,9 +817,10 @@ def page_preseason_scorecard() -> None:
         f'<div class="sc-head">'
         f'<div class="sc-eyebrow">The Data Diamond</div>'
         f'<h1 class="sc-title">Preseason Scorecard</h1>'
-        f'<p class="sc-lede">Every projection here was frozen before Opening Day, built from '
-        f'2018-{CURRENT_SEASON - 1} data with no knowledge of this season. This page scores '
-        f'them against what has actually happened, including the parts that did not work.</p>'
+        f'<p class="sc-lede">Every projection here was built from 2018-{CURRENT_SEASON - 1} data '
+        f'with no knowledge of this season, and the counting and wRC+ lines come from snapshots '
+        f'frozen on Opening Day. This page scores them against what has actually happened, '
+        f'including the parts that did not work.</p>'
         f'</div>',
         unsafe_allow_html=True,
     )

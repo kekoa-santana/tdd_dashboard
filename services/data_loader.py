@@ -228,7 +228,15 @@ def load_counting(player_type: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=_DATA_TTL)
 def load_preseason_projections(player_type: str) -> pd.DataFrame:
-    """Frozen preseason rate projections (K%, BB%, HR rate)."""
+    """Preseason-baseline rate projections (K%, BB%, HR rate).
+
+    Trained on 2018-2025 only and carrying no in-season conjugate updates, so
+    these are a valid preseason baseline. Unlike the ``*_counting_sim`` and
+    ``*_counting`` snapshots, though, this file is NOT the artifact frozen on
+    Opening Day: a full precompute rewrites it, and the copy on disk carries a
+    mid-season ``snapshot_date``. Do not describe it as frozen before Opening
+    Day. See ``load_preseason_counting_sim`` for the genuinely frozen files.
+    """
     path = artifact_path(
         f"snapshots/{player_type}_projections_{CURRENT_SEASON}_preseason.parquet"
     )
