@@ -223,6 +223,37 @@ def _assemble_home_data() -> dict:
 # HTML builders
 # ---------------------------------------------------------------------------
 
+def _slate_state(schedule: list[dict]) -> tuple[str, str, bool]:
+    """Describe the slate as a whole: label, CSS modifier, and whether to pulse.
+
+    Reads every game, not just the handful the ticker shows, so the label
+    still reads LIVE when the one game in progress has scrolled past.
+    """
+    statuses = [str(g.get("status", "")).lower() for g in schedule]
+    if not statuses:
+        return "TODAY", "upcoming", False
+    if any("progress" in s or "live" in s for s in statuses):
+        return "LIVE", "live", True
+
+    def _done(s: str) -> bool:
+        return "final" in s or "game over" in s or "completed" in s
+
+    def _called_off(s: str) -> bool:
+        return "postponed" in s or "cancel" in s or "suspended" in s
+
+    played = [s for s in statuses if _done(s)]
+    # A postponed game is never going to start, so it does not keep the
+    # slate "in progress" the way an unplayed scheduled game does.
+    pending = [s for s in statuses if not _done(s) and not _called_off(s)]
+    if not pending:
+        return ("FINAL", "final", False) if played else ("TODAY", "today", False)
+    if played:
+        return "TODAY", "today", False
+    if any("warmup" in s or "pre-game" in s or "pregame" in s for s in pending):
+        return "FIRST PITCH", "today", False
+    return "UPCOMING", "upcoming", False
+
+
 def _render_ticker(data: dict) -> str:
     """Scrolling ticker strip at top."""
     items = []
@@ -245,10 +276,12 @@ def _render_ticker(data: dict) -> str:
         )
     # Duplicate for seamless loop
     all_items = "".join(items) * 2
+    label, state, pulse = _slate_state(data["schedule"])
+    dot_cls = "home-ticker-live-dot" if pulse else "home-ticker-live-dot is-static"
     return f'''
     <div class="home-ticker">
-        <span class="home-ticker-live-dot"></span>
-        <span class="home-ticker-label">LIVE</span>
+        <span class="{dot_cls}" data-state="{escape(state)}"></span>
+        <span class="home-ticker-label" data-state="{escape(state)}">{escape(label)}</span>
         <div class="home-ticker-items">{all_items}</div>
     </div>
     '''

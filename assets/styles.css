@@ -1895,6 +1895,18 @@ hr {
     70% { box-shadow: 0 0 0 8px rgba(107,163,142,0); }
     100%{ box-shadow: 0 0 0 0 rgba(107,163,142,0); }
 }
+/* Only a slate with a game actually in progress pulses. */
+.home-ticker-live-dot.is-static {
+    animation: none;
+    box-shadow: none;
+}
+.home-ticker-live-dot[data-state="final"] { background: var(--tdd-slate); }
+.home-ticker-live-dot[data-state="today"],
+.home-ticker-live-dot[data-state="upcoming"] { background: var(--tdd-gold); }
+@media (prefers-reduced-motion: reduce) {
+    .home-ticker-live-dot { animation: none; box-shadow: none; }
+    .home-ticker-items { animation: none; }
+}
 .home-ticker-label {
     color: var(--tdd-sage);
     font-weight: 700;
@@ -1910,6 +1922,9 @@ hr {
     z-index: 2;
     background: var(--tdd-dark);
 }
+.home-ticker-label[data-state="final"] { color: var(--tdd-slate); }
+.home-ticker-label[data-state="today"],
+.home-ticker-label[data-state="upcoming"] { color: var(--tdd-gold); }
 .home-ticker-items {
     display: flex;
     gap: 2rem;
