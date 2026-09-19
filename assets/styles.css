@@ -1955,6 +1955,32 @@ hr {
     color: var(--tdd-slate);
     font-variant-numeric: tabular-nums;
 }
+.home-ticker-score.is-live {
+    color: var(--tdd-sage);
+    font-weight: 700;
+}
+.home-ticker-score.is-final {
+    color: var(--tdd-slate);
+    font-size: 0.7rem;
+    letter-spacing: 0.5px;
+}
+/* Run totals sit tight against the team they belong to. */
+.home-ticker-side {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+}
+.home-ticker-runs {
+    color: var(--tdd-cream);
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+}
+.home-ticker-at {
+    color: var(--tdd-slate);
+    margin: 0 2px;
+}
+.home-ticker-team.is-win + .home-ticker-runs,
+.home-ticker-team.is-win { color: var(--tdd-gold); }
 .home-ticker-dot { color: var(--tdd-dark-border); }
 
 /* --- Masthead --- */

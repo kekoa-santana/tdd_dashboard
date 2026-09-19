@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from datetime import timedelta
 
@@ -12,6 +13,8 @@ import streamlit as st
 from config import DASHBOARD_DIR, AVAILABLE_SEASONS, PROJECTION_LABEL, CURRENT_SEASON
 from services.artifacts import artifact_path, list_artifacts
 from utils.archetype_names import get_pitch_archetype_name
+
+logger = logging.getLogger(__name__)
 
 # TTL for cached parquet data — ensures dashboard picks up fresh precompute
 # output within 5 minutes without manual cache clearing / restart.
@@ -657,6 +660,49 @@ def load_weekly_snapshots(player_type: str) -> dict[str, pd.DataFrame]:
             continue
         result[stem[len(prefix):-len(".parquet")]] = pd.read_parquet(path)
     return dict(sorted(result.items()))
+
+
+@st.cache_data(ttl=120)  # scores move during a game, so keep this short
+def fetch_live_scores(game_date: str) -> dict[int, dict]:
+    """Current score and inning per game, keyed by ``game_pk``.
+
+    ``todays_games.parquet`` carries no score columns (it is written by the
+    projection repo), so the scores come straight from the MLB schedule
+    endpoint. Never raises: on any failure this returns an empty mapping and
+    callers fall back to showing the scheduled start time.
+    """
+    import json
+    import urllib.request
+
+    url = (
+        f"https://statsapi.mlb.com/api/v1/schedule"
+        f"?date={game_date}&sportId=1&hydrate=linescore"
+    )
+    try:
+        with urllib.request.urlopen(url, timeout=6) as resp:
+            payload = json.loads(resp.read().decode())
+    except Exception as exc:  # noqa: BLE001 - the ticker degrades quietly
+        logger.warning("Live score fetch failed for %s: %s", game_date, exc)
+        return {}
+
+    scores: dict[int, dict] = {}
+    for date_entry in payload.get("dates", []):
+        for game in date_entry.get("games", []):
+            gpk = game.get("gamePk")
+            if gpk is None:
+                continue
+            teams = game.get("teams") or {}
+            line = game.get("linescore") or {}
+            away = (teams.get("away") or {}).get("score")
+            home = (teams.get("home") or {}).get("score")
+            scores[int(gpk)] = {
+                "away_score": None if away is None else int(away),
+                "home_score": None if home is None else int(home),
+                "status": game.get("status", {}).get("detailedState", ""),
+                "inning": line.get("currentInning"),
+                "inning_state": line.get("inningState", ""),
+            }
+    return scores
 
 
 @st.cache_data(ttl=600)  # 10-minute TTL for live schedule data

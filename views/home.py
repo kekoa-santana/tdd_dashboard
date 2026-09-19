@@ -9,6 +9,7 @@ import streamlit as st
 
 from config import CURRENT_SEASON
 from services.data_loader import (
+    fetch_live_scores,
     load_hitters_daily_standouts,
     load_todays_batter_sims,
     load_todays_games,
@@ -204,10 +205,21 @@ def _assemble_home_data() -> dict:
             "status": "ok" if age < warn_after else "warn",
         })
 
+    # Scores are not in the schedule parquet, so pull them from the MLB API,
+    # but only once the slate has actually started. Before first pitch there
+    # is nothing to show and Home should not pay for a network round trip.
+    live_scores: dict[int, dict] = {}
+    if any(
+        "scheduled" not in str(g.get("status", "")).lower()
+        for g in schedule
+    ):
+        live_scores = fetch_live_scores(game_date)
+
     return {
         "game_date": game_date,
         "meta": meta,
         "schedule": schedule,
+        "live_scores": live_scores,
         "best_matchups": best_matchups,
         "top_hitters": top_hitters,
         "model_stats": model_stats,
@@ -223,13 +235,25 @@ def _assemble_home_data() -> dict:
 # HTML builders
 # ---------------------------------------------------------------------------
 
-def _slate_state(schedule: list[dict]) -> tuple[str, str, bool]:
+def _slate_state(
+    schedule: list[dict],
+    live_scores: dict[int, dict] | None = None,
+) -> tuple[str, str, bool]:
     """Describe the slate as a whole: label, CSS modifier, and whether to pulse.
 
     Reads every game, not just the handful the ticker shows, so the label
-    still reads LIVE when the one game in progress has scrolled past.
+    still reads LIVE when the one game in progress has scrolled past. When
+    live statuses are available they win, because the cached parquet can be
+    up to a refresh cycle behind the actual state of play.
     """
-    statuses = [str(g.get("status", "")).lower() for g in schedule]
+    live_scores = live_scores or {}
+
+    def _status(g: dict) -> str:
+        gpk = g.get("game_pk")
+        live = live_scores.get(int(gpk)) if gpk is not None else None
+        return str((live or {}).get("status") or g.get("status") or "").lower()
+
+    statuses = [_status(g) for g in schedule]
     if not statuses:
         return "TODAY", "upcoming", False
     if any("progress" in s or "live" in s for s in statuses):
@@ -254,35 +278,87 @@ def _slate_state(schedule: list[dict]) -> tuple[str, str, bool]:
     return "UPCOMING", "upcoming", False
 
 
+def _inning_tag(live: dict) -> str:
+    """Compact half-inning marker, e.g. T7 or B9."""
+    inning = live.get("inning")
+    state = str(live.get("inning_state", "")).lower()
+    if not inning:
+        return "LIVE"
+    half = "T" if state.startswith("top") else "B" if state.startswith("bot") else ""
+    if state.startswith("mid") or state.startswith("end"):
+        half = "T" if state.startswith("mid") else "B"
+    return f"{half}{int(inning)}" if half else f"IN {int(inning)}"
+
+
+def _ticker_game(g: dict, live: dict | None) -> str:
+    """One ticker entry: teams, plus the score once a game has started."""
+    away, home = g["away"], g["home"]
+    status = str(live.get("status") if live else g["status"] or "").lower()
+    away_score = (live or {}).get("away_score")
+    home_score = (live or {}).get("home_score")
+    has_score = away_score is not None and home_score is not None
+
+    is_live = "progress" in status or "live" in status
+    is_final = "final" in status or "game over" in status
+
+    away_cls = home_cls = "home-ticker-team"
+    if is_final and has_score:
+        # Mark the winner so a glance at the strip reads as a result.
+        if away_score > home_score:
+            away_cls += " is-win"
+        elif home_score > away_score:
+            home_cls += " is-win"
+
+    def _side(abbr: str, cls: str, score: int | None) -> str:
+        out = (f'<span class="{cls}" data-team="{escape(abbr)}">'
+               f'{escape(team_short(abbr))}</span>')
+        if has_score and (is_live or is_final):
+            out += f'<span class="home-ticker-runs">{score}</span>'
+        # Wrapped so the run total stays tight against its own team rather
+        # than picking up the item's wider flex gap.
+        return f'<span class="home-ticker-side">{out}</span>'
+
+    if is_final and has_score:
+        tag = '<span class="home-ticker-score is-final">FINAL</span>'
+    elif is_live and has_score:
+        tag = f'<span class="home-ticker-score is-live">{escape(_inning_tag(live or {}))}</span>'
+    elif is_final:
+        tag = '<span class="home-ticker-score is-final">FINAL</span>'
+    elif is_live:
+        tag = f'<span class="home-ticker-score is-live">{escape(_inning_tag(live or {}))}</span>'
+    else:
+        tag = f'<span class="home-ticker-score">{escape(g["time"])}</span>'
+
+    return (
+        f'<span class="home-ticker-item">'
+        f'{_side(away, away_cls, away_score)}'
+        f'<span class="home-ticker-at">@</span>'
+        f'{_side(home, home_cls, home_score)}'
+        f'{tag}'
+        f'<span class="home-ticker-dot">&middot;</span>'
+        f'</span>'
+    )
+
+
 def _render_ticker(data: dict) -> str:
     """Scrolling ticker strip at top."""
-    items = []
-    for g in data["schedule"][:6]:
-        status = g["status"].lower()
-        if "progress" in status or "live" in status:
-            score_html = f'<span class="home-ticker-score">{escape(str(g.get("status", "")))}</span>'
-        elif "final" in status:
-            score_html = '<span class="home-ticker-score">FINAL</span>'
-        else:
-            score_html = f'<span class="home-ticker-score">{escape(g["time"])}</span>'
-        items.append(
-            f'<span class="home-ticker-item">'
-            f'<span data-team="{escape(g["away"])}">{escape(team_short(g["away"]))}</span>'
-            f' @ '
-            f'<span data-team="{escape(g["home"])}">{escape(team_short(g["home"]))}</span>'
-            f' {score_html}'
-            f'<span class="home-ticker-dot">&middot;</span>'
-            f'</span>'
-        )
+    scores = data.get("live_scores") or {}
+    schedule = data["schedule"]
+    items = [_ticker_game(g, scores.get(int(g["game_pk"]))) for g in schedule]
+
     # Duplicate for seamless loop
     all_items = "".join(items) * 2
-    label, state, pulse = _slate_state(data["schedule"])
+    label, state, pulse = _slate_state(schedule, scores)
     dot_cls = "home-ticker-live-dot" if pulse else "home-ticker-live-dot is-static"
+    # Hold the scroll speed steady regardless of slate size: the marquee
+    # travels half its own width, so the duration has to grow with the
+    # number of games or a 15-game card blurs past.
+    duration = max(40, 7 * max(len(items), 1))
     return f'''
     <div class="home-ticker">
         <span class="{dot_cls}" data-state="{escape(state)}"></span>
         <span class="home-ticker-label" data-state="{escape(state)}">{escape(label)}</span>
-        <div class="home-ticker-items">{all_items}</div>
+        <div class="home-ticker-items" style="animation-duration:{duration}s">{all_items}</div>
     </div>
     '''
 
