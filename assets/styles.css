@@ -1979,8 +1979,10 @@ hr {
     color: var(--tdd-slate);
     margin: 0 2px;
 }
-.home-ticker-team.is-win + .home-ticker-runs,
-.home-ticker-team.is-win { color: var(--tdd-gold); }
+/* Every run total reads white, winner included, so the strip scans as a
+   result feed rather than a highlight reel. The is-win class stays on the
+   markup as a styling hook, deliberately with no color of its own: team
+   names keep their data-team color either way. */
 .home-ticker-dot { color: var(--tdd-dark-border); }
 
 /* --- Masthead --- */
